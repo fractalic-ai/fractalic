@@ -10,8 +10,11 @@ from pathlib import Path
 import json
 import os
 import toml
+from fastapi.responses import FileResponse
 
 app = FastAPI()
+
+current_repo_path = ""
 
 # Set BASE_DIR to the root directory to allow navigation to parent directories
 BASE_DIR = Path('/').resolve()
@@ -31,6 +34,11 @@ app.add_middleware(
 # Define the settings file path
 SETTINGS_FILE_PATH = '../../settings.toml'
 
+def set_repo_path(path: str):
+    """Set the current repository path globally"""
+    global current_repo_path
+    current_repo_path = path
+
 # Helper functions
 def get_repo(repo_path: str):
     resolved_path = Path(repo_path).resolve()
@@ -38,6 +46,7 @@ def get_repo(repo_path: str):
         raise HTTPException(status_code=400, detail="Invalid repository path")
     try:
         repo = git.Repo(resolved_path)
+        set_repo_path(resolved_path)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error initializing git repository: {e}")
     return repo
@@ -88,6 +97,24 @@ def enrich_call_tree(node, repo):
 
     return node
 
+@app.get("/serve_image/")
+async def serve_image(path: str = Query(...)):
+    """
+    Serves an image file from a path relative to the current repository path
+    that was set during get_repo call.
+    """
+    if not current_repo_path:
+        raise HTTPException(
+            status_code=400, 
+            detail="Repository path not set. Call get_repo first."
+        )
+    
+    image_path = os.path.join(current_repo_path, path)
+    
+    if not os.path.isfile(image_path):
+        raise HTTPException(status_code=404, detail="Image not found")
+
+    return FileResponse(image_path)
 
 
 @app.get("/list_directory/")
