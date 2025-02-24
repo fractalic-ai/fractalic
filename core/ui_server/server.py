@@ -10,7 +10,7 @@ from pathlib import Path
 import json
 import os
 import toml
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 
 app = FastAPI()
 
@@ -114,7 +114,9 @@ async def serve_image(path: str = Query(...)):
     if not os.path.isfile(image_path):
         raise HTTPException(status_code=404, detail="Image not found")
 
-    return FileResponse(image_path)
+    response = FileResponse(image_path)
+    response.headers["Cache-Control"] = "no-store"
+    return response
 
 
 @app.get("/list_directory/")
