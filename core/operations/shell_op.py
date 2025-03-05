@@ -37,7 +37,6 @@ def execute_shell_command(command: str) -> str:
 
         start_time = time.time()
         
-        # Key changes: Set bufsize=0 and add universal_newlines=True
         process = subprocess.Popen(
             command,
             stdout=subprocess.PIPE, 
@@ -50,7 +49,6 @@ def execute_shell_command(command: str) -> str:
         )
 
         with console.status("[cyan]@shell[/cyan] processing...") as status:
-            # Use select to handle both stdout and stderr in real-time
             import select
             outputs = [process.stdout, process.stderr]
             
@@ -64,11 +62,9 @@ def execute_shell_command(command: str) -> str:
                         continue
                         
                     if output == process.stderr:
-                        # Check if line is truly an error
                         if "ERROR" in line or "Traceback" in line:
                             console.print(f"[red]{line.rstrip()}[/red]")
                         else:
-                            # Treat as normal info
                             console.print(line.rstrip())
                         captured_output.append(line)
                     else:
@@ -76,11 +72,18 @@ def execute_shell_command(command: str) -> str:
                         captured_output.append(line)
 
         process.wait()
+        # If the command returned a non-zero exit code and no output was captured,
+        # add a fallback error message.
+        if process.returncode != 0:
+            fallback = f"Command exited with non-zero code: {process.returncode}"
+            if not captured_output or all(not l.strip() for l in captured_output):
+                console.print(f"[red]{fallback}[/red]")
+                captured_output.append(fallback + "\n")
+        
         duration = time.time() - start_time
         mins, secs = divmod(int(duration), 60)
         duration_str = f"{mins}m {secs}s" if mins > 0 else f"{secs}s"
         console.print(f"[light_green]✓[/light_green][cyan] @shell[/cyan] completed ({duration_str})")
-
         return "".join(captured_output)
         
     except Exception as e:
@@ -115,7 +118,7 @@ def process_shell(ast: AST, current_node: Node) -> Optional[Node]:
         if use_header.lower() != "none":
             header = f"{use_header}\n"
     else:
-        header = "# OS Shell Tool response block\n"
+        header = "# Shell response block\n"
         
     response_ast = AST(f"{header}{response}\n")
     

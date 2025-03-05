@@ -19,7 +19,7 @@ class Config:
     #base_url = None  # Add base_url property
 
 # Limit for @goto operation for one node in each run context
-GOTO_LIMIT = 5
+GOTO_LIMIT = 30
 
 
 
