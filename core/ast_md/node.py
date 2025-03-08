@@ -37,7 +37,7 @@ class Node:
     prev: Optional['Node'] = None
     next: Optional['Node'] = None
     enabled: bool = True  # Persistent flag for run-once logic
-
+    role: str = "user"  # Default role is "user", will be set to "assistant" for operation blocks and their results
 
     @property
     def hash(self) -> str:

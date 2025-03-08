@@ -25,5 +25,17 @@ class LLMClient:
         api_key = provider_settings.get('apiKey')
         return client_class(api_key=api_key, settings=provider_settings)
 
-    def llm_call(self, prompt_text: str, operation_params: dict = None) -> str:
-        return self.client.llm_call(prompt_text, operation_params)
+    def llm_call(self, prompt_text: str, messages: list = None, operation_params: dict = None) -> str:
+        """
+        Call the LLM with either a text prompt or structured messages.
+        
+        Args:
+            prompt_text: Traditional string prompt (may be empty if messages are used)
+            messages: List of message dictionaries with role/content pairs (optional)
+            operation_params: Additional parameters for the LLM call
+        
+        Returns:
+            String response from the LLM
+        """
+        # Forward the call to the provider-specific implementation
+        return self.client.llm_call(prompt_text, messages, operation_params)

@@ -121,7 +121,9 @@ def process_shell(ast: AST, current_node: Node) -> Optional[Node]:
         header = "# Shell response block\n"
         
     response_ast = AST(f"{header}{response}\n")
-    
+    for node_key, node in response_ast.parser.nodes.items():
+        node.role = "assistant"
+
     # Handle target block insertion
     operation_type = OperationType(params.get('mode', Config.DEFAULT_OPERATION))
     target_key = current_node.key

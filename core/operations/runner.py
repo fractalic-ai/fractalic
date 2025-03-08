@@ -10,7 +10,7 @@ from core.ast_md.node import Node, NodeType, OperationType
 from core.errors import BlockNotFoundError, UnknownOperationError
 from core.config import Config
 from core.utils import parse_file, get_content_without_header
-from core.render.render_ast import render_ast_to_markdown
+from core.render.render_ast import render_ast_to_markdown, render_ast_to_trace
 from core.operations.import_op import process_import
 from core.operations.llm_op import process_llm
 from core.operations.goto_op import process_goto
@@ -203,9 +203,14 @@ def run(filename: str, param_node: Optional[Union[Node, AST]] = None, create_new
                     if return_result:
                         ctx_filename = Path(local_file_name).with_suffix('.ctx')
                         output_file = os.path.join(file_dir, ctx_filename)
+
+                        trc_filename = Path(local_file_name).with_suffix('.trc')
+                        trc_output_file = os.path.join(file_dir, trc_filename)
+
                         relative_ctx_path = get_relative_path(base_dir, output_file)
                         
                         render_ast_to_markdown(ast, output_file)
+                        render_ast_to_trace(ast, trc_output_file)
 
                         #print(f"[DEBUG runner.py] Committing return operation files")
                         ctx_commit_hash = commit_changes(
@@ -231,9 +236,14 @@ def run(filename: str, param_node: Optional[Union[Node, AST]] = None, create_new
 
         ctx_filename = Path(local_file_name).with_suffix('.ctx')
         output_file = os.path.join(file_dir, ctx_filename)
+
+        trc_filename = Path(local_file_name).with_suffix('.trc')
+        trc_output_file = os.path.join(file_dir, trc_filename)
+        
         relative_ctx_path = os.path.relpath(output_file, base_dir)
         
         render_ast_to_markdown(ast, output_file)
+        render_ast_to_trace(ast, trc_output_file)
 
         ctx_commit_hash = commit_changes(
             base_dir,
@@ -256,7 +266,12 @@ def run(filename: str, param_node: Optional[Union[Node, AST]] = None, create_new
         # Same logic to render .ctx:
         ctx_filename = Path(local_file_name).with_suffix('.ctx')
         output_file = os.path.join(file_dir, ctx_filename)
+
+        trc_filename = Path(local_file_name).with_suffix('.trc')
+        trc_output_file = os.path.join(file_dir, trc_filename)
+
         render_ast_to_markdown(ast, output_file)
+        render_ast_to_trace(ast, trc_output_file)
 
         # Append traceback and exception text to the .ctx file
         with open(output_file, 'a', encoding='utf-8') as f:
@@ -376,6 +391,7 @@ def process_run(ast: AST, current_node: Node, local_file_name, parent_operation,
             level=1,
             content=parameter_value,
             id="InputParameters",
+            role="user",
             key=str(uuid.uuid4())[:8]
         )
         

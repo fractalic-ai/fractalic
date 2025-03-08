@@ -141,41 +141,71 @@ class anthropicclient:
             console.print(f"[bold red]✗ Error:[/bold red] {str(e)}")
             raise
 
-    def llm_call(self, prompt_text: str, operation_params: dict = None, model: str = None) -> str:
-        
+    def llm_call(self, prompt_text: str, messages: list = None, operation_params: dict = None, model: str = None) -> str:
         model = model or self.settings.get('model', "claude-3-5-sonnet-20241022")
         max_tokens = self.settings.get('contextSize', 8192)
         temperature = operation_params.get('temperature', self.settings.get('temperature', 0.0))
         system_prompt = self.settings.get('systemPrompt', "")
+        
+        # Prepare API call based on input type
+        if messages and len(messages) > 0:
+            # Anthropic uses a specific format for messages
+            anthropic_messages = []
+            
+            # Look for a system message first
+            system_msg = next((msg for msg in messages if msg.get('role') == 'system'), None)
+            
+            api_system_prompt = system_msg['content'] if system_msg else system_prompt
+            
+            # Convert other messages to Anthropic format
+            for msg in messages:
+                if msg.get('role') == 'system':
+                    continue  # System message handled separately
+                    
+                anthropic_messages.append({
+                    "role": msg.get('role'),
+                    "content": [{"type": "text", "text": msg.get('content')}]
+                })
+            
+            # Add media if exists
+            if operation_params and 'media' in operation_params:
+                for i, media_path in enumerate(operation_params['media']):
+                    # Find the first user message to attach media to
+                    for j, msg in enumerate(anthropic_messages):
+                        if msg.get('role') == 'user':
+                            # Insert media before text in this message
+                            anthropic_messages[j]['content'].insert(0, self._load_media(media_path))
+                            break
+                            
+            response = self.client.messages.create(
+                model=model,
+                messages=anthropic_messages,
+                system=api_system_prompt,
+                max_tokens=max_tokens,
+                temperature=temperature
+            )
+        else:
+            # Traditional approach with prompt_text
+            content = []
+            
+            # Add media if exists
+            if operation_params and 'media' in operation_params:
+                for media_path in operation_params['media']:
+                    content.append(self._load_media(media_path))
+            
+            # Add text prompt
+            content.append({
+                "type": "text",
+                "text": prompt_text
+            })
+            
+            response = self.client.messages.create(
+                model=model,
+                system=system_prompt,
+                max_tokens=max_tokens,
+                temperature=temperature,
+                messages=[{"role": "user", "content": content}]
+            )
+        
+        return response.content[0].text
 
-        # Prepare content array
-        content = []
-
-        # Add media if exists
-        if operation_params and 'media' in operation_params:
-            for media_path in operation_params['media']:
-                content.append(self._load_media(media_path))
-
-        # Add text prompt
-        content.append({
-            "type": "text",
-            "text": prompt_text
-        })
-
-        # print("DEBUG!!!: ANTHROPIC called with model: ", model)
-
-        # Make API call
-        response = self.client.messages.create(
-            model=model,
-            max_tokens=max_tokens,
-            temperature=temperature, 
-            system=system_prompt,
-            messages=[{
-                "role": "user",
-                "content": content
-            }]
-        )
-
-        if isinstance(response.content, list):
-            return ''.join([block.text for block in response.content if hasattr(block, 'text')])
-        return str(response.content)

@@ -322,12 +322,13 @@ class HeadingBlock:
     title: str
     id: Optional[str]
     content: str
-
+    role: str = "user"  # Added field with default role "user"
 @dataclass
 class OperationBlock:
     operation: str
     params: Dict[str, Any]
     content: str
+    role: str = "user" #assistant"  # Added field with default role "assistant"
 
 @dataclass
 class SchemaProcessor:
@@ -620,7 +621,8 @@ class Parser:
                     level=block.level,
                     id=node_id,
                     indent=block.level * 4,
-                    content= block.content.strip()
+                    content= block.content.strip(),
+                    role=block.role  # Default role for heading blocks
                 )
             elif isinstance(block, OperationBlock):
                 node = Node(
@@ -633,7 +635,8 @@ class Parser:
                     source_path=block.params.get('path', ''), # TODO !!! ALL PARAMS LOOKS WRONG
                     source_block_id=block.params.get('block_uri', ''),
                     target_path=block.params.get('to', {}).get('path', ''), # 
-                    target_block_id=block.params.get('to', {}).get('block_uri', '')
+                    target_block_id=block.params.get('to', {}).get('block_uri', ''),
+                    role=block.role  # Default role for operation blocks
                 )
             else:
                 continue  # Handle other block types if necessary
@@ -780,6 +783,7 @@ def print_node(node: Node, level: int) -> None:
     print(f"{indent}Key: {node.key}")
     print(f"{indent}ID: {node.id}")
     print(f"{indent}Level: {node.level}")
+    print(f"{indent}Role: {node.role}")
 
     if node.type == NodeType.OPERATION:
         print(f"{indent}Source Path: {node.source_path}")
