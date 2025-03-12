@@ -49,7 +49,7 @@ Currently, the recommended way to use Fractalic is to install both the interpret
 ```bash
 curl -s https://raw.githubusercontent.com/fractalic-ai/fractalic/main/docker_build_run.sh | bash
 ```
-Now UI should be avaliable on http://localhost:3000 and backend on http://localhost:8000, on the first run it can take a while to launch the UI (takes about 10 seonds of blank screen). Please be aware to connect local folder with .md files and settings.toml to persist changes
+Now UI should be available on http://localhost:3000 and backend on http://localhost:8000, on the first run it can take a while to launch the UI (takes about 10 seconds of blank screen). Please be aware to connect local folder with .md files and settings.toml to persist changes
 
 
 # Installation (Local)
