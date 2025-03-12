@@ -33,6 +33,13 @@ Whatch this video with quick project overview and 101 concepts how to use it (pi
 - 🔍 **Diff-based Session Results: Session results as diffs in UI**  
 - 📖 **Integrated Markdown Viewer: Markdown viewer in UI**
 
+## Upcoming Roadmap
+- [ ] **LiteLLM Support:** Add any model available on the market.
+- [ ] **Context State Player:** Trace and replay each context change.
+- [ ] **Session Snapshot Migration:** Migrate from Git to zip format – remove Git library dependencies to resolve Windows 11 issues and provide complete state tracking.
+- [ ] **System Context Direct Setting:** Enable direct system context adjustments at runtime.
+- [ ] **And Many More...**
+
 # Installation (Docker)
 ## Requirements
 Important: please ensure you have Git installed on your system.
