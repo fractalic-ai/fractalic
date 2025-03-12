@@ -1,5 +1,22 @@
 #!/bin/bash
 
+# ===================================================
+# Run Server Script for Fractalic Application
+# ===================================================
+# 
+# Description:
+#   This script starts the Uvicorn server for the Fractalic application.
+#   It activates the virtual environment, navigates to the server directory,
+#   and launches the server with hot-reload enabled.
+#
+# Usage:
+#   ./run_server.sh
+#
+# Requirements:
+#   - Virtual environment at ./venv
+#   - Server module at ./core/ui_server/server.py
+# ===================================================
+
 # Get the directory of the script (relative path resolution)
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 VENV_PATH="$SCRIPT_DIR/venv"

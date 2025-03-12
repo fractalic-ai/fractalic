@@ -14,7 +14,7 @@ Modern AI workflows shouldn’t be harder than they already are. We have powerfu
 Fractalic combines Markdown and YAML to create agentic AI systems using straightforward, human-readable documents. It lets you grow context step by step, control AI knowledge precisely, and orchestrate complex workflows through simple document structure and syntax.
 
 ## Tutorial 101 
-Whatch this video with quick project overview and 101 concepts how to use it
+Whatch this video with quick project overview and 101 concepts how to use it (picture is clickable YouTube link)
 [![Watch the video](https://img.youtube.com/vi/iRqIzmKE8uw/0.jpg)](https://www.youtube.com/watch?v=iRqIzmKE8uw)
 
 
@@ -38,11 +38,11 @@ Important: please ensure you have Git installed on your system.
 Git dependecy would be removed in future releases. Sessions would be stored on .zip or .tar.gz files.
 
 ## Project structure
-Fractalic is split into two repositories: fractalic and fractalic-ui. Both repositories are installed in the same directory to run the application using script.
+Fractalic is split into two repositories: `fractalic` and [`fractalic-ui`](https://github.com/fractalic-ai/fractalic-ui). Both repositories need to be installed in the same directory to run the application.
 
-Backend will be launched on port 8000 and frontend on port 3000.
+The backend will be launched on port 8000 and the frontend on port 3000.
 
-As for now, the best way to use Fractalic is to install both interpreter with backend server and UI frontend and run it as docker container, if you dont need docker - please skip that step.
+Currently, the recommended way to use Fractalic is to install both the interpreter with backend server and UI frontend, and run it as a Docker container. If you don't need Docker, you can skip that step and follow the local installation instructions.
 
 ## Installation script
 ```bash

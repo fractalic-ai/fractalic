@@ -27,9 +27,6 @@ sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8')
 
 original_open = open
 
-
-
-
 def setup_provider_config(args, settings):
     """Setup provider configuration with proper error handling."""
     # Define provider to environment variable mapping
@@ -48,7 +45,7 @@ def setup_provider_config(args, settings):
     api_key_env_var = PROVIDER_API_KEYS[provider]
     provider_settings = settings.get('settings', {}).get(provider, {})
     
-    # Get API key from various sources
+    # API key precedence: 1) command line arg, 2) settings.toml, 3) environment variable
     api_key = (args.api_key or 
               provider_settings.get('apiKey') or 
               os.getenv(api_key_env_var))
