@@ -1,0 +1,61 @@
+{
+    "operation": "@run",
+    "operation_src": [
+        null
+    ],
+    "filename": "main_stocks_vs_news_analysis.md",
+    "ctx_file": "main_stocks_vs_news_analysis.ctx",
+    "md_commit_hash": "2ac76963dae550857952be7f8b6240a9e3d74de5",
+    "ctx_commit_hash": "e8f5a1c698a63cd9043b59d7d01d829a97ff781a",
+    "children": [
+        {
+            "operation": "@run",
+            "operation_src": [
+                "@run\nfile: agent-yahoo-finance.md\nprompt: Get stock values for NVIDIA, Meta, and Microsoft for February of 2025"
+            ],
+            "filename": "agent-yahoo-finance.md",
+            "ctx_file": "agent-yahoo-finance.ctx",
+            "md_commit_hash": "2ac76963dae550857952be7f8b6240a9e3d74de5",
+            "ctx_commit_hash": "2ac76963dae550857952be7f8b6240a9e3d74de5",
+            "children": [],
+            "node_python": "<core.operations.call_tree.CallTreeNode object at 0x102246b10>"
+        },
+        {
+            "operation": "@run",
+            "operation_src": [
+                "@run\nfile: agent-tavily-py.md\nprompt: \"NVIDIA stock price drop February 21-27, 2025 market correction tech sector news earnings report semiconductor industry\""
+            ],
+            "filename": "agent-tavily-py.md",
+            "ctx_file": "agent-tavily-py.ctx",
+            "md_commit_hash": "2ac76963dae550857952be7f8b6240a9e3d74de5",
+            "ctx_commit_hash": "94b6e97c4cbb7706c4d467637fda69ff682a8c5f",
+            "children": [],
+            "node_python": "<core.operations.call_tree.CallTreeNode object at 0x103ab11d0>"
+        },
+        {
+            "operation": "@run",
+            "operation_src": [
+                "@run\nfile: agent-tavily-py.md\nprompt: \"Meta Platforms stock performance early February 2025 growth factors investor sentiment social media metaverse earnings\""
+            ],
+            "filename": "agent-tavily-py.md",
+            "ctx_file": "agent-tavily-py.ctx",
+            "md_commit_hash": "2ac76963dae550857952be7f8b6240a9e3d74de5",
+            "ctx_commit_hash": "701698faabd58b946aff8a5133c222a2ac9f6dc9",
+            "children": [],
+            "node_python": "<core.operations.call_tree.CallTreeNode object at 0x103af01d0>"
+        },
+        {
+            "operation": "@run",
+            "operation_src": [
+                "@run\nfile: agent-tavily-py.md\nprompt: \"Microsoft stock stability February 2025 compared to tech sector market correction cloud computing AI investments defensive tech stock\""
+            ],
+            "filename": "agent-tavily-py.md",
+            "ctx_file": "agent-tavily-py.ctx",
+            "md_commit_hash": "2ac76963dae550857952be7f8b6240a9e3d74de5",
+            "ctx_commit_hash": "0f91487e04221d9d5388be16f95a7b7ccea0862b",
+            "children": [],
+            "node_python": "<core.operations.call_tree.CallTreeNode object at 0x103262750>"
+        }
+    ],
+    "node_python": "<core.operations.call_tree.CallTreeNode object at 0x102233010>"
+}

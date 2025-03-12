@@ -1,0 +1,155 @@
+# Input Parameters {id=input-parameters}
+Microsoft stock stability February 2025 compared to tech sector market correction cloud computing AI investments defensive tech stock
+
+# Your Task
+Generate a shell command for the `tool_tavily_search.py` script for the request specified in the **Input parameters** block. Ensure the command adheres to the following rules:
+1. The required `--query` parameter.
+2. The required `--task` parameter (`search` or `extract`).
+3. Optional parameters with defaults if not specified.
+4. Properly formatted output in the format:
+
+```bash
+@shell
+  prompt: 'python3 tool_tavily_search.py --task "<TASK>" --query "<QUERY>" [options]'
+  use-header: "# Web search result {id=web-search-result}"
+```
+
+Example:
+
+```bash
+@shell
+  prompt: 'python3 tool_tavily_search.py --task "search" --query "AI news" --search_depth advanced --max_results 10'
+  use-header: "# Web search result {id=web-search-result}"
+```
+
+# Script Parameters Definition
+- `TASK`: Required. The task to perform, either `"search"` or `"extract"`.
+- `QUERY`: Required. The search query string or URLs to extract, e.g., `"AI news"`.
+- `SEARCH_DEPTH`: `"basic"` or `"advanced"`. Default: `"basic"`.
+- `TOPIC`: `"general"` or `"news"`. Default: `"general"`.
+- `DAYS`: Integer, e.g., `7`. Default: `3`. *(Only if `TOPIC` is `"news"`)*
+- `MAX_RESULTS`: Integer, e.g., `10`. Default: `5`.
+- `INCLUDE_IMAGES`: Add this flag to include images in the response.
+- `INCLUDE_IMAGE_DESCRIPTIONS`: Add this flag to include image descriptions. Requires `INCLUDE_IMAGES` flag.
+- `INCLUDE_ANSWER`: Add this flag to include a short LLM-generated answer.
+- `INCLUDE_RAW_CONTENT`: Add this flag to include the parsed HTML content of search results.
+- `INCLUDE_DOMAINS`: Comma-separated list, e.g., `"domain1.com,domain2.com"`.
+- `EXCLUDE_DOMAINS`: Comma-separated list, e.g., `"excludedomain.com"`.
+
+---
+
+# Example Usage
+To search for "AI news" with advanced depth and include images:
+```bash
+@shell
+  prompt: 'python3 tool_tavily_search.py --task "search" --query "AI news" --search_depth advanced --include_images'
+  use-header: "# Web search result {id=web-search-result}"
+```
+
+To include domains:
+```bash
+@shell
+  prompt: 'python3 tool_tavily_search.py --task "search" --query "Machine Learning" --include_domains "domain1.com,domain2.com"'
+  use-header: "# Web search result {id=web-search-result}"
+```
+
+To extract content from URLs:
+```bash
+@shell
+  prompt: 'python3 tool_tavily_search.py --task "extract" --query "https://example.com,https://another.com"'
+  use-header: "# Web search result {id=web-search-result}"
+```
+
+# Important Notes
+- Flags such as `--include_answer` should not be followed by a value (e.g., `true`). Simply add the flag to enable the feature.
+- Always precede @shell code with an empty line in your output.
+- Remember to remove any markdown in your output of the command, such as "``` bash" or similar formatting.
+- If the task is simple, like known facts retrieval, try to limit `MAX_RESULTS` to an appropriate value.
+
+@shell
+prompt: chmod +x tool_tavily_search.py
+
+# Shell response block
+
+@llm
+prompt: |
+  Generate a shell command for the `tool_tavily_search.py` script 
+  for request specified in the **Input parameters** block.
+  Do not use any ``` or markdown, just command required starting from @shell
+use-header: none
+
+@shell
+  prompt: 'python3 tool_tavily_search.py --task "search" --query "Microsoft stock stability February 2025 compared to tech sector market correction cloud computing AI investments defensive tech stock" --search_depth advanced --topic news --days 30 --max_results 8 --include_answer'
+  use-header: "# Web search result {id=web-search-result}"
+
+# Web search result {id=web-search-result}
+Success:
+{
+  "query": "Microsoft stock stability February 2025 compared to tech sector market correction cloud computing AI investments defensive tech stock",
+  "follow_up_questions": null,
+  "answer": "Based on the most recent data, Microsoft stock stability in February 2025 appears to be relatively resilient compared to the broader tech sector, which has experienced market corrections. Microsoft's significant investment in cloud computing and AI, such as the $297 million investment in South Africa\u2019s cloud and AI future, positions it well against defensive tech stocks. Additionally, the tech sector's reliance on AI-driven growth, highlighted by Nvidia\u2019s earnings and the speculation around it reigniting the AI rally, suggests that Microsoft's strategic investments could provide a buffer against sector-wide downturns. However, the ongoing discussions around TikTok and its potential impact on the tech sector could introduce some uncertainty.",
+  "images": [],
+  "results": [
+    {
+      "url": "https://markets.businessinsider.com/news/stocks/microsoft-nasdaq-msft-powers-up-south-africa-s-cloud-and-ai-future-with-297m-investment-1034452346",
+      "title": "Microsoft (NASDAQ:MSFT) Powers Up South Africa\u2019s Cloud and AI Future with $297M Investment - Markets Insider",
+      "score": 0.4395795,
+      "published_date": "Fri, 07 Mar 2025 08:46:33 GMT",
+      "content": "Microsoft (NASDAQ:MSFT) Powers Up South Africa\u2019s Cloud and AI Future with $297M Investment | Markets Insider Markets Stocks Indices Commodities Cryptocurrencies Currencies ETFs News Stocks Stocks Microsoft (NASDAQ:MSFT) Powers Up South Africa\u2019s Cloud and AI Future with $297M Investment Microsoft (NASDAQ:MSFT) Powers Up South Africa\u2019s Cloud and AI Future with $297M Investment Microsoft (NASDAQ:MSFT) Powers Up South Africa\u2019s Cloud and AI Future with $297M InvestmentTipRanks 2hGoogle\u2019s Larry Page Sets Up a New AI Firm to Revolutionize ManufacturingTipRanks 2hNVDA and Amazon-Backed Startup Scale AI Faces US Labor Probe Over Pay ViolationsTipRanks 4hMicrosoft (MSFT) Stock Moves -1.03%: What You Should KnowZacks 10hTrump says would 'probably' extend TikTok deadline, China 'to play a role' in deal for appSeeking Alpha 12hAlphabet (GOOGL) Gets Subpoenaed as Republicans Investigate Biden-Harris CensorshipTipRanks 14hNintendo Switch 2 Will Dominate Rivals Thanks to NTDOY\u2019s Simple StrategyTipRanks 14hOracle, OpenAI eyeing Nvidia chips for Stargate worth billions, Bloomberg saysTipRanks 15h Stocks"
+    },
+    {
+      "url": "https://finance.yahoo.com/news/stocks-slide-bonds-rally-us-223039956.html",
+      "title": "Tech Stocks Up in Late Hours on Nvidia\u2019s Results: Markets Wrap - Yahoo Finance",
+      "score": 0.40288594,
+      "published_date": "Wed, 26 Feb 2025 22:23:12 GMT",
+      "content": "Tech Stocks Up in Late Hours on Nvidia\u2019s Results: Markets Wrap \u00b7 Bloomberg (Bloomberg) -- Shares of the world\u2019s largest technology companies climbed in late hours on speculation that Nvidia Corp.\u2019s earnings will help reignite the artificial intelligence-driven rally. Stock pickers are holding their smallest allocations of megacap names since the global financial crisis, boosting their funds\u2019 performance in a year that has kicked off with a slide in technology shares. With the so-called Magnificent Seven faltering this year, active investors\u2019 are seeing a performance boost: Roughly 49% of actively managed mutual funds and exchange-traded funds that compare themselves to the S&P 500 are beating the index in 2025, according to Morningstar Direct. Salesforce Inc. gave a fiscal-year revenue forecast that fell short of estimates, dimming optimism that the company\u2019s new artificial intelligence product would spur faster sales growth."
+    },
+    {
+      "url": "https://markets.businessinsider.com/news/stocks/who-wants-tiktok-trump-confirms-talks-with-multiple-potential-buyers-1034457335",
+      "title": "Who Wants TikTok? Trump Confirms Talks with Multiple Potential Buyers - Markets Insider",
+      "score": 0.40112522,
+      "published_date": "Mon, 10 Mar 2025 06:54:18 GMT",
+      "content": "Markets Stocks Indices Commodities Cryptocurrencies Currencies ETFs News Stocks Stocks Microsoft-stock Trump Confirms Talks with Multiple Potential BuyersTipRanks 2hNVIDIA GTC 2025: AI Breakthroughs, Quantum Leap, and Big Market MovesTipRanks 17hAI Daily: Broadcom jumps after AI-powered earningsTipRanks 2dCatalyst Watch: Oracle earnings, crypto swings, CPI print, and more tariff salvosSeeking Alpha 2dMicrosoft (MSFT) Stock is \u2018Range Bound,\u2019 Says Top AnalystTipRanks 3dOpening Day: Kestra opens for trading, Discord discusses potential IPOTipRanks 3dChinese telecoms questioned by U.S. lawmakers over military ties, links to BeijingSeeking Alpha 3dNvidia loses $1T market cap since hitting record high earlier this yearSeeking Alpha 3d Stock Indices Stocks Google Stock Meta Stock Dow-Stock Stock Market News"
+    },
+    {
+      "url": "https://www.tipranks.com/news/company-announcements/time-finance-announces-investor-presentation-amid-positive-trading-momentum",
+      "title": "Time Finance Announces Investor Presentation Amid Positive Trading Momentum - TipRanks",
+      "score": 0.36161602,
+      "published_date": "Wed, 12 Mar 2025 07:20:44 GMT",
+      "content": "[Premium](https://lp.tipranks.com/go-premium-fp-short?llf=paid-only-article&custom18=news \"Upgrade to Premium to unlock this investment idea\") Stock Market News Today, 3/12/25 \u2013 Futures Rise ahead of Key Inflation Data [Radhika Saraogi](https://www.tipranks.com/news/author/radhika-saraogi)2h ago [NDX](https://www.tipranks.com/news/topic/ndx)[SPX](https://www.tipranks.com/news/topic/spx) [Premium](https://lp.tipranks.com/go-premium-fp-short?llf=paid-only-article&custom18=news \"Upgrade to Premium to unlock this investment idea\") Stock Market News Today, 3/12/25 \u2013 Futures Rise ahead of Key Inflation Data [Radhika Saraogi](https://www.tipranks.com/news/author/radhika-saraogi)2h ago [NDX](https://www.tipranks.com/news/topic/ndx)[SPX](https://www.tipranks.com/news/topic/spx) [Premium](https://lp.tipranks.com/go-premium-fp-short?llf=paid-only-article&custom18=news \"Upgrade to Premium to unlock this investment idea\") Super Micro Computer (SMCI) Stock Leads S&P 500 as AI Investors Seize the Opportunity [Kirti Tak](https://www.tipranks.com/news/author/kirti-taktipranks-com)2h ago [AVGO](https://www.tipranks.com/news/topic/avgo)[NVDA](https://www.tipranks.com/news/topic/nvda) [Premium](https://lp.tipranks.com/go-premium-fp-short?llf=paid-only-article&custom18=news \"Upgrade to Premium to unlock this investment idea\") Verizon Stock Downgraded by Wolfe Research on Growing Competition [Shalu Saraf](https://www.tipranks.com/news/author/shalu-saraf)2h ago [VZ](https://www.tipranks.com/news/topic/vz) [Premium](https://lp.tipranks.com/go-premium-fp-short?llf=paid-only-article&custom18=news \"Upgrade to Premium to unlock this investment idea\") Musk\u2019s Starlink Reaches Indian Skies While Tesla (TSLA) Stock Faces a Bumpy Ride [Kirti Tak](https://www.tipranks.com/news/author/kirti-taktipranks-com)5h ago [TSLA](https://www.tipranks.com/news/topic/tsla)"
+    },
+    {
+      "url": "https://finance.yahoo.com/news/nasdaq-stock-correction-4-magnificent-080600220.html",
+      "title": "Nasdaq Stock Correction: 4 Magnificent Artificial Intelligence (AI) Stocks That Make for Slam-Dunk Buys Right Now - Yahoo Finance",
+      "score": 0.34707275,
+      "published_date": "Mon, 10 Mar 2025 08:06:00 GMT",
+      "content": "The first phenomenal AI stock that makes for a slam-dunk buy with the Nasdaq correcting lower is e-commerce behemoth Amazon (NASDAQ: AMZN). Keeping with the \"Magnificent Seven\" theme, the second AI stock that makes for a no-brainer buy with the Nasdaq Composite correcting lower is Alphabet (NASDAQ: GOOGL)(NASDAQ: GOOG), the parent company of search engine Google, streaming platform YouTube, and cloud infrastructure service provider Google Cloud. The Nasdaq stock market correction is the perfect time to look overseas for outstanding AI stocks to buy, as well. The Motley Fool has positions in and recommends Alphabet, Amazon, Baidu, Meta Platforms, Microsoft, Nvidia, and Palantir Technologies. Nasdaq Stock Correction: 4 Magnificent Artificial Intelligence (AI) Stocks That Make for Slam-Dunk Buys Right Now was originally published by The Motley Fool"
+    },
+    {
+      "url": "https://markets.businessinsider.com/news/stocks/microsoft-msft-preps-to-host-openai-s-gpt-4-5-and-gpt-5-models-1034390186",
+      "title": "Microsoft (MSFT) Preps to Host OpenAI\u2019s GPT-4.5 and GPT-5 Models - Markets Insider",
+      "score": 0.284333,
+      "published_date": "Fri, 21 Feb 2025 07:16:30 GMT",
+      "content": "Microsoft (MSFT) Preps to Host OpenAI\u2019s GPT-4.5 and GPT-5 Models | Markets Insider Markets Stocks Indices Commodities Cryptocurrencies Currencies ETFs News Stocks Stocks Microsoft-stock Microsoft (MSFT) Preps to Host OpenAI\u2019s GPT-4.5 and GPT-5 Models Microsoft (MSFT) Preps to Host OpenAI\u2019s GPT-4.5 and GPT-5 Models Tech giant Microsoft (MSFT) is prepping to host OpenAI\u2019s GPT-4.5 and GPT-5 AI (artificial intelligence) models on its Azure platform. Salesforce Dismisses Big Cloud Deal Rumors with Tech Titans, Sticks with GoogleTipRanks 2hMicrosoft (MSFT) Preps to Host OpenAI\u2019s GPT-4.5 and GPT-5 ModelsTipRanks 4hMeta Platforms (META) Trims Equity Perks amid AI ExpansionTipRanks 4hAI Daily: Meta reportedly leading charge against EU\u2019s AI ActTipRanks 16hOpenAI User Growth Surges Despite DeepSeek DisturbanceTipRanks 17hWalmart reports Q4 beat, Salesforce in cloud talks with Microsoft: Morning BuzzTipRanks 18hBuy IonQ (IONQ) Stock After Microsoft Breakthrough, Says D.A. DavidsonTipRanks 18hSalesforce in talks with Microsoft about cloud deal, The Information saysTipRanks 19h Stocks Dow-Stock Stock Market News"
+    },
+    {
+      "url": "https://www.bnnbloomberg.ca/business/company-news/2025/02/25/magnificent-7-dips-into-correction-territory-with-tesla-lagging/",
+      "title": "Magnificent 7 dips into correction territory with Tesla lagging - BNN Bloomberg",
+      "score": 0.26032406,
+      "published_date": "Tue, 25 Feb 2025 15:40:03 GMT",
+      "content": "By Bloomberg News Seven of the biggest companies that have powered the majority of the S&P 500 Index\u2019s gains over the past two years are not having a great start to 2025 \u2014 plunging into correction territory and erasing approximately US$1.4 trillion in value. The Bloomberg Magnificent 7 index, an equal-weighted gauge that consists of Apple Inc., Nvidia Corp., Microsoft Corp., Alphabet Inc., Amazon.com Inc., Meta Platforms Inc. and Tesla Inc., has fallen about 10% from a December high, passing the threshold that meets the definition of correction. Elon Musk\u2019s Tesla has been the biggest laggard for the index in the period, followed by Microsoft and Alphabet. \u00a92025 Bloomberg L.P. Political Ads RegistryOpens in new window RDS.caOpens in new window"
+    },
+    {
+      "url": "https://www.bloomberg.com/news/videos/2025-02-13/what-the-deepseek-ai-fever-says-about-china-s-economy-video",
+      "title": "Watch What the DeepSeek AI Fever Says About China's Economy - Bloomberg",
+      "score": 0.22900927,
+      "published_date": "Thu, 13 Feb 2025 04:37:00 GMT",
+      "content": "Watch What the DeepSeek AI Fever Says About China's Economy - Bloomberg Bloomberg Tech At Bloomberg Bloomberg Markets Bloomberg Technology Bloomberg Politics Bloomberg Opinion Bloomberg Businessweek Tech At Bloomberg Bloomberg Markets Bloomberg Technology Bloomberg Politics Bloomberg Opinion Bloomberg Businessweek Bloomberg Live on Bloomberg TV This was a brand new investable new economy sector that bring back long term capital back to China, not just to play a policy stimulus, but really they are for a five year growth story. 01:32:59 ### Bloomberg: The China Show 02/13/2025  Bank of America Securities says investors can look to China's AI sector as a positive catalyst, potentially offsetting worries linked to the property crisis, weak consumer sentiment, and US tariffs. 01:31:42 ### Bloomberg: The China Show 02/12/2025 02:53 ### Why Stock Investors Fear China: Bloomberg Opinion Bloomberg Technology"
+    }
+  ],
+  "response_time": 1.86
+}
+
+@return
+block: web-search-result
+

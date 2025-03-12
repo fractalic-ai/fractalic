@@ -1,0 +1,174 @@
+# Input Parameters {id=input-parameters}
+Get stock values for NVIDIA, Meta, and Microsoft for February of 2025
+
+# Your goals
+Your goal is to process input requirments from InputParameters block and output them as custom YAML operation with provided format and parameters.
+
+# How to prcoess input data
+- In your request can be request to get historical stock values for one or few companies. 
+- If few companies are presented in request: for each company you should output one instance of YAML @shell command, so for example if user requests five companies, you should print five sequential instances of 
+YAML operation in one output
+
+# Stocks Data
+
+## NVIDIA stock values
+
+YF.download() has changed argument auto_adjust default to True
+Price             Open        High         Low       Close     Volume
+[*********************100%***********************]  1 of 1 completed
+Ticker            NVDA        NVDA        NVDA        NVDA       NVDA
+Date                                                                 
+2025-02-03  114.750000  118.570000  113.010002  116.660004  371235700
+2025-02-04  116.959999  121.199997  116.699997  118.650002  256550000
+2025-02-05  121.760002  125.000000  120.760002  124.830002  262230800
+2025-02-06  127.419998  128.770004  125.209999  128.679993  251483600
+2025-02-07  129.220001  130.369995  125.000000  129.839996  228186300
+2025-02-10  130.089996  135.000000  129.960007  133.570007  216989100
+2025-02-11  132.580002  134.479996  131.020004  132.800003  178902400
+2025-02-12  130.020004  132.240005  129.080002  131.139999  160278600
+2025-02-13  131.559998  136.500000  131.169998  135.289993  197430000
+2025-02-14  136.479996  139.250000  135.500000  138.850006  195479600
+2025-02-18  141.270004  143.440002  137.929993  139.399994  219176600
+2025-02-19  139.509995  141.360001  137.220001  139.229996  167536000
+2025-02-20  140.029999  140.660004  136.789993  140.110001  143903600
+2025-02-21  140.039993  141.460007  134.029999  134.429993  228217600
+2025-02-24  136.559998  138.589996  130.080002  130.279999  251381100
+2025-02-25  129.979996  130.199997  124.440002  126.629997  271428700
+2025-02-26  129.990005  133.729996  128.490005  131.279999  322553800
+2025-02-27  135.000000  135.009995  120.010002  120.150002  443175800
+
+## Meta stock values
+
+YF.download() has changed argument auto_adjust default to True
+Price             Open        High         Low       Close    Volume
+[*********************100%***********************]  1 of 1 completed
+Ticker            META        META        META        META      META
+Date                                                                
+2025-02-03  675.909973  704.000000  675.250000  697.460022  21415700
+2025-02-04  702.500000  707.710022  691.609985  704.190002  13826300
+2025-02-05  703.549988  718.140015  699.010010  704.869995  17778200
+2025-02-06  705.880005  718.900024  703.500000  711.989990  13080700
+2025-02-07  716.799988  725.010010  711.750000  714.520020  16427100
+2025-02-10  718.559998  721.200012  711.330017  717.400024  12904300
+2025-02-11  713.320007  723.659973  710.039978  719.799988  12998000
+2025-02-12  715.299988  727.099976  712.599976  725.380005  12016500
+2025-02-13  721.520020  729.000000  718.039978  728.559998  12569100
+2025-02-14  726.140015  740.909973  725.619995  736.669983  16901200
+2025-02-18  736.000000  737.000000  706.440002  716.369995  21938700
+2025-02-19  704.099976  707.000000  695.390015  703.770020  17535500
+2025-02-20  697.280029  705.630005  693.640015  694.840027  12587400
+2025-02-21  696.580017  703.869995  682.359985  683.549988  15660400
+2025-02-24  686.280029  687.270020  662.450012  668.130005  15677000
+2025-02-25  665.969971  668.000000  641.859985  657.500000  20579700
+2025-02-26  659.650024  683.010010  658.000000  673.700012  14488700
+2025-02-27  682.450012  688.650024  657.570007  658.239990  12500000
+
+## Microsoft stock values
+
+YF.download() has changed argument auto_adjust default to True
+Price             Open        High         Low       Close    Volume
+[*********************100%***********************]  1 of 1 completed
+Ticker            MSFT        MSFT        MSFT        MSFT      MSFT
+Date                                                                
+2025-02-03  410.776349  414.578723  407.842230  410.097717  25679100
+2025-02-04  411.864167  413.091716  408.920058  411.544800  20532100
+2025-02-05  411.524861  413.001880  409.578751  412.462982  16316700
+2025-02-06  413.171550  417.363157  413.171550  414.987915  16309800
+2025-02-07  415.646597  417.812238  407.283362  408.930054  22886800
+2025-02-10  412.882120  414.628618  410.097725  411.395111  20817900
+2025-02-11  408.820283  411.664555  408.480936  410.616669  18140600
+2025-02-12  406.395111  409.928036  403.560798  408.221466  19121700
+2025-02-13  406.185551  410.177546  405.546817  409.718475  23891700
+2025-02-14  406.973967  408.091721  405.067786  407.612671  22758500
+2025-02-18  407.183549  409.778352  405.686551  408.820282  21423100
+2025-02-19  407.063806  414.658563  406.834255  413.940002  24114200
+2025-02-20  415.290009  419.309998  412.540009  416.130005  23508700
+2025-02-21  417.339996  418.049988  407.890015  408.209991  27524800
+2025-02-24  408.510010  409.369995  399.320007  404.000000  26443700
+2025-02-25  401.100006  401.920013  396.700012  397.899994  29387400
+2025-02-26  398.010010  403.600006  394.250000  399.730011  19619000
+2025-02-27  401.269989  405.739990  392.170013  392.529999  21127400
+
+@llm
+prompt: |
+  Please output shell command for getting required company stock price
+  + using as example bash processing for running pyton script like this (example for NVidia)
+  + Important: replace "ticker" value with proper ticker in script
+  + Important: assign to start_date and end_date specific dates in python code if they are presented as part of request from InputParameters 
+  + Important: replace "days" with integer value of days if its possible to get this information from InputParameters request, that would search stock values from current date minus "days" by default. By default "days" is equal to 30 days
+  + Important: in YAML operation replace {companyName} with name of company we are getting stocks values and {ticker} with proper ticjer value
+  + Very important!: "ALWAYS replace {emptyline} macro with empty line in your output\""
+  + For each company - print one instace of @shell command and dont print any other not required output:
+  {emptyline}
+  @shell
+  use-header: "## {companyName} stock values"
+  mode: append
+  to: stocks-data/*
+  prompt: |
+    python3 -c '
+    import yfinance as yf
+    import pandas as pd
+    from datetime import datetime, timedelta
+    end_date = datetime.now()
+    start_date = end_date - timedelta(days=30)
+    ticker = "{ticker}"
+    data = yf.download(ticker, start=start_date.strftime("%Y-%m-%d"), end=end_date.strftime("%Y-%m-%d"))
+    data = data[["Open", "High", "Low", "Close", "Volume"]]
+    print(data.to_string(index=True))
+    '
+use-header: none
+
+@shell
+use-header: "## NVIDIA stock values"
+mode: append
+to: stocks-data/*
+prompt: |
+  python3 -c '
+  import yfinance as yf
+  import pandas as pd
+  from datetime import datetime, timedelta
+  start_date = datetime(2025, 2, 1)
+  end_date = datetime(2025, 2, 28)
+  ticker = "NVDA"
+  data = yf.download(ticker, start=start_date.strftime("%Y-%m-%d"), end=end_date.strftime("%Y-%m-%d"))
+  data = data[["Open", "High", "Low", "Close", "Volume"]]
+  print(data.to_string(index=True))
+  '
+
+@shell
+use-header: "## Meta stock values"
+mode: append
+to: stocks-data/*
+prompt: |
+  python3 -c '
+  import yfinance as yf
+  import pandas as pd
+  from datetime import datetime, timedelta
+  start_date = datetime(2025, 2, 1)
+  end_date = datetime(2025, 2, 28)
+  ticker = "META"
+  data = yf.download(ticker, start=start_date.strftime("%Y-%m-%d"), end=end_date.strftime("%Y-%m-%d"))
+  data = data[["Open", "High", "Low", "Close", "Volume"]]
+  print(data.to_string(index=True))
+  '
+
+@shell
+use-header: "## Microsoft stock values"
+mode: append
+to: stocks-data/*
+prompt: |
+  python3 -c '
+  import yfinance as yf
+  import pandas as pd
+  from datetime import datetime, timedelta
+  start_date = datetime(2025, 2, 1)
+  end_date = datetime(2025, 2, 28)
+  ticker = "MSFT"
+  data = yf.download(ticker, start=start_date.strftime("%Y-%m-%d"), end=end_date.strftime("%Y-%m-%d"))
+  data = data[["Open", "High", "Low", "Close", "Volume"]]
+  print(data.to_string(index=True))
+  '
+
+@return
+block: stocks-data/*
+
