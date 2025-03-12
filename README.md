@@ -88,9 +88,21 @@ Required for UI to work. Please run the following command in the terminal.
 ## Settings
 First time you run the UI, settings.toml would be created required for parser (at least while working from UI, if you are using it headless from CLI - you can use script CLI params). You should select default provider and enter env keys for external providers (repicate, tavily and etc).
 
+# Tutorials and Examples (work in progress)
+Please check `tutorials` folder, currently WIP but you can find some examples there. More tutorials, examples and videos will be added soon.
+
+| Category | Tutorial Name | File Path | Description |
+|----------|--------------|-----------|-------------|
+| **01_Basics**  | Hello World | `/hello-world/hello.md` | Simple introduction demonstrating basic Fractalic operations |
+| **01_Basics** | Markdown Tree | `/01_Basics/markdown-tree/nodes_hierarchy.md` | Demonstrates hierarchical document structure manipulation and block targeting with `block: nested-block-1/*` |
+| **01_Basics** | Markdown Preview | `/01_Basics/markdown-preview/markdown-preview-tables.md` | Shows markdown rendering capabilities including tables and Mermaid diagrams |
+| **01_Basics** | Mermaid Simple | `/01_Basics/mermaid-simple/table-test.md` | Focuses on Mermaid diagram rendering with examples of different diagram types |
+| **01_Basics** | Multimodel Workflow | `/01_Basics/multimodel-workflow/multimodel_jokes_evaluation.md` | Demonstrates using multiple LLM providers (Claude, OpenAI, Groq) in a single workflow |
+| **01_Basics** | PDF Summary | `/01_Basics/pdf-summary/sum.md` | Shows how to process PDF documents with the `media` parameter |
+| **02_Integrations** | Yahoo Finance & Tavily | `/02_tutorial_yahoofinance_tavily_stocks_news_analytics/stocks_news.md` | Integrates Yahoo Finance API for stock data and Tavily search for news, demonstrating financial data analysis and news summarization |
+
 
 # Quick 101
-
 When a Markdown file is executed (either directly or called as an agent/module), the interpreter creates a context tree in memory. This tree consists of two types of blocks:
 
 1. Knowledge blocks: These correspond to Markdown header sections AND their associated content (all text/content under that header until the next header or operation). 
