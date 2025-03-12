@@ -91,15 +91,17 @@ First time you run the UI, settings.toml would be created required for parser (a
 # Tutorials and Examples (work in progress)
 Please check `tutorials` folder, currently WIP but you can find some examples there. More tutorials, examples and videos will be added soon.
 
+Please check [`tutorials`](./tutorials) folder, currently WIP but you can find some examples there. More tutorials, examples and videos will be added soon.
+
 | Category | Tutorial Name | File Path | Description |
 |----------|--------------|-----------|-------------|
-| **01_Basics**  | Hello World | `/hello-world/hello.md` | Simple introduction demonstrating basic Fractalic operations |
-| **01_Basics** | Markdown Tree | `/01_Basics/markdown-tree/nodes_hierarchy.md` | Demonstrates hierarchical document structure manipulation and block targeting with `block: nested-block-1/*` |
-| **01_Basics** | Markdown Preview | `/01_Basics/markdown-preview/markdown-preview-tables.md` | Shows markdown rendering capabilities including tables and Mermaid diagrams |
-| **01_Basics** | Mermaid Simple | `/01_Basics/mermaid-simple/table-test.md` | Focuses on Mermaid diagram rendering with examples of different diagram types |
-| **01_Basics** | Multimodel Workflow | `/01_Basics/multimodel-workflow/multimodel_jokes_evaluation.md` | Demonstrates using multiple LLM providers (Claude, OpenAI, Groq) in a single workflow |
-| **01_Basics** | PDF Summary | `/01_Basics/pdf-summary/sum.md` | Shows how to process PDF documents with the `media` parameter |
-| **02_Integrations** | Yahoo Finance & Tavily | `/02_tutorial_yahoofinance_tavily_stocks_news_analytics/stocks_news.md` | Integrates Yahoo Finance API for stock data and Tavily search for news, demonstrating financial data analysis and news summarization |
+| **01_Basics** | [Hello World](./tutorials/hello-world) | `/hello-world/hello.md` | Simple introduction demonstrating basic Fractalic operations |
+| **01_Basics** | [Markdown Tree](./tutorials/01_Basics/markdown-tree) | `/01_Basics/markdown-tree/nodes_hierarchy.md` | Demonstrates hierarchical document structure manipulation and block targeting with `block: nested-block-1/*` |
+| **01_Basics** | [Markdown Preview](./tutorials/01_Basics/markdown-preview) | `/01_Basics/markdown-preview/markdown-preview-tables.md` | Shows markdown rendering capabilities including tables and Mermaid diagrams |
+| **01_Basics** | [Mermaid Simple](./tutorials/01_Basics/mermaid-simple) | `/01_Basics/mermaid-simple/table-test.md` | Focuses on Mermaid diagram rendering with examples of different diagram types |
+| **01_Basics** | [Multimodel Workflow](./tutorials/01_Basics/multimodel-workflow) | `/01_Basics/multimodel-workflow/multimodel_jokes_evaluation.md` | Demonstrates using multiple LLM providers (Claude, OpenAI, Groq) in a single workflow |
+| **01_Basics** | [PDF Summary](./tutorials/01_Basics/pdf-summary) | `/01_Basics/pdf-summary/sum.md` | Shows how to process PDF documents with the `media` parameter |
+| **02_Integrations** | [Yahoo Finance & Tavily](./tutorials/02_tutorial_yahoofinance_tavily_stocks_news_analytics) | `/02_tutorial_yahoofinance_tavily_stocks_news_analytics/stocks_news.md` | Integrates Yahoo Finance API for stock data and Tavily search for news, demonstrating financial data analysis and news summarization. **Note:** Requires Tavily API key to be configured in settings.toml |
 
 
 # Quick 101
