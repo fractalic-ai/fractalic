@@ -45,22 +45,11 @@ The backend will be launched on port 8000 and the frontend on port 3000.
 
 Currently, the recommended way to use Fractalic is to install both the interpreter with backend server and UI frontend, and run it as a Docker container. If you don't need Docker, you can skip that step and follow the local installation instructions.
 
-## Installation script
+## Quick Install (Docker build + run)
 ```bash
-git clone https://github.com/fractalic-ai/fractalic.git && \
-git clone https://github.com/fractalic-ai/fractalic-ui.git  && \
-cd fractalic && \
-cp -a docker/. .. && \
-cd .. && \
-docker build -t fractalic-app . && \
-docker run -d \
-  -p 8000:8000 \
-  -p 3000:3000 \
-  --name fractalic-app \
-  fractalic-app
+curl -s https://raw.githubusercontent.com/fractalic-ai/fractalic/main/docker_build_run.sh | bash
 ```
-Now UI should be avaliable on http://localhost:3000 and backend on http://localhost:8000
-Please be aware to connect local folder with .md files to persist changes
+Now UI should be avaliable on http://localhost:3000 and backend on http://localhost:8000, on the first run it can take a while to launch the UI (takes about 10 seonds of blank screen). Please be aware to connect local folder with .md files and settings.toml to persist changes
 
 
 # Installation (Local)
