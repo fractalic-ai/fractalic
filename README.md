@@ -13,6 +13,11 @@ Modern AI workflows shouldn’t be harder than they already are. We have powerfu
 
 Fractalic combines Markdown and YAML to create agentic AI systems using straightforward, human-readable documents. It lets you grow context step by step, control AI knowledge precisely, and orchestrate complex workflows through simple document structure and syntax.
 
+## Tutorial 101 
+Whatch this video with quick project overview and 101 concepts how to use it
+[![Watch the video](https://img.youtube.com/vi/iRqIzmKE8uw/0.jpg)](https://www.youtube.com/watch?v=iRqIzmKE8uw)
+
+
 ## Key Features
 
 - 🖥 **Multi-Provider Support: Anthropic, Groq, OpenAI and compatible providers**  
@@ -27,7 +32,74 @@ Fractalic combines Markdown and YAML to create agentic AI systems using straight
 - 🔍 **Diff-based Session Results: Session results as diffs in UI**  
 - 📖 **Integrated Markdown Viewer: Markdown viewer in UI**
 
-## Quick 101
+# Installation (Docker)
+## Requirements
+Important: please ensure you have Git installed on your system.
+Git dependecy would be removed in future releases. Sessions would be stored on .zip or .tar.gz files.
+
+## Project structure
+Fractalic is split into two repositories: fractalic and fractalic-ui. Both repositories are installed in the same directory to run the application using script.
+
+Backend will be launched on port 8000 and frontend on port 3000.
+
+As for now, the best way to use Fractalic is to install both interpreter with backend server and UI frontend and run it as docker container, if you dont need docker - please skip that step.
+
+## Installation script
+```bash
+git clone https://github.com/fractalic-ai/fractalic.git && \
+git clone https://github.com/fractalic-ai/fractalic-ui.git  && \
+cd fractalic && \
+cp -a docker/. .. && \
+cd .. && \
+docker build -t fractalic-app . && \
+docker run -d \
+  -p 8000:8000 \
+  -p 3000:3000 \
+  --name fractalic-app \
+  fractalic-app
+```
+Now UI should be avaliable on http://localhost:3000 and backend on http://localhost:8000
+Please be aware to connect local folder with .md files to persist changes
+
+
+# Installation (Local)
+
+1. Backend installation
+```bash
+git clone https://github.com/fractalic-ai/fractalic.git && \
+cd fractalic && \
+python3 -m venv venv && \
+source venv/bin/activate && \
+pip install -r requirements.txt 
+```
+2. Run backend
+```bash
+./run_server.sh
+```
+
+3. Frontend installation
+```bash
+git clone https://github.com/fractalic-ai/fractalic-ui.git  && \
+cd fractalic-ui && \
+npm install 
+```
+
+4. Run frontend
+```bash
+npm run dev
+```
+
+## Running fractalic backend server
+Required for UI to work. Please run the following command in the terminal.
+```bash
+./run_server.sh
+```
+
+## Settings
+First time you run the UI, settings.toml would be created required for parser (at least while working from UI, if you are using it headless from CLI - you can use script CLI params). You should select default provider and enter env keys for external providers (repicate, tavily and etc).
+
+
+# Quick 101
 
 When a Markdown file is executed (either directly or called as an agent/module), the interpreter creates a context tree in memory. This tree consists of two types of blocks:
 
@@ -375,67 +447,6 @@ For any operation that accepts a `use-header` parameter, the special value `"non
 | `save-to-file`      | ✓    | –       | –      | –     | –       | –     |
 | `media`             | ✓(A) | –       | –      | –     | –       | –     |
 
-
-# Requirements
-Important: please ensure you have Git installed on your system.
-Git dependecy would be removed in future releases. Sessions would be stored on .zip or .tar.gz files.
-
-# Installation (Docker)
-As for now, the best way to use Fraxtalic is to install both interpreter with backend server and UI frontend and run it as odcker container, if you dont need docker - please skip that step.
-
-```bash
-git clone https://github.com/fractalic-ai/fractalic.git && \
-git clone https://github.com/fractalic-ai/fractalic-ui.git  && \
-cd fractalic && \
-cp -a docker/. .. && \
-cd .. && \
-docker build -t fractalic-app . && \
-docker run -d \
-  -p 8000:8000 \
-  -p 3000:3000 \
-  --name fractalic-app \
-  fractalic-app
-```
-Now UI should be avaliable on http://localhost:3000
-Please be aware to connect local folder with .md files to persist changes
-Same action is required for settings toml
-
-
-# Installation (Local)
-
-1. Backend installation
-```bash
-git clone https://github.com/fractalic-ai/fractalic.git && \
-cd fractalic && \
-python3 -m venv venv && \
-source venv/bin/activate && \
-pip install -r requirements.txt 
-```
-2. Run backend
-```bash
-./run_server.sh
-```
-
-3. Frontend installation
-```bash
-git clone https://github.com/fractalic-ai/fractalic-ui.git  && \
-cd fractalic-ui && \
-npm install 
-```
-
-4. Run frontend
-```bash
-npm run dev
-```
-
-# Running fractalic backend server
-Required for UI to work. Please run the following command in the terminal.
-```bash
-./run_server.sh
-```
-
-# Settings
-First time you run the UI, settings.toml would be created required for parser (at least while working from UI, if you are using it headless from CLI - you can use script CLI params). You should select default provider and enter env keys for external providers (repicate, tavily and etc).
 
 
 
