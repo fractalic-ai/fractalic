@@ -15,21 +15,17 @@ Fractalic combines Markdown and YAML to create agentic AI systems using straight
 
 ## Key Features
 
-🧬 **Structured Knowledge & Precision** - Use Markdown heading blocks to form a semantic tree. Reference specific nodes or branches with a simple, path-like syntax.
-
-🧠 **Dynamic Knowledge context** - Each operation can modify specific nodes and branches, allowing your system to evolve dynamically.
-    
-🤖 **Agentic ready** - The module system (`@run`) isolates execution contexts. It passes parameters and returns results as semantic blocks, enabling both specialized agents and reusable workflows with clear inputs and outputs.
-
-🪄 **Runtime Instruction Generation** Generate instructions dynamically during execution, or delegate this task to the LLM. This enables conditional workflows and supports autonomous agent behavior.
-    
-🤝 **Multi-Model Collaboration** - You can explicitly specify LLM provider, model, and parameters (e.g., temperature) for each call.
-    
-🖥️ **Shell Integration** - Execute CLI tools and scripts (Python, curl, Docker, Git, etc.) and automatically update the knowledge context with the results.
-    
-📝 **Transparent Versioning** - Automatically track every context change and decision using Git-native version control. 
-    
-📒 **User Interface** - A notebook-like UI provides straightforward parameter selection and operation management.
+- 🖥 **Multi-Provider Support: Anthropic, Groq, OpenAI and compatible providers**  
+- 🔄 **Integrated Workflow: Collaborate with different models and adjust settings in one workflow**  
+- 📁 **Structured Markdown Navigation: Markdown document structure accessible as a tree**  
+- ⚙ **Dynamic Knowledge Context: Knowledge context can be changed and updated at runtime**  
+- 🔧 **Runtime Flow & Logic Control: Flow and logic control instructions can be generated in runtime**  
+- 💻 **Shell Access: Easy shell access with results accessible in context at runtime**  
+- 🔑 **External API Token Access: External API tokens are accessible in @shell**  
+- 📂 **Git-Backed Sessions: Each session’s results are saved to git**  
+- 📝 **Notebook-like UI: Notebook-like UI**  
+- 🔍 **Diff-based Session Results: Session results as diffs in UI**  
+- 📖 **Integrated Markdown Viewer: Markdown viewer in UI**
 
 ## Quick 101
 
@@ -121,19 +117,22 @@ This is followed by a YAML section containing the operation's parameters.
 4. If no target specified, content is inserted at current position
 
 **Examples**:
+
+Import entire file
 ```yaml
-# Import entire file
 @import
-file: "docs/other.md"
+file: instructions/identity.md
+```
 
-# Import specific section with nested blocks
+Import specific section with nested blocks
+```yaml
 @import
-file: "docs/other.md"
-block: "section/subsection/*"
-mode: "append"
-to: "targetSection"
+file: docs/other.md
+block: section/subsection
+```
 
-# Import single block and replace target
+Import single block and replace target
+```yaml
 @import
 file: "templates/header.md"
 block: "main-header"
@@ -171,28 +170,36 @@ Note: Either `prompt` or `block` must be provided.
 6. Merges response into document at specified location
 
 **Examples**:
+Simple prompt with default settings
 ```yaml
-# Simple prompt with default settings
 @llm
 prompt: "Generate a summary of the following text:"
-block: "input-text"
+```
 
 # Complex prompt with multiple inputs and specific target
+```yaml
 @llm
 prompt: "Compare and contrast the following sections:"
-block: ["section1/*", "section2/*"]
-media: ["context.png", "diagram.svg"]
+block: 
+   - section1/*
+   - section2/*
+media: 
+   - context.png
+   - diagram.svg
 use-header: "# Comparison Analysis"
-mode: "replace"
-to: "analysis-section"
+mode: replace
+to: analysis-section
+```
 
-# Save response to file with custom model
+Save response to file with custom model; multiline prompt
+```yaml
 @llm
-prompt: "Generate technical documentation"
-block: "specifications"
-save-to-file: "output/docs.md"
-provider: "custom-provider"
-model: "technical-writer-v2"
+prompt: |
+   Generate technical documentation
+   about specifications above
+save-to-file: output/docs.md
+provider: custom-provider
+model: technical-writer-v2
 ```
 
 ### @shell
@@ -218,21 +225,20 @@ model: "technical-writer-v2"
 # Simple command execution
 @shell
 prompt: "ls -la"
+```
 
-# Process file and insert at specific location
+Process file and insert at specific location
+```yaml
+# Error section
+This block will be replaced with the error log summary
+
 @shell
 prompt: "cat data.txt | grep 'ERROR' | sort -u"
 use-header: "# Error Log Summary"
-mode: "prepend"
-to: "error-section"
-
-# Run script and replace content
-@shell
-prompt: "./generate_report.sh --format=markdown"
-use-header: "none"
-mode: "replace"
-to: "report-content"
+to: error-section
+mode: replace
 ```
+
 
 ### @return
 
@@ -259,17 +265,21 @@ Note: Either `prompt` or `block` must be provided.
 ```yaml
 # Return single block
 @return
-block: "final-output"
+block: final-output
+```
 
-# Return multiple blocks with custom header
+Return multiple blocks with custom header
+```yaml
 @return
-block: ["summary/*", "conclusions"]
-use-header: "# Final Report"
+block: 
+   - summary/*
+   - conclusions`
+```
 
-# Return literal text
+Return literal text
+```yaml
 @return
-prompt: "Process completed successfully"
-use-header: "none"
+prompt: Process completed successfully
 ```
 
 ### @run
@@ -296,26 +306,25 @@ use-header: "none"
 6. Merges results into current document at target location
 
 **Examples**:
+Simple workflow execution
 ```yaml
-# Simple workflow execution
 @run
-file: "workflows/process.md"
+file: workflows/process.md
+```
 
-# Run workflow with input and specific target
-@run
-file: "workflows/analyze.md"
-block: "data-section/*"
-mode: "replace"
-to: "analysis-results"
+Multiple inputs and append results
+```yaml
+# Reports
+This root block would be appended with the results of the workflows
 
-# Complex workflow with multiple inputs
 @run
-file: "workflows/compare.md"
-prompt: "Compare performance metrics"
-block: ["metrics-2023/*", "metrics-2024/*"]
-use-header: "# Comparison Results"
-mode: "append"
-to: "reports"
+file: workflows/compare.md
+prompt: Compare performance metrics
+block: 
+   - metrics-2023/* 
+   - metrics-2024/*
+mode: append
+to: reports
 ```
 
 ## Execution Context
@@ -335,27 +344,17 @@ The document evolves incrementally as each operation is processed, building towa
 
 ## Block References
 
-Block references can use several special notations:
-- Simple reference: `"section-name"`
-- Nested reference: `"parent/child"`
-- Wildcard nested: `"section/*"` (includes all nested blocks)
-- Multiple blocks: `["block1", "block2/nested", "section3/*"]`
+Block references (field: `block`) can use several special notations:
+- Simple reference: `section-name`
+- Nested reference: `parent/child`
+- Wildcard nested: `section/*` (includes all nested blocks)
+- Multiple blocks are accessabe by using YAML array syntax
 
 ## Special Values
 
 For any operation that accepts a `use-header` parameter, the special value `"none"` (case-insensitive) can be used to omit the header entirely.
 
 ---
-## Operations list
-@llm: AI-powered content generation
-
-@shell: Execute system commands
-
-@import: Include external files or blocks
-
-@run: Execute sub-documents
-
-@goto: Conditional flow control
 
 
 ### Operation Field Matrix  
@@ -376,10 +375,6 @@ For any operation that accepts a `use-header` parameter, the special value `"non
 | `save-to-file`      | ✓    | –       | –      | –     | –       | –     |
 | `media`             | ✓(A) | –       | –      | –     | –       | –     |
 
-
-
-# fractalic updating in progress
-Hello, repo updating is in progress. Please wait for a while.
 
 # Requirements
 Important: please ensure you have Git installed on your system.
@@ -432,8 +427,6 @@ npm install
 ```bash
 npm run dev
 ```
-
-
 
 # Running fractalic backend server
 Required for UI to work. Please run the following command in the terminal.
