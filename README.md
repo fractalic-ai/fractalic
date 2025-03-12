@@ -14,7 +14,7 @@ Modern AI workflows shouldn’t be harder than they already are. We have powerfu
 Fractalic combines Markdown and YAML to create agentic AI systems using straightforward, human-readable documents. It lets you grow context step by step, control AI knowledge precisely, and orchestrate complex workflows through simple document structure and syntax.
 
 ## Tutorial 101 
-Whatch this video with quick project overview and 101 concepts how to use it (picture is clickable YouTube link)
+Whatch this video with quick project overview and 101 concepts how to use it (picture is clickable YouTube [link](https://www.youtube.com/watch?v=iRqIzmKE8uw))
 
 [![Watch the video](https://img.youtube.com/vi/iRqIzmKE8uw/0.jpg)](https://www.youtube.com/watch?v=iRqIzmKE8uw)
 
