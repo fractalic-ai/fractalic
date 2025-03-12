@@ -59,7 +59,7 @@ docker run -d \
   --name fractalic-app \
   fractalic-app
 ```
-Now UI should be avaliable on http://localhost:3000 and backend on http://localhost:8000
+Now UI should be available on http://localhost:3000 and backend on http://localhost:8000
 Please be aware to connect local folder with .md files to persist changes
 
 
