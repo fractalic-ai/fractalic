@@ -15,6 +15,7 @@ Fractalic combines Markdown and YAML to create agentic AI systems using straight
 
 ## Tutorial 101 
 Whatch this video with quick project overview and 101 concepts how to use it (picture is clickable YouTube link)
+
 [![Watch the video](https://img.youtube.com/vi/iRqIzmKE8uw/0.jpg)](https://www.youtube.com/watch?v=iRqIzmKE8uw)
 
 
