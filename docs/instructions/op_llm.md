@@ -73,115 +73,86 @@ to: "results/summary"
 
 This operation is designed to be flexible and powerful, allowing for various LLM interactions while maintaining document structure and context.
 
-1. **Context Building Modes**:
-The system builds context in three different ways depending on the parameters provided:
+I'll explain the context building process in natural language without code snippets:
 
-a) **Block-Based Context**:
-```yaml
-@llm
-block: "section/content"
-```
-- When only `block` is specified:
-  - System extracts content from the referenced block(s)
-  - If multiple blocks are specified, they are stacked together
-  - No additional context is added
-  - Each node's content becomes a separate message with the specified role
+## Context Building Process
 
-b) **Prompt-Based Context**:
-```yaml
-@llm
-prompt: "Your prompt here"
-```
-- When only `prompt` is specified:
-  - System automatically includes all previous heading nodes as context
-  - Previous headings are added as messages with their respective roles
-  - The prompt is added as the final message
-  - Context is built as: `[all previous headings] + prompt`
+### 1. Block Processing Logic
+When processing blocks, the system follows these steps:
 
-c) **Combined Context**:
-```yaml
-@llm
-prompt: "Your prompt"
-block: 
-  - "section1/*"
-  - "section2/*"
-```
-- When both `prompt` and `block` are specified:
-  - System stacks content in order: `[specified blocks] + prompt`
-  - Each block's content is added as separate messages
-  - The prompt is added as the final message
+1. **Single Block Processing**:
+   - Retrieves the block content using the provided block URI
+   - Checks if nested blocks should be included
+   - Extracts all content from the block's nodes
+   - Combines the content with proper spacing
+   - Creates messages for each node with appropriate roles
 
-2. **Message Structure**:
-The system builds two parallel structures:
-- `prompt_parts`: A list of text content for traditional prompt format
-- `messages`: A list of structured messages with roles for chat format
+2. **Multiple Block Processing**:
+   - Handles an array of block references
+   - Processes each block individually
+   - Maintains the order of blocks as specified
+   - Combines all block contents sequentially
+   - Preserves individual block roles and message structure
 
-3. **Block Processing**:
-```python
-if block_params:
-    if block_params.get('is_multi'):
-        # Handle array of blocks
-        blocks = block_params.get('blocks', [])
-        for block_info in blocks:
-            block_uri = block_info.get('block_uri')
-            nested_flag = block_info.get('nested_flag', False)
-            block_ast = get_ast_part_by_path(ast, block_uri, nested_flag)
-            # Process block content and add to messages
-    else:
-        # Handle single block
-        block_uri = block_params.get('block_uri')
-        nested_flag = block_params.get('nested_flag', False)
-        block_ast = get_ast_part_by_path(ast, block_uri, nested_flag)
-        # Process block content and add to messages
-```
+### 2. Previous Headings Context
+When building context from previous headings, the system:
 
-4. **Previous Headings Context**:
-```python
-def get_previous_headings(node: Node) -> str:
-    context = []
-    current = ast.first()
-    while current and current != node:
-        if current.type == NodeType.HEADING:
-            context.append(current.content)
-        current = current.next
-    return "\n\n".join(context)
+1. **Content Collection**:
+   - Traverses the document from the beginning up to the current node
+   - Identifies all heading nodes encountered
+   - Preserves the hierarchical structure of headings
+   - Maintains the original order of headings
 
-def get_previous_heading_messages(node: Node) -> list:
-    messages = []
-    current = ast.first()
-    while current and current != node:
-        role = getattr(current, "role", "user")
-        messages.append({"role": role, "content": current.content})
-        current = current.next
-    return messages
-```
+2. **Message Formation**:
+   - Creates messages for each heading
+   - Preserves the role of each heading (defaults to "user" if not specified)
+   - Maintains the chronological order of messages
+   - Ensures proper spacing between heading contents
 
-5. **Final Context Assembly**:
-```python
-# Combine all parts with proper spacing
-prompt_text = "\n\n".join(part.strip() for part in prompt_parts if part.strip())
+### 3. Final Context Assembly
+The system combines all context elements in the following order:
 
-# Add prompt if specified (always last)
-if prompt:
-    prompt_parts.append(prompt)
-    messages.append({"role": "user", "content": prompt})
-```
+1. **Block Content** (if specified):
+   - Adds all block contents first
+   - Maintains proper spacing between blocks
+   - Preserves block-specific roles
 
-6. **Provider-Specific Handling**:
-Each provider (OpenAI, Anthropic, Groq) handles the context differently:
-- OpenAI: Uses chat completion format with system/user/assistant messages
-- Anthropic: Supports both message format and traditional prompt format
-- Groq: Similar to OpenAI's chat completion format
+2. **Previous Headings** (if no blocks specified):
+   - Adds all previous heading content
+   - Maintains heading hierarchy
+   - Preserves heading roles
 
-7. **Media Integration**:
-If media files are specified:
-```yaml
-@llm
-prompt: "Analyze this image"
-media: 
-  - "images/diagram.png"
-```
+3. **Prompt** (if specified):
+   - Always adds the prompt last
+   - Sets the prompt role as "user"
+   - Ensures proper separation from previous content
+
+### 4. Provider-Specific Handling
+Each provider handles the context differently:
+
+1. **OpenAI**:
+   - Uses chat completion format
+   - Supports system/user/assistant message roles
+   - Handles context through message history
+   - Maintains conversation flow through structured messages
+
+2. **Anthropic**:
+   - Supports both message format and traditional prompt format
+   - Handles media attachments in message content
+   - Uses system prompt for additional context
+   - Maintains conversation state through message history
+
+3. **Groq**:
+   - Similar to OpenAI's chat completion format
+   - Supports message history and roles
+   - Handles context through structured messages
+   - Maintains conversation flow through message history
+
+### 5. Media Integration
+When media files are specified:
 - Media is attached to the first user message
 - Each provider handles media attachments according to their API requirements
+- Media content is properly formatted for each provider's specific needs
+- Maintains proper context and relationships between text and media
 
 This context building system ensures that the LLM receives appropriate context while maintaining the document's structure and relationships between different parts of the content.
