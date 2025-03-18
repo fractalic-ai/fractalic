@@ -94,7 +94,18 @@ def run(filename: str, param_node: Optional[Union[Node, AST]] = None, create_new
         # RESTORING LOGIC  
         # Process the AST
         try:
+            
+            
             ast = parse_file(local_file_name)
+            
+            # Runner py run logic created_by_file setup
+            """
+            After parsing, iterate through all nodes in the AST to set the 'created_by_file' attribute.
+            This attribute is crucial for tracking the origin of each node, especially when dealing with multiple files or nested operations.
+            The value should be the absolute path of the file being processed.
+            """
+            for node in ast.parser.nodes.values():
+                node.created_by_file = local_file_name    
         except Exception as e:
             print(f"[ERROR runner.py] Error parsing file {local_file_name}: {str(e)}")
             print(f"[ERROR runner.py] Current directory: {os.getcwd()}")
@@ -392,7 +403,10 @@ def process_run(ast: AST, current_node: Node, local_file_name, parent_operation,
             content=parameter_value,
             id="InputParameters",
             role="user",
-            key=str(uuid.uuid4())[:8]
+            key=str(uuid.uuid4())[:8],
+            created_by = current_node.key, # Store the key of the operation node that triggered this response
+            # here we need to store the path of parent file file path for this run operation
+            created_by_file = local_file_name
         )
         
         # Create prompt AST

@@ -32,17 +32,21 @@ def process_llm(ast: AST, current_node: Node) -> Optional[Node]:
             current = current.next
         return "\n\n".join(context)
     
+    
     def get_previous_heading_messages(node: Node) -> list:
         """Return a list of messages for each heading node encountered before the given node."""
         messages = []
         current = ast.first()
         while current and current != node:
-            if current.type == NodeType.HEADING:
-                # Use the node's role attribute, defaulting to "user" if not specified
-                role = getattr(current, "role", "user")
-                messages.append({"role": role, "content": current.content})
+            #if current.type == NodeType.HEADING:
+            # Use the node's role attribute, defaulting to "user" if not specified
+            role = getattr(current, "role", "user")
+            messages.append({"role": role, "content": current.content})
+    
             current = current.next
         return messages
+    
+
 
     # Get parameters
     params = current_node.params or {}
@@ -148,6 +152,9 @@ def process_llm(ast: AST, current_node: Node) -> Optional[Node]:
         ) as status:
             response = llm_client.llm_call(prompt_text, messages, params)
 
+        # Store the raw response on the current node for export
+        current_node.response_content = response
+
         duration = time.time() - start_time
         mins, secs = divmod(int(duration), 60)
         duration_str = f"{mins}m {secs}s" if mins > 0 else f"{secs}s"
@@ -160,6 +167,7 @@ def process_llm(ast: AST, current_node: Node) -> Optional[Node]:
     except Exception as e:
         console.print(f"[bold red]✗ Failed: {str(e)}[/bold red]")
         console.print(f"[bold red]  Operation content:[/bold red]\n{current_node.content}")
+        current_node.response_content = f"ERROR: {str(e)}"
         raise
 
     # Get save-to-file parameter
@@ -183,6 +191,19 @@ def process_llm(ast: AST, current_node: Node) -> Optional[Node]:
     response_ast = AST(f"{header}{response}\n")
     for node_key, node in response_ast.parser.nodes.items():
         node.role = "assistant"
+        node.created_by = current_node.key  # Store the ID of the operation node that triggered this response
+        node.created_by_file = current_node.created_by_file # set the file path
+        
+    llm_response_ast = AST(f"{header}{response}\n")
+
+    # Llm_op.py process_llm logic created_by_file setup
+    # After creating the AST from the LLM's response, iterate through all nodes in the AST
+    # to set the 'created_by_file' attribute. This ensures that each node knows its origin.
+    # The value should be the file path of the current file being processed.
+    for node_key, node in llm_response_ast.parser.nodes.items():
+        node.role = "assistant"
+        node.created_by = current_node.key  # Store the ID of the operation node that triggered this response
+        node.created_by_file = current_node.created_by_file # set the file path
 
     # Handle target block insertion
     operation_type = OperationType(params.get('mode', Config.DEFAULT_OPERATION))

@@ -38,6 +38,10 @@ class Node:
     next: Optional['Node'] = None
     enabled: bool = True  # Persistent flag for run-once logic
     role: str = "user"  # Default role is "user", will be set to "assistant" for operation blocks and their results
+    response_content: Optional[str] = None  # Store operation responses
+    created_by: Optional[str] = None  # Store the key of the operation node that triggered this response
+    # here we need to store the path of parent file file path for this run operation
+    created_by_file : Optional[str] = None
 
     @property
     def hash(self) -> str:
