@@ -73,8 +73,6 @@ to: "results/summary"
 
 This operation is designed to be flexible and powerful, allowing for various LLM interactions while maintaining document structure and context.
 
-I'll explain the context building process in natural language without code snippets:
-
 ## Context Building Process
 
 ### 1. Block Processing Logic
