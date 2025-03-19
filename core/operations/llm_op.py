@@ -38,10 +38,10 @@ def process_llm(ast: AST, current_node: Node) -> Optional[Node]:
         messages = []
         current = ast.first()
         while current and current != node:
-            #if current.type == NodeType.HEADING:
-            # Use the node's role attribute, defaulting to "user" if not specified
-            role = getattr(current, "role", "user")
-            messages.append({"role": role, "content": current.content})
+            if current.type == NodeType.HEADING:
+                # Use the node's role attribute, defaulting to "user" if not specified
+                role = getattr(current, "role", "user")
+                messages.append({"role": role, "content": current.content})
     
             current = current.next
         return messages
