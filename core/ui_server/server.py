@@ -78,14 +78,18 @@ def enrich_call_tree(node, repo):
 
     filename = node.get('filename')
     ctx_file = node.get('ctx_file')
+    trc_file = node.get('trc_file')  # Add this line to get trc_file
     md_commit_hash = node.get('md_commit_hash')
     ctx_commit_hash = node.get('ctx_commit_hash')
+    trc_commit_hash = node.get('trc_commit_hash')  # Add this line to get trc_commit_hash
 
     source_content = get_file_content(repo, md_commit_hash, filename)
     target_content = get_file_content(repo, ctx_commit_hash, ctx_file)
-
+    trace_content = get_file_content(repo, trc_commit_hash, trc_file)
+      
     node['source_content'] = ensure_empty_lines_before_symbols(source_content)
     node['target_content'] = ensure_empty_lines_before_symbols(target_content)
+    node['trace_content'] = trace_content  # Add trace_content to node
     node['operation_src'] = operation_src
 
     children = node.get('children', [])
@@ -186,6 +190,8 @@ async def get_branches_and_commits(repo_path: str = Query(...)):
                     'md_file': node['filename'],
                     'md_commit_hash': node['md_commit_hash'],
                     'ctx_commit_hash': node['ctx_commit_hash'],
+                    'trc_file': node.get('trc_file', ''),  # Add trc_file field
+                    'trc_commit_hash': node.get('trc_commit_hash', ''),  # Add trc_commit_hash field
                     'branch': branch.name,
                     'children': []
                 }

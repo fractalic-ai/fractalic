@@ -119,13 +119,13 @@ def main():
                 
             temp_ast = parse_file(args.task_file)
             param_node = temp_ast.get_part_by_path(args.param_input_user_request, True)
-            result_nodes, call_tree_root, ctx_file, ctx_hash, branch_name = run(
+            result_nodes, call_tree_root, ctx_file, ctx_hash, trc_file, trc_hash, branch_name = run(
                 args.input_file,
                 param_node,
                 p_call_tree_node=None
             )
         else:
-            result_nodes, call_tree_root, ctx_file, ctx_hash, branch_name = run(
+            result_nodes, call_tree_root, ctx_file, ctx_hash, trc_file, trc_hash, branch_name = run(
                 args.input_file,
                 p_call_tree_node=None
             )
@@ -138,6 +138,8 @@ def main():
         with open(call_tree_path, 'w', encoding='utf-8') as json_file:
             call_tree_root.ctx_file = ctx_file
             call_tree_root.ctx_hash = ctx_hash
+            call_tree_root.trc_file = trc_file  
+            call_tree_root.trc_hash = trc_hash  
             json_file.write(call_tree_root.to_json())
 
         md_commit_hash = commit_changes(

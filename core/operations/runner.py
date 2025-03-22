@@ -39,7 +39,7 @@ def print_ast_state(ast):
 
 def run(filename: str, param_node: Optional[Union[Node, AST]] = None, create_new_branch: bool = True,
         p_parent_filename=None, p_parent_operation: str = None, p_call_tree_node=None,
-        committed_files=None, file_commit_hashes=None, base_dir=None) -> Tuple[AST, CallTreeNode, str, str, str]:
+        committed_files=None, file_commit_hashes=None, base_dir=None) -> Tuple[AST, CallTreeNode, str, str, str, str, str]:
  
     console = Console(force_terminal=True, color_system="auto")
     if committed_files is None:
@@ -193,7 +193,7 @@ def run(filename: str, param_node: Optional[Union[Node, AST]] = None, create_new
                 if operation_name == "@import":
                     current_node = process_import(ast, current_node)
                 elif operation_name == "@run":
-                    current_node, child_node, run_ctx_file, run_ctx_hash = process_run(
+                    current_node, child_node, run_ctx_file, run_ctx_hash, run_trc_file, run_trc_hash = process_run(
                         ast,
                         current_node,
                         local_file_name,
@@ -219,6 +219,7 @@ def run(filename: str, param_node: Optional[Union[Node, AST]] = None, create_new
                         trc_output_file = os.path.join(file_dir, trc_filename)
 
                         relative_ctx_path = get_relative_path(base_dir, output_file)
+                        relative_trc_path = get_relative_path(base_dir, trc_output_file)
                         
                         render_ast_to_markdown(ast, output_file)
                         render_ast_to_trace(ast, trc_output_file)
@@ -227,18 +228,20 @@ def run(filename: str, param_node: Optional[Union[Node, AST]] = None, create_new
                         ctx_commit_hash = commit_changes(
                             base_dir,
                             "@return operation",
-                            [local_file_name, ctx_filename],  # Use local names
+                            [local_file_name, ctx_filename, trc_filename],  # Include trc_filename
                             p_parent_filename,
                             p_parent_operation
                         )
+                        
                         console.print(f"[light_green]✓[/light_green] git. context commited: [light_green]{ctx_filename}[/light_green]")
+                        console.print(f"[light_green]✓[/light_green] git. trace file commited: [light_green]{trc_filename}[/light_green]")
 
                         new_node.ctx_file = relative_ctx_path
                         new_node.ctx_commit_hash = ctx_commit_hash
+                        new_node.trc_file = relative_trc_path
+                        new_node.trc_commit_hash = ctx_commit_hash  # Same commit hash as ctx
 
-                        # RESTORING LOGIC
-                        # this operation was commented out
-                        return return_result, new_node, relative_ctx_path, ctx_commit_hash, branch_name
+                        return return_result, new_node, relative_ctx_path, ctx_commit_hash, relative_trc_path, ctx_commit_hash, branch_name
                     break  # Exit processing on return
                 else:
                     raise UnknownOperationError(f"Unknown operation: {operation_name}")
@@ -252,6 +255,7 @@ def run(filename: str, param_node: Optional[Union[Node, AST]] = None, create_new
         trc_output_file = os.path.join(file_dir, trc_filename)
         
         relative_ctx_path = os.path.relpath(output_file, base_dir)
+        relative_trc_path = os.path.relpath(trc_output_file, base_dir)
         
         render_ast_to_markdown(ast, output_file)
         render_ast_to_trace(ast, trc_output_file)
@@ -259,16 +263,20 @@ def run(filename: str, param_node: Optional[Union[Node, AST]] = None, create_new
         ctx_commit_hash = commit_changes(
             base_dir,
             "Final processed files",
-            [local_file_name, ctx_filename],
+            [local_file_name, ctx_filename, trc_filename],  # Include trc_filename in commit
             p_parent_filename,
             p_parent_operation
         )
         console.print(f"[light_green]✓[/light_green] git. main context commited: [light_green]{ctx_filename}[/light_green]")
+        console.print(f"[light_green]✓[/light_green] git. trace file commited: [light_green]{trc_filename}[/light_green]")
 
+        # Update node with ctx and trc file information
         new_node.ctx_file = relative_ctx_path
         new_node.ctx_commit_hash = ctx_commit_hash
+        new_node.trc_file = relative_trc_path
+        new_node.trc_commit_hash = ctx_commit_hash  # Same commit hash as ctx
 
-        return ast, new_node, relative_ctx_path, ctx_commit_hash, branch_name
+        return ast, new_node, relative_ctx_path, ctx_commit_hash, relative_trc_path, ctx_commit_hash, branch_name
 
     except Exception as e:
         import traceback
@@ -296,24 +304,33 @@ def run(filename: str, param_node: Optional[Union[Node, AST]] = None, create_new
         ctx_commit_hash = commit_changes(
             base_dir,
             "Exception caught: appended traceback",
-            [local_file_name, ctx_filename],
+            [local_file_name, ctx_filename, trc_filename],  # Include trc_filename
             p_parent_filename,
             p_parent_operation
         )
+        
+        relative_ctx_path = get_relative_path(base_dir, output_file)
+        relative_trc_path = get_relative_path(base_dir, trc_output_file)
+        
         console.print(f"[bright_red]✓[/bright_red] git. context commited with exception info: [bright_red]{ctx_filename}[/bright_red]")
+        console.print(f"[bright_red]✓[/bright_red] git. trace file commited with exception info: [bright_red]{trc_filename}[/bright_red]")
 
-        # Make sure new_node references updated ctx_file data
-        new_node.ctx_file = get_relative_path(base_dir, output_file)
+        # Make sure new_node references updated ctx_file and trc_file data
+        new_node.ctx_file = relative_ctx_path
         new_node.ctx_commit_hash = ctx_commit_hash
+        new_node.trc_file = relative_trc_path
+        new_node.trc_commit_hash = ctx_commit_hash  # Same commit hash as ctx
 
-        # Return results back to fractalic
-        return ast, new_node, new_node.ctx_file, ctx_commit_hash, branch_name
+        # Return results back to fractalic with trace information
+        return ast, new_node, new_node.ctx_file, ctx_commit_hash, new_node.trc_file, new_node.trc_commit_hash, branch_name
+
+
 
     finally:
         os.chdir(original_cwd)
 
 def process_run(ast: AST, current_node: Node, local_file_name, parent_operation, call_tree_node,
-                committed_files=None, file_commit_hashes=None, base_dir=None) -> Optional[Tuple[Node, CallTreeNode, str, str]]:
+                committed_files=None, file_commit_hashes=None, base_dir=None) -> Optional[Tuple[Node, CallTreeNode, str, str, str, str, str]]:
     params = current_node.params
     if not params:
         raise ValueError("No parameters found for @run operation.")
@@ -339,10 +356,6 @@ def process_run(ast: AST, current_node: Node, local_file_name, parent_operation,
     nested_flag = block_params.get('nested_flag', False)
     use_header = params.get('use-header')
 
-    # Validate prompt and block are not both specified
-    # if prompt and block_uri:
-    #     raise ValueError("Cannot specify both 'prompt' and 'block' parameters")
-    
     # Create an empty input AST that will hold all input blocks
     input_ast = None
     
@@ -378,6 +391,7 @@ def process_run(ast: AST, current_node: Node, local_file_name, parent_operation,
                 # Handle single block (existing logic)
                 block_uri = block_params.get('block_uri')
                 nested_flag = block_params.get('nested_flag', False)
+                
                 block_ast = get_ast_part_by_path(ast, block_uri, nested_flag)
                 if not block_ast.parser.nodes:
                     raise BlockNotFoundError(f"Block with path '{block_uri}' is empty.")
@@ -451,7 +465,7 @@ def process_run(ast: AST, current_node: Node, local_file_name, parent_operation,
 
     # Execute run
     if input_ast and input_ast.parser.nodes:
-        run_result, child_call_tree_node, ctx_file, ctx_file_hash, branch_name = run(
+        run_result, child_call_tree_node, ctx_file, ctx_file_hash, trc_file, trc_file_hash, branch_name = run(
             source_path,
             input_ast,  # Pass the complete input AST
             False,
@@ -463,7 +477,7 @@ def process_run(ast: AST, current_node: Node, local_file_name, parent_operation,
             base_dir=base_dir
         )
     else:
-        run_result, child_call_tree_node, ctx_file, ctx_file_hash, branch_name = run(
+        run_result, child_call_tree_node, ctx_file, ctx_file_hash, trc_file, trc_file_hash, branch_name = run(
             source_path,
             None,
             False,
@@ -499,4 +513,4 @@ def process_run(ast: AST, current_node: Node, local_file_name, parent_operation,
             False
         )
 
-    return current_node.next, child_call_tree_node, ctx_file, ctx_file_hash
+    return current_node.next, child_call_tree_node, ctx_file, ctx_file_hash, trc_file, trc_file_hash

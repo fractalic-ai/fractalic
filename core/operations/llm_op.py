@@ -38,11 +38,16 @@ def process_llm(ast: AST, current_node: Node) -> Optional[Node]:
         messages = []
         current = ast.first()
         while current and current != node:
+
+            # TODO: this regulates visibility/exclusion of operation blocks for LLM
+            # it should be controlled by settings and explicit params
+            # this is needed for autonomous LLM execution
+            
             if current.type == NodeType.HEADING:
-                # Use the node's role attribute, defaulting to "user" if not specified
+            # Use the node's role attribute, defaulting to "user" if not specified
                 role = getattr(current, "role", "user")
                 messages.append({"role": role, "content": current.content})
-    
+        
             current = current.next
         return messages
     
