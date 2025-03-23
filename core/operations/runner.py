@@ -355,6 +355,9 @@ def process_run(ast: AST, current_node: Node, local_file_name, parent_operation,
     block_uri = block_params.get('block_uri', '')
     nested_flag = block_params.get('nested_flag', False)
     use_header = params.get('use-header')
+    
+    # Initialize parameter_value to avoid UnboundLocalError
+    parameter_value = None
 
     # Create an empty input AST that will hold all input blocks
     input_ast = None
