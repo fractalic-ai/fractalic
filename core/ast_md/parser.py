@@ -530,13 +530,13 @@ def parse_document(text: str, schema_text: str) -> List[Any]:
         line = l.rstrip('\n')
 
         # Heading Block Detection
-        if re.match(r'^#+ ', line) and parsing_state != 'operation_block':
+        if re.match(r'^#+ ', line) and parsing_state != 'operation_block' and (previous_line is None or previous_line.strip() == ''):
             parsing_state = 'heading_block'
             level = len(line) - len(line.lstrip('#'))
-            heading_line = line# line[level:].strip()
+            heading_line = line
             m = re.match(r'^(.*?)\s*(\{id=([a-zA-Z][a-zA-Z0-9\-_]*)\})?$', heading_line)
             if m:
-                title = heading_line# m.group(1).strip()
+                title = heading_line
                 id_value = m.group(3)
             else:
                 title = heading_line
@@ -545,7 +545,7 @@ def parse_document(text: str, schema_text: str) -> List[Any]:
                 level=level,
                 title=title,
                 id=id_value,
-                content=heading_line+'\n'#''
+                content=heading_line+'\n'
             )
             blocks.append(current_block)
             parsing_state = 'heading_block'
