@@ -97,12 +97,20 @@ def main():
                        default=default_operation)
     parser.add_argument('--param_input_user_request', type=str,
                        help='Part path for ParamInput-UserRequest', default=None)
+    parser.add_argument('-v', '--show-operations', action='store_true',
+                       help='Make operations visible to LLM (overrides TOML setting)')
 
     args = parser.parse_args()
 
     try:
         provider, api_key, provider_settings = setup_provider_config(args, settings)
-
+        
+        # Update TOML settings if show-operations flag is explicitly set
+        if args.show_operations:
+            if 'settings' not in settings:
+                settings['settings'] = {}
+            settings['settings']['enableOperationsVisibility'] = True
+        
         Config.TOML_SETTINGS = settings
         Config.LLM_PROVIDER = provider
         Config.API_KEY = api_key
