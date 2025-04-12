@@ -37,21 +37,21 @@ def process_llm(ast: AST, current_node: Node) -> Optional[Node]:
         """Return a list of messages for each heading node encountered before the given node."""
         messages = []
         current = ast.first()
+        
+        # Get the enableOperationsVisibility setting from Config
+        enable_operations_visibility = Config.TOML_SETTINGS.get('settings', {}).get('enableOperationsVisibility', False)
+        
         while current and current != node:
-
-            # TODO: this regulates visibility/exclusion of operation blocks for LLM
-            # it should be controlled by settings and explicit params
-            # this is needed for autonomous LLM execution
-            
-            if current.type == NodeType.HEADING:
-            # Use the node's role attribute, defaulting to "user" if not specified
+            # If enableOperationsVisibility is True, include all nodes
+            # Otherwise, only include HEADING nodes (original behavior)
+            if enable_operations_visibility or current.type == NodeType.HEADING:
+                # Use the node's role attribute, defaulting to "user" if not specified
                 role = getattr(current, "role", "user")
                 messages.append({"role": role, "content": current.content})
         
             current = current.next
         return messages
     
-
 
     # Get parameters
     params = current_node.params or {}
