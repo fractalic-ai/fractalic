@@ -38,9 +38,10 @@ def process_llm(ast: AST, current_node: Node) -> Optional[Node]:
         messages = []
         current = ast.first()
         
-        # Get the enableOperationsVisibility setting from Config
-        enable_operations_visibility = Config.TOML_SETTINGS.get('settings', {}).get('enableOperationsVisibility', False)
-        
+        # Get the enableOperationsVisibility setting from Config - fixed to look in runtime section
+        enable_operations_visibility = Config.TOML_SETTINGS.get('runtime', {}).get('enableOperationsVisibility', False)
+        # print(f"enableOperationsVisibility: {enable_operations_visibility}")
+
         while current and current != node:
             # If enableOperationsVisibility is True, include all nodes
             # Otherwise, only include HEADING nodes (original behavior)
