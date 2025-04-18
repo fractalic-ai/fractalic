@@ -39,7 +39,8 @@ def print_ast_state(ast):
 
 def run(filename: str, param_node: Optional[Union[Node, AST]] = None, create_new_branch: bool = True,
         p_parent_filename=None, p_parent_operation: str = None, p_call_tree_node=None,
-        committed_files=None, file_commit_hashes=None, base_dir=None) -> Tuple[AST, CallTreeNode, str, str, str, str, str]:
+        committed_files=None, file_commit_hashes=None, base_dir=None) -> Tuple[AST, CallTreeNode, str, str, str, str, str, bool]:
+    """Modified return signature to include the return_mode flag at the end."""
  
     console = Console(force_terminal=True, color_system="auto")
     if committed_files is None:
@@ -57,6 +58,9 @@ def run(filename: str, param_node: Optional[Union[Node, AST]] = None, create_new
     goto_count = {}
     branch_name = None
     original_cwd = os.getcwd()
+    
+    # Flag to track if execution ended with @return operation
+    explicit_return = False
     
     try:
         os.chdir(file_dir)
@@ -94,8 +98,6 @@ def run(filename: str, param_node: Optional[Union[Node, AST]] = None, create_new
         # RESTORING LOGIC  
         # Process the AST
         try:
-            
-            
             ast = parse_file(local_file_name)
             
             # Runner py run logic created_by_file setup
@@ -143,10 +145,6 @@ def run(filename: str, param_node: Optional[Union[Node, AST]] = None, create_new
             )
             p_call_tree_node.add_child(new_node)
 
-
-
-        
-
         if param_node:
             if isinstance(param_node, AST):
                 ast.prepend_node_with_ast(ast.first().key, param_node)
@@ -155,7 +153,6 @@ def run(filename: str, param_node: Optional[Union[Node, AST]] = None, create_new
                     type=NodeType.HEADING,
                     name="Input Parameters",
                     level=1,
-                    #content=f"# Input Parameters\n{get_content_without_header(param_node)}",
                     content=f"{param_node.content}",
                     id="InputParameters",
                     key=str(uuid.uuid4())[:8]
@@ -167,24 +164,14 @@ def run(filename: str, param_node: Optional[Union[Node, AST]] = None, create_new
                 ast.prepend_node_with_ast(ast.first().key, param_ast)
 
         # RESTORING LOGIC
-        # moved operation, was before this block
         current_node = ast.first()
 
         while current_node:
-
             # Skip processing if the node is disabled
             if hasattr(current_node, 'enabled') and current_node.enabled is False:
                 current_node = current_node.next
                 continue
             
-            # Print the current AST state
-            # print("--------------")
-            # print_ast_state(ast)
-            # print("--------------") 
-
-            # If the node's parameters include a run-once flag, disable the node for future runs
-            # print(f'[DEBUG runner.py] Current node run_once: {current_node.params.get("run-once") if current_node.params else None}')
-
             if current_node.params and current_node.params.get("run-once") is True:
                 current_node.enabled = False
 
@@ -193,7 +180,7 @@ def run(filename: str, param_node: Optional[Union[Node, AST]] = None, create_new
                 if operation_name == "@import":
                     current_node = process_import(ast, current_node)
                 elif operation_name == "@run":
-                    current_node, child_node, run_ctx_file, run_ctx_hash, run_trc_file, run_trc_hash = process_run(
+                    current_node, child_node, run_ctx_file, run_ctx_hash, run_trc_file, run_trc_hash, _, child_explicit_return = process_run(
                         ast,
                         current_node,
                         local_file_name,
@@ -224,7 +211,6 @@ def run(filename: str, param_node: Optional[Union[Node, AST]] = None, create_new
                         render_ast_to_markdown(ast, output_file)
                         render_ast_to_trace(ast, trc_output_file)
 
-                        #print(f"[DEBUG runner.py] Committing return operation files")
                         ctx_commit_hash = commit_changes(
                             base_dir,
                             "@return operation",
@@ -241,7 +227,9 @@ def run(filename: str, param_node: Optional[Union[Node, AST]] = None, create_new
                         new_node.trc_file = relative_trc_path
                         new_node.trc_commit_hash = ctx_commit_hash  # Same commit hash as ctx
 
-                        return return_result, new_node, relative_ctx_path, ctx_commit_hash, relative_trc_path, ctx_commit_hash, branch_name
+                        # Set explicit return flag to True
+                        explicit_return = True
+                        return return_result, new_node, relative_ctx_path, ctx_commit_hash, relative_trc_path, ctx_commit_hash, branch_name, explicit_return
                     break  # Exit processing on return
                 else:
                     raise UnknownOperationError(f"Unknown operation: {operation_name}")
@@ -276,7 +264,7 @@ def run(filename: str, param_node: Optional[Union[Node, AST]] = None, create_new
         new_node.trc_file = relative_trc_path
         new_node.trc_commit_hash = ctx_commit_hash  # Same commit hash as ctx
 
-        return ast, new_node, relative_ctx_path, ctx_commit_hash, relative_trc_path, ctx_commit_hash, branch_name
+        return ast, new_node, relative_ctx_path, ctx_commit_hash, relative_trc_path, ctx_commit_hash, branch_name, explicit_return
 
     except Exception as e:
         import traceback
@@ -322,15 +310,15 @@ def run(filename: str, param_node: Optional[Union[Node, AST]] = None, create_new
         new_node.trc_commit_hash = ctx_commit_hash  # Same commit hash as ctx
 
         # Return results back to fractalic with trace information
-        return ast, new_node, new_node.ctx_file, ctx_commit_hash, new_node.trc_file, new_node.trc_commit_hash, branch_name
-
-
+        return ast, new_node, new_node.ctx_file, ctx_commit_hash, new_node.trc_file, new_node.trc_commit_hash, branch_name, explicit_return
 
     finally:
         os.chdir(original_cwd)
 
 def process_run(ast: AST, current_node: Node, local_file_name, parent_operation, call_tree_node,
-                committed_files=None, file_commit_hashes=None, base_dir=None) -> Optional[Tuple[Node, CallTreeNode, str, str, str, str, str]]:
+                committed_files=None, file_commit_hashes=None, base_dir=None) -> Optional[Tuple[Node, CallTreeNode, str, str, str, str, str, bool]]:
+    """Modified return signature to include explicit_return flag."""
+    
     params = current_node.params
     if not params:
         raise ValueError("No parameters found for @run operation.")
@@ -422,7 +410,6 @@ def process_run(ast: AST, current_node: Node, local_file_name, parent_operation,
             role="user",
             key=str(uuid.uuid4())[:8],
             created_by = current_node.key, # Store the key of the operation node that triggered this response
-            # here we need to store the path of parent file file path for this run operation
             created_by_file = local_file_name
         )
         
@@ -466,9 +453,9 @@ def process_run(ast: AST, current_node: Node, local_file_name, parent_operation,
             key=str(uuid.uuid4())[:8]
         )
 
-    # Execute run
+    # Execute run with updated return signature
     if input_ast and input_ast.parser.nodes:
-        run_result, child_call_tree_node, ctx_file, ctx_file_hash, trc_file, trc_file_hash, branch_name = run(
+        run_result, child_call_tree_node, ctx_file, ctx_file_hash, trc_file, trc_file_hash, branch_name, explicit_return = run(
             source_path,
             input_ast,  # Pass the complete input AST
             False,
@@ -480,7 +467,7 @@ def process_run(ast: AST, current_node: Node, local_file_name, parent_operation,
             base_dir=base_dir
         )
     else:
-        run_result, child_call_tree_node, ctx_file, ctx_file_hash, trc_file, trc_file_hash, branch_name = run(
+        run_result, child_call_tree_node, ctx_file, ctx_file_hash, trc_file, trc_file_hash, branch_name, explicit_return = run(
             source_path,
             None,
             False,
@@ -516,4 +503,5 @@ def process_run(ast: AST, current_node: Node, local_file_name, parent_operation,
             False
         )
 
-    return current_node.next, child_call_tree_node, ctx_file, ctx_file_hash, trc_file, trc_file_hash
+    # Return the explicit_return flag as well
+    return current_node.next, child_call_tree_node, ctx_file, ctx_file_hash, trc_file, trc_file_hash, branch_name, explicit_return

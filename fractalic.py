@@ -16,6 +16,7 @@ from core.utils import read_file
 from core.operations.runner import run
 from core.operations.call_tree import CallTreeNode
 from core.errors import BlockNotFoundError, UnknownOperationError
+from core.render.render_ast import render_ast_to_markdown
 
 from rich.console import Console
 from rich.panel import Panel
@@ -127,13 +128,13 @@ def main():
                 
             temp_ast = parse_file(args.task_file)
             param_node = temp_ast.get_part_by_path(args.param_input_user_request, True)
-            result_nodes, call_tree_root, ctx_file, ctx_hash, trc_file, trc_hash, branch_name = run(
+            result_nodes, call_tree_root, ctx_file, ctx_hash, trc_file, trc_hash, branch_name, explicit_return = run(
                 args.input_file,
                 param_node,
                 p_call_tree_node=None
             )
         else:
-            result_nodes, call_tree_root, ctx_file, ctx_hash, trc_file, trc_hash, branch_name = run(
+            result_nodes, call_tree_root, ctx_file, ctx_hash, trc_file, trc_hash, branch_name, explicit_return = run(
                 args.input_file,
                 p_call_tree_node=None
             )
@@ -160,6 +161,23 @@ def main():
 
         # Send message to UI for branch information
         print(f"[EventMessage: Root-Context-Saved] ID: {branch_name}, {ctx_hash}")
+        
+        # Log information about how the workflow completed
+        if explicit_return:
+            print(f"[EventMessage: Execution-Mode] Explicit @return operation")
+            print(f"[EventMessage: Return-Nodes-Count] {len(result_nodes.parser.nodes)}")
+            
+            # Print the content of the returned AST
+            print("\n[EventMessage: Return-Content-Start]")
+            # Print each node's content in sequence
+            current_node = result_nodes.first()
+            while current_node:
+                print(current_node.content)
+                current_node = current_node.next
+            print("[EventMessage: Return-Content-End]\n")
+        else:
+            print(f"[EventMessage: Execution-Mode] Natural workflow completion")
+            # No need to print the full AST for natural completion as it's already in the .ctx file
 
     except (BlockNotFoundError, UnknownOperationError, FileNotFoundError, ValueError) as e:
         print(f"[ERROR fractalic.py] {str(e)}")
