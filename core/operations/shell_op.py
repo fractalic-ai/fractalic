@@ -128,7 +128,7 @@ def process_shell(ast: AST, current_node: Node) -> Optional[Node]:
     # to set the 'created_by_file' attribute. This ensures that each node knows its origin.
     # The value should be the file path of the current file being processed.
     for node_key, node in response_ast.parser.nodes.items():
-        node.role = "assistant"
+        node.role = "user"
         node.created_by = current_node.key  # Store the ID of the operation node that triggered this response
         node.created_by_file = current_node.created_by_file # set the file path
 
