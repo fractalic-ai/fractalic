@@ -149,7 +149,7 @@ class anthropicclient:
         max_tokens = self.settings.get('contextSize', 8192)
         temperature = operation_params.get('temperature', self.settings.get('temperature', 0.0)) if operation_params else self.settings.get('temperature', 0.0)
         system_prompt = self.settings.get('systemPrompt', "")
-        # streaming flag
+        # streaming flag (set to true always in llmop)
         stream = operation_params.get('stream', False) if operation_params else False
         
         # Prepare API call based on input type
