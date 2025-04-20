@@ -14,6 +14,8 @@ from rich.console import Console
 from rich.spinner import Spinner
 from rich import print
 from rich.status import Status
+from rich.panel import Panel
+from rich.box import SQUARE
 
 # Assuming LLM_PROVIDER and API_KEY are globally set in fractalic.py
 # You can initialize LLMClient here if it's a singleton
@@ -144,19 +146,15 @@ def process_llm(ast: AST, current_node: Node) -> Optional[Node]:
     llm_client = LLMClient(provider=llm_provider, model=llm_model)
     actual_model = model or (getattr(llm_client.client, "settings", {}).get("model"))
 
-    # Determine whether to use messages or prompt_text
-    #use_messages = params.get('use_messages', False) and len(messages) > 0
-    #llm_input = messages if use_messages else prompt_text
+    # Always enable streaming
+    params['stream'] = True
+
+    # Print a simple header for the LLM call
+    console.print(f"[cyan]@llm ({llm_provider}/{actual_model}) streaming...[/cyan]")
 
     start_time = time.time()
     try:
-        with console.status(
-            f"[cyan] @llm [turquoise2]({llm_provider}/{actual_model}"
-            f"{('/' + llm_client.base_url) if hasattr(llm_client, 'base_url') and llm_client.base_url else ''})[/turquoise2]"
-            f"[/cyan] processing...",
-            spinner="dots"
-        ) as status:
-            response = llm_client.llm_call(prompt_text, messages, params)
+        response = llm_client.llm_call(prompt_text, messages, params)
 
         # Store the raw response on the current node for export
         current_node.response_content = response

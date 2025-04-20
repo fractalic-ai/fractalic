@@ -8,6 +8,9 @@ from rich.box import ASCII
 import imghdr
 from PIL import Image
 import io
+import sys  # for streaming print
+from rich.console import Console
+from rich.live import Live
 
 SUPPORTED_MEDIA_TYPES = {
     'image/jpeg': ['jpeg', 'jpg'],
@@ -144,8 +147,10 @@ class anthropicclient:
     def llm_call(self, prompt_text: str, messages: list = None, operation_params: dict = None, model: str = None) -> str:
         model = model or self.settings.get('model', "claude-3-5-sonnet-20241022")
         max_tokens = self.settings.get('contextSize', 8192)
-        temperature = operation_params.get('temperature', self.settings.get('temperature', 0.0))
+        temperature = operation_params.get('temperature', self.settings.get('temperature', 0.0)) if operation_params else self.settings.get('temperature', 0.0)
         system_prompt = self.settings.get('systemPrompt', "")
+        # streaming flag
+        stream = operation_params.get('stream', False) if operation_params else False
         
         # Prepare API call based on input type
         if messages and len(messages) > 0:
@@ -160,8 +165,7 @@ class anthropicclient:
             # Convert other messages to Anthropic format
             for msg in messages:
                 if msg.get('role') == 'system':
-                    continue  # System message handled separately
-                    
+                    continue
                 anthropic_messages.append({
                     "role": msg.get('role'),
                     "content": [{"type": "text", "text": msg.get('content')}]
@@ -170,20 +174,44 @@ class anthropicclient:
             # Add media if exists
             if operation_params and 'media' in operation_params:
                 for i, media_path in enumerate(operation_params['media']):
-                    # Find the first user message to attach media to
                     for j, msg in enumerate(anthropic_messages):
                         if msg.get('role') == 'user':
-                            # Insert media before text in this message
                             anthropic_messages[j]['content'].insert(0, self._load_media(media_path))
                             break
-                            
-            response = self.client.messages.create(
-                model=model,
-                messages=anthropic_messages,
-                system=api_system_prompt,
-                max_tokens=max_tokens,
-                temperature=temperature
-            )
+            
+            # call with or without streaming
+            if stream:
+                console = Console()
+                response_text = ""
+                stream_resp = self.client.messages.create(
+                    model=model,
+                    messages=anthropic_messages,
+                    system=api_system_prompt,
+                    max_tokens=max_tokens,
+                    temperature=temperature,
+                    stream=True
+                )
+                for event in stream_resp:
+                    text = None
+                    if hasattr(event, "type"):
+                        if event.type == "content_block_delta":
+                            if hasattr(event, "delta") and hasattr(event.delta, "text"):
+                                text = event.delta.text
+                        elif event.type == "completion":
+                            text = getattr(event, "completion", None)
+                    if text:
+                        response_text += text
+                        console.print(text, end="", highlight=False)
+                console.print()  # newline after streaming
+                return response_text
+            else:
+                response = self.client.messages.create(
+                    model=model,
+                    messages=anthropic_messages,
+                    system=api_system_prompt,
+                    max_tokens=max_tokens,
+                    temperature=temperature
+                )
         else:
             # Traditional approach with prompt_text
             content = []
@@ -198,14 +226,39 @@ class anthropicclient:
                 "type": "text",
                 "text": prompt_text
             })
-            
-            response = self.client.messages.create(
-                model=model,
-                system=system_prompt,
-                max_tokens=max_tokens,
-                temperature=temperature,
-                messages=[{"role": "user", "content": content}]
-            )
-        
+            # call with or without streaming
+            if stream:
+                console = Console()
+                response_text = ""
+                stream_resp = self.client.messages.create(
+                    model=model,
+                    system=system_prompt,
+                    max_tokens=max_tokens,
+                    temperature=temperature,
+                    messages=[{"role": "user", "content": content}],
+                    stream=True
+                )
+                for event in stream_resp:
+                    text = None
+                    if hasattr(event, "type"):
+                        if event.type == "content_block_delta":
+                            if hasattr(event, "delta") and hasattr(event.delta, "text"):
+                                text = event.delta.text
+                        elif event.type == "completion":
+                            text = getattr(event, "completion", None)
+                    if text:
+                        response_text += text
+                        console.print(text, end="", highlight=False)
+                console.print()
+                return response_text
+            else:
+                response = self.client.messages.create(
+                    model=model,
+                    system=system_prompt,
+                    max_tokens=max_tokens,
+                    temperature=temperature,
+                    messages=[{"role": "user", "content": content}]
+                )
+        # non-streaming return
         return response.content[0].text
 
