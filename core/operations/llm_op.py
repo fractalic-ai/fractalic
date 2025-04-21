@@ -198,16 +198,6 @@ def process_llm(ast: AST, current_node: Node) -> Optional[Node]:
         node.created_by = current_node.key  # Store the ID of the operation node that triggered this response
         node.created_by_file = current_node.created_by_file # set the file path
         
-    llm_response_ast = AST(f"{header}{response}\n")
-
-    # Llm_op.py process_llm logic created_by_file setup
-    # After creating the AST from the LLM's response, iterate through all nodes in the AST
-    # to set the 'created_by_file' attribute. This ensures that each node knows its origin.
-    # The value should be the file path of the current file being processed.
-    for node_key, node in llm_response_ast.parser.nodes.items():
-        node.role = "assistant"
-        node.created_by = current_node.key  # Store the ID of the operation node that triggered this response
-        node.created_by_file = current_node.created_by_file # set the file path
 
     # Handle target block insertion
     operation_type = OperationType(params.get('mode', Config.DEFAULT_OPERATION))
