@@ -107,6 +107,11 @@ operations:
         type: boolean
         default: false
         description: "Whether this operation should only run once."
+      stop-sequences:
+        type: array
+        items:
+          type: string
+        description: "List of strings where the model should stop generation (for Anthropic models it maps to stop_sequences parameter)."
     anyOf:
       - required: ["prompt"]
       - required: ["block"]

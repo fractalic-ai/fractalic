@@ -65,6 +65,11 @@ def process_llm(ast: AST, current_node: Node) -> Optional[Node]:
     provider = params.get('provider')
     model = params.get('model')
 
+    # Map the new stop-sequences parameter into stop_sequences for the LLM client
+    stop_seqs = params.get('stop-sequences')
+    if stop_seqs:
+        params['stop_sequences'] = stop_seqs
+
     # Validate at least one of prompt/block is provided
     if not prompt and not block_params:
         raise ValueError("@llm operation requires either 'prompt' or 'block' parameter")

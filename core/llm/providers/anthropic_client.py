@@ -145,12 +145,15 @@ class anthropicclient:
             raise
 
     def llm_call(self, prompt_text: str, messages: list = None, operation_params: dict = None, model: str = None) -> str:
+
+  
         model = model or self.settings.get('model', "claude-3-5-sonnet-20241022")
         max_tokens = self.settings.get('contextSize', 8192)
         temperature = operation_params.get('temperature', self.settings.get('temperature', 0.0)) if operation_params else self.settings.get('temperature', 0.0)
         system_prompt = self.settings.get('systemPrompt', "")
         # streaming flag (set to true always in llmop)
         stream = operation_params.get('stream', False) if operation_params else False
+        stop_sequences = operation_params.get('stop_sequences') if operation_params else None
         
         # Prepare API call based on input type
         if messages and len(messages) > 0:
@@ -189,6 +192,7 @@ class anthropicclient:
                     system=api_system_prompt,
                     max_tokens=max_tokens,
                     temperature=temperature,
+                    stop_sequences=stop_sequences,
                     stream=True
                 )
                 for event in stream_resp:
@@ -197,8 +201,16 @@ class anthropicclient:
                         if event.type == "content_block_delta":
                             if hasattr(event, "delta") and hasattr(event.delta, "text"):
                                 text = event.delta.text
-                        elif event.type == "completion":
-                            text = getattr(event, "completion", None)
+                        elif event.type == "message_delta":
+                            # Check for stop sequence in message_delta events
+                            if hasattr(event, "delta") and hasattr(event.delta, "stop_sequence") and event.delta.stop_sequence:
+                                # Remove the stop sequence from the response_text if it was added
+                                stop_seq = event.delta.stop_sequence
+                                if response_text.endswith(stop_seq):
+                                    response_text = response_text[:-len(stop_seq)]
+                                    # Erase the last printed stop sequence from terminal
+                                    console.print(f"\r{' ' * len(stop_seq)}\r", end="")
+                                console.print(f"[bold red]\n[Stopped on sequence: '{stop_seq}'][/bold red]")
                     if text:
                         response_text += text
                         console.print(text, end="", highlight=False)
@@ -210,7 +222,8 @@ class anthropicclient:
                     messages=anthropic_messages,
                     system=api_system_prompt,
                     max_tokens=max_tokens,
-                    temperature=temperature
+                    temperature=temperature,
+                    stop_sequences=stop_sequences
                 )
         else:
             # Traditional approach with prompt_text
@@ -235,6 +248,7 @@ class anthropicclient:
                     system=system_prompt,
                     max_tokens=max_tokens,
                     temperature=temperature,
+                    stop_sequences=stop_sequences,
                     messages=[{"role": "user", "content": content}],
                     stream=True
                 )
@@ -244,8 +258,16 @@ class anthropicclient:
                         if event.type == "content_block_delta":
                             if hasattr(event, "delta") and hasattr(event.delta, "text"):
                                 text = event.delta.text
-                        elif event.type == "completion":
-                            text = getattr(event, "completion", None)
+                        elif event.type == "message_delta":
+                            # Check for stop sequence in message_delta events
+                            if hasattr(event, "delta") and hasattr(event.delta, "stop_sequence") and event.delta.stop_sequence:
+                                # Remove the stop sequence from the response_text if it was added
+                                stop_seq = event.delta.stop_sequence
+                                if response_text.endswith(stop_seq):
+                                    response_text = response_text[:-len(stop_seq)]
+                                    # Erase the last printed stop sequence from terminal
+                                    console.print(f"\r{' ' * len(stop_seq)}\r", end="")
+                                console.print(f"[orange3]\n[Stopped on sequence: '{stop_seq}'][/orange3]")
                     if text:
                         response_text += text
                         console.print(text, end="", highlight=False)
@@ -257,6 +279,7 @@ class anthropicclient:
                     system=system_prompt,
                     max_tokens=max_tokens,
                     temperature=temperature,
+                    stop_sequences=stop_sequences,
                     messages=[{"role": "user", "content": content}]
                 )
         # non-streaming return
