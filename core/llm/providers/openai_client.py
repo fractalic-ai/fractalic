@@ -219,11 +219,7 @@ class liteclient:
 
     # -----------------------------------------------------------------
     def _provider(self, op: Dict[str, Any]) -> str:
-        if "provider" in op:                       # explicit override
-            return op["provider"].lower()
-        if "/" in self.model:                      # e.g. openai/gpt-4o
-            return self.model.split("/", 1)[0].lower()
-        return "openai"                            # default if no prefix
+        return "openai"
 
     # -----------------------------------------------------------------
     def llm_call(

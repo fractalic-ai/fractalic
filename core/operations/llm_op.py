@@ -148,7 +148,7 @@ def process_llm(ast: AST, current_node: Node) -> Optional[Node]:
     # Call LLM - use messages if available, otherwise fall back to prompt_text
     llm_provider = provider if provider else Config.LLM_PROVIDER
     llm_model = model if model else Config.MODEL
-    llm_client = LLMClient(provider=llm_provider, model=llm_model)
+    llm_client = LLMClient(model=llm_model)
     actual_model = model or (getattr(llm_client.client, "settings", {}).get("model"))
 
     # Always enable streaming

@@ -29,58 +29,61 @@ sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8')
 original_open = open
 
 def setup_provider_config(args, settings):
-    """Setup provider configuration with proper error handling."""
-    # Define provider to environment variable mapping
-    PROVIDER_API_KEYS = {
-        'openai': 'OPENAI_API_KEY',
-        'anthropic': 'ANTHROPIC_API_KEY',
-        'groq': 'GROQ_API_KEY'
+    raw_model = args.model or settings.get("defaultProvider")
+    if not raw_model:
+        raise ValueError("No model specified via --model or defaultProvider in settings.toml")
+
+    all_models = settings.get("settings", {})
+    model_key = None
+
+    # 1) direct match on the table key
+    if raw_model in all_models:
+        model_key = raw_model
+    else:
+        # 2) match against each record's "model" field (and common variants)
+        for key, conf in all_models.items():
+            name = conf.get("model", key)
+            if raw_model == name \
+               or raw_model == name.replace(".", "-") \
+               or raw_model == name.replace(".", "_"):
+                model_key = key
+                break
+        # 3) fallback: sanitize CLI string to table keys
+        if model_key is None:
+            for alt in (raw_model.replace(".", "-"), raw_model.replace(".", "_")):
+                if alt in all_models:
+                    model_key = alt
+                    break
+
+    if model_key is None:
+        raise KeyError(
+            f'model "{raw_model}" not found under [settings]. '
+            f"Available models: {', '.join(all_models.keys())}"
+        )
+
+    # use the section name (anthropic/openrouter/openai) as provider
+    provider = model_key
+
+    provider_settings = all_models[model_key]
+    # ensure downstream sees the actual model name (with dots if present)
+    provider_settings = {
+        **provider_settings,
+        "model": provider_settings.get("model", model_key),
     }
-    
-    provider = args.provider.lower()
-    
-    # Validate provider
-    if provider not in PROVIDER_API_KEYS:
-        raise ValueError(f"Unsupported provider: {provider}")
-        
-    api_key_env_var = PROVIDER_API_KEYS[provider]
-    provider_settings = settings.get('settings', {}).get(provider, {})
-    
-    # API key precedence: 1) command line arg, 2) settings.toml, 3) environment variable
-    api_key = (args.api_key or 
-              provider_settings.get('apiKey') or 
-              os.getenv(api_key_env_var))
-    
-    # Log API key sources (without showing the actual keys)
-    console = Console(force_terminal=True, color_system="auto")
-    
-    def mask_key(key):
-        if key and len(key) > 7:
-            return f"{key[:5]}........{key[-2:]}"
-        return key if key else None
 
-    api_key_masked = mask_key(api_key)
-    console.print(f"\n[bold] Provider: [light_green]{provider}[/light_green][/bold]")
-    
-    if args.api_key:
-        console.print(f"[light_green]✓[/light_green] API key from arguments: [light_green]{api_key_masked}[/light_green]")
-    else:
-        console.print(f"[dim][red]✗[/red] API key from arguments[/dim]")
-        
-    if provider_settings.get('apiKey'):
-        console.print(f"[light_green]✓[/light_green] API key from settings.toml: [light_green]{api_key_masked}[/light_green]")
-    else:
-        console.print(f"[dim][red]✗[/red] API key from settings.toml[/dim]")
-        
-    if os.getenv(api_key_env_var):
-        console.print(f"[light_green]✓[/light_green] API key from environment variable {api_key_env_var}: [light_green]{api_key_masked}[/light_green]")
-    else:
-        console.print(f"[dim][red]✗[/red] API key from environment variable {api_key_env_var}[/dim]")
-
-    if not api_key:
-        raise ValueError(f"API key for {provider} must be provided either as an argument, in settings.toml, or through the {api_key_env_var} environment variable.")
-    
+    api_key = (
+        args.api_key
+        or provider_settings.get("apiKey")
+       # or os.getenv(PROVIDER_API_KEYS[provider])
+    )
     return provider, api_key, provider_settings
+
+def _mask_key(key: str) -> str:
+    if not key:
+        return ""
+    if len(key) <= 8:
+        return "*" * len(key)
+    return key[:4] + "*" * (10) + key[-4:]
 
 def main():
     settings = load_settings()  # Load settings.toml once
@@ -92,8 +95,10 @@ def main():
     parser.add_argument('input_file', type=str, help='Path to the input markdown file.')
     parser.add_argument('--task_file', type=str, help='Path to the task markdown file.')
     parser.add_argument('--api_key', type=str, help='LLM API key', default=None)
-    parser.add_argument('--provider', type=str, help='LLM provider (e.g., openai, anthropic, groq)',
-                       default=default_provider)
+    parser.add_argument(
+        "--model",
+        help="LLM model to use (overrides settings.defaultProvider)"
+    )
     parser.add_argument('--operation', type=str, help='Default operation to perform',
                        default=default_operation)
     parser.add_argument('--param_input_user_request', type=str,
@@ -116,6 +121,14 @@ def main():
         Config.LLM_PROVIDER = provider
         Config.API_KEY = api_key
         Config.DEFAULT_OPERATION = args.operation
+
+        console = Console()  # rich output manager
+
+        # show masked key and its source with icons
+        masked = _mask_key(api_key)
+        source = "CLI argument" if args.api_key else "settings.toml"
+        console.print(f"[bright_green]✓[/bright_green] Using provider [bold]{provider}[/bold], model [bold]{provider_settings.get('model')}[/bold]")
+        console.print(f"[bright_green]✓[/bright_green] API key [bold]{masked}[/bold] (from {source})")
 
         os.environ[f"{provider.upper()}_API_KEY"] = api_key
 
