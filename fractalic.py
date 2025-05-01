@@ -1,3 +1,11 @@
+import warnings
+warnings.filterwarnings(
+    "ignore",
+    message="Valid config keys have changed in V2:",  # match only the first line
+    category=UserWarning,
+    module="pydantic._internal._config",
+)
+
 import os
 import sys
 import io
@@ -27,6 +35,7 @@ sys.stdin = io.TextIOWrapper(sys.stdin.buffer, encoding='utf-8')
 sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8')
 
 original_open = open
+
 
 def setup_provider_config(args, settings):
     raw_model = args.model or settings.get("defaultProvider")

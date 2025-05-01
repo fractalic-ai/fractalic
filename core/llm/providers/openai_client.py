@@ -20,7 +20,15 @@ from rich.console import Console
 from litellm import completion                          # chat-completions + Responses
 import openai                                           # raw SDK for file upload
 import requests
+import warnings
 
+warnings.filterwarnings(
+    "ignore",
+    message="Valid config keys have changed in V2:.*'fields'",
+    category=UserWarning,
+    module="pydantic._internal._config"
+)
+logging.getLogger("LiteLLM").setLevel(logging.WARNING)
 logging.getLogger("httpx").setLevel(logging.WARNING)
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
