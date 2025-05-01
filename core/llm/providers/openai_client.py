@@ -192,7 +192,7 @@ def _embed_media(item: str | dict, provider: str, api_key: str) -> Dict[str, Any
 @dataclass
 class liteclient:
     api_key: str
-    model: str = "openai/gpt-4o-mini"
+    model: str # = "openai/gpt-4o-mini"
     temperature: float = 0.1
     top_p: float = 1.0
     max_tokens: Optional[int] = None
@@ -273,10 +273,7 @@ class liteclient:
         # ----------------------------------------------------------------
 
         # ------------ Chat-Completions branch -------------------------
-        if provider == "openai":
-            os.environ["OPENAI_API_KEY"] = self.api_key
-        elif provider == "anthropic":
-            os.environ["ANTHROPIC_API_KEY"] = self.api_key
+
 
         params = dict(
             model=op.get("model", self.model),
@@ -286,6 +283,7 @@ class liteclient:
             stop=op.get("stop_sequences"),
             stream=stream,
             tools=self.schema,
+            api_key= self.api_key
         )
 
         # ----- build messages -----
