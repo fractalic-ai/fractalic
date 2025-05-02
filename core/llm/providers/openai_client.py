@@ -21,6 +21,7 @@ from litellm import completion                          # chat-completions + Res
 import openai                                           # raw SDK for file upload
 import requests
 import warnings
+from core.plugins.tool_registry import ToolRegistry  # NEW import
 
 warnings.filterwarnings(
     "ignore",
@@ -41,38 +42,6 @@ SUPPORTED_MEDIA_TYPES = {
     "image/webp": ["webp"],
 }
 MAX_IMAGE_SIZE = 20 * 1024 * 1024  # 20 MB
-
-# ====================================================================
-#  Toolkit
-# ====================================================================
-class Toolkit(dict):
-    def register(self, name: Optional[str] = None):
-        def deco(fn: Callable):
-            self[name or fn.__name__] = fn
-            return fn
-        return deco
-
-    def generate_schema(self):
-        out = []
-        for n, fn in self.items():
-            ps = inspect.signature(fn).parameters
-            out.append({
-                "type": "function",
-                "function": {
-                    "name": n,
-                    "description": inspect.getdoc(fn) or f"Executes {n}.",
-                    "parameters": {
-                        "type": "object",
-                        "properties": {p: {"type": "string"} for p in ps},
-                        "required": [p for p, prm in ps.items()
-                                     if prm.default is inspect.Parameter.empty],
-                    },
-                },
-            })
-        return out
-
-
-toolkit = Toolkit()
 
 # ====================================================================
 #  Console
@@ -96,7 +65,7 @@ class ConsoleManager:
 #  Tool executor
 # ====================================================================
 class ToolExecutor:
-    def __init__(self, tk: Toolkit, ui: ConsoleManager):
+    def __init__(self, tk: ToolRegistry, ui: ConsoleManager):
         self.tk, self.ui = tk, ui
 
     def execute(self, fn: str, args_json: str) -> str:
@@ -207,7 +176,9 @@ class liteclient:
     system_prompt: str = "You are a helpful assistant."
     max_tool_turns: int = 5
     settings: Optional[Dict[str, Any]] = field(default=None, repr=False)
-    toolkit: Toolkit = field(default_factory=lambda: toolkit)
+    tools_dir: str | Path = "tools"  # NEW
+    mcp_servers: List[str] = field(default_factory=list)  # NEW
+    registry: ToolRegistry = field(init=False)  # NEW
 
     def __post_init__(self):
         if self.settings:
@@ -221,9 +192,14 @@ class liteclient:
                                        s.get("systemPrompt", self.system_prompt))
             self.max_tool_turns = s.get("max_tool_turns", self.max_tool_turns)
 
+        self.registry = ToolRegistry(self.tools_dir, self.mcp_servers)  # NEW
+        print(f"[DEBUG] ToolRegistry tools_dir: {self.registry.tools_dir.resolve()}")
+        # Debug print: show discovered tools and schema
+        print("[DEBUG] Discovered tools:", list(self.registry.keys()))
+        print("[DEBUG] Tool schema:", json.dumps(self.registry.generate_schema(), indent=2))
         self.ui = ConsoleManager()
-        self.exec = ToolExecutor(self.toolkit, self.ui)
-        self.schema = self.toolkit.generate_schema()
+        self.exec = ToolExecutor(self.registry, self.ui)  # registry replaces toolkit
+        self.schema = self.registry.generate_schema()  # registry replaces toolkit
 
     # -----------------------------------------------------------------
     def _provider(self, op: Dict[str, Any]) -> str:
@@ -363,33 +339,6 @@ class liteclient:
             params["messages"] = hist
 
         return "\n\n".join(convo)
-
-# ====================================================================
-#  Example tools
-# ====================================================================
-@toolkit.register("calculate")
-def calculate(expression: str):
-    """Safe arithmetic evaluation of a Python expression."""
-    try:
-        allowed = (ast.Expression, ast.Constant, ast.BinOp, ast.Add, ast.Sub,
-                   ast.Mult, ast.Div, ast.Pow, ast.USub)
-        tree = ast.parse(expression, mode="eval")
-        if all(isinstance(node, allowed) for node in ast.walk(tree)):
-            return {"result": eval(compile(tree, "", "eval"))}
-        return {"error": "Unsafe expression"}
-    except Exception as e:
-        return {"error": str(e)}
-
-
-@toolkit.register("get_weather")
-def get_weather(latitude: float, longitude: float):
-    """Fetch current temperature via open-meteos public API."""
-    try:
-        url = ("https://api.open-meteo.com/v1/forecast"
-               f"?latitude={latitude}&longitude={longitude}&current=temperature_2m")
-        return requests.get(url, timeout=10).json()
-    except Exception as e:
-        return {"error": str(e)}
 
 # -------- legacy alias --------
 openaiclient = liteclient
