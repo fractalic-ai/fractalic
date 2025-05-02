@@ -1,4 +1,5 @@
 import warnings
+# TODO: #5 remove warning supression when pydantic v2 is stable
 warnings.filterwarnings(
     "ignore",
     message="Valid config keys have changed in V2:",  # match only the first line
