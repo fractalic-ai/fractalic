@@ -20,9 +20,32 @@ from __future__ import annotations
 import json, sys, importlib, subprocess, yaml, textwrap
 from pathlib import Path
 from typing import Any, Dict, List, Callable, Optional
+import os
+import logging
 
 from .cli_introspect import sniff as sniff_cli
 from .mcp_client import list_tools as mcp_list, call_tool as mcp_call
+from core.config import Config
+
+# Add the missing ToolParameterParser class
+class ToolParameterParser:
+    """Convert tool parameters to command line arguments"""
+    def __init__(self, properties: Dict[str, Any]):
+        self.properties = properties
+    
+    def convert_to_cli_args(self, kw: Dict[str, Any]) -> List[str]:
+        """Convert keyword arguments to CLI arguments"""
+        args = []
+        for k, v in kw.items():
+            flag = f"--{k.replace('_', '-')}"
+            if isinstance(v, bool):
+                if v:  # Only add flag if True
+                    args.append(flag)
+            else:
+                args.extend([flag, str(v)])
+        return args
+
+from core.utils import load_settings # Ensure load_settings is imported if needed elsewhere, though Config should handle it
 
 class ToolRegistry(dict):
     def __init__(self,
@@ -115,11 +138,67 @@ class ToolRegistry(dict):
             srv = meta.get("_mcp") or meta["mcp_server"]
             runner = lambda **kw: mcp_call(srv, name, kw)
 
+        elif meta.get("type") == "cli":
+            path = Path(meta["entry"])
+            def runner_with_env(**kw):
+                env = None
+                # Inject environment variables from settings.toml if present
+                if Config.TOML_SETTINGS and 'environment' in Config.TOML_SETTINGS:
+                    env = os.environ.copy()
+                    for env_var in Config.TOML_SETTINGS['environment']:
+                        if 'key' in env_var and 'value' in env_var:
+                            env[env_var['key']] = env_var['value']
+                    # --- BEGIN DEBUG PRINT ---
+                    print(f"DEBUG: Injecting env for {name}: { {k: ('***' if 'KEY' in k.upper() else v) for k, v in env.items() if k == 'TAVILY_API_KEY'} }", file=sys.stderr)
+                    # --- END DEBUG PRINT ---
+                else:
+                    # --- BEGIN DEBUG PRINT ---
+                    print(f"DEBUG: NOT Injecting env for {name}. Config.TOML_SETTINGS: {Config.TOML_SETTINGS is not None}, 'environment' in settings: {'environment' in Config.TOML_SETTINGS if Config.TOML_SETTINGS else 'N/A'}", file=sys.stderr)
+                    # --- END DEBUG PRINT ---
+
+                # Convert boolean args to flags, handle other types
+                args = [str(path)]
+                parser = ToolParameterParser(meta["parameters"]["properties"])
+                cli_args = parser.convert_to_cli_args(kw)
+                args.extend(cli_args)
+
+                try:
+                    # Use the potentially modified env
+                    result = subprocess.run(
+                        args, # Pass the constructed args list
+                        capture_output=True, text=True, check=True, env=env
+                    )
+                    return result.stdout
+                except subprocess.CalledProcessError as e:
+                    # Log or return stderr for better debugging in case of tool error
+                    error_message = f"Tool '{name}' failed with exit code {e.returncode}.\nArgs: {' '.join(args)}\nStderr: {e.stderr}"
+                    logging.error(error_message)
+                    # Return a dictionary indicating error, including stderr
+                    return {"error": error_message, "stderr": e.stderr}
+                except FileNotFoundError:
+                    error_message = f"Tool '{name}' executable not found at {path}."
+                    logging.error(error_message)
+                    return {"error": error_message}
+
+            runner = runner_with_env
+            self.tools[name] = {"meta": meta, "runner": runner}
+            logging.debug(f"Registered CLI tool: {name}")
+
         else:
             path = Path(meta["entry"])
-            runner = lambda **kw: subprocess.run(
-                [path, *map(str, kw.values())],
-                capture_output=True, text=True, check=True).stdout
+            def runner_with_env(**kw):
+                env = None
+                # Inject environment variables from settings.toml if present
+                if Config.TOML_SETTINGS and 'environment' in Config.TOML_SETTINGS:
+                    env = os.environ.copy()
+                    for env_var in Config.TOML_SETTINGS['environment']:
+                        if 'key' in env_var and 'value' in env_var:
+                            env[env_var['key']] = env_var['value']
+                return subprocess.run(
+                    [path, *map(str, kw.values())],
+                    capture_output=True, text=True, check=True, env=env
+                ).stdout
+            runner = runner_with_env
 
         self[name] = runner
         self._manifests.append(meta)

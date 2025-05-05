@@ -15,6 +15,8 @@ from __future__ import annotations
 import json, re, subprocess, sys, runpy, types, argparse
 from pathlib import Path
 from typing import Dict, List, Tuple, Callable, Any
+import os
+from core.config import Config
 
 # --- regex fallback (for bash or non-argparse pythons) ----------------
 HELP_RE = re.compile(
@@ -77,7 +79,21 @@ def _make_runner(exec_prefix: List[str]) -> Callable:
                     argv.append(flag)
             else:
                 argv += [flag, str(v)]
-        out = subprocess.run(argv, capture_output=True, text=True)
+
+        # inject settings.toml environment if present
+        env = None
+        if Config.TOML_SETTINGS and 'environment' in Config.TOML_SETTINGS:
+            env = os.environ.copy()
+            for item in Config.TOML_SETTINGS['environment']:
+                if 'key' in item and 'value' in item:
+                    env[item['key']] = item['value']
+
+        out = subprocess.run(
+            argv,
+            capture_output=True,
+            text=True,
+            env=env  # <-- pass through injected env
+        )
         if out.returncode != 0:
             raise RuntimeError(out.stderr.strip() or out.stdout.strip())
         try:
