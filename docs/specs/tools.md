@@ -93,30 +93,41 @@ parameters:
 Simple weather fetcher (first non-blank line becomes the description)
 """
 import argparse, json, requests
+
+# Optional: implement get_tool_schema and support --fractalic-dump-schema
+# def get_tool_schema():
+#     return { ... }
+
 ap = argparse.ArgumentParser(description="Simple weather fetcher")
-ap.add_argument("--lat", required=True)
-ap.add_argument("--lon", required=True)
+ap.add_argument("--lat", required=True, help="Latitude of the location (e.g., 48.8566)")
+ap.add_argument("--lon", required=True, help="Longitude of the location (e.g., 2.3522)")
+ap.add_argument("--fractalic-dump-schema", action="store_true", help=argparse.SUPPRESS)
 args = ap.parse_args()
-url = (f"https://api.open-meteo.com/v1/forecast"
-       f"?latitude={args.lat}&longitude={args.lon}&current=temperature_2m")
+
+url = (
+    f"https://api.open-meteo.com/v1/forecast"
+    f"?latitude={args.lat}&longitude={args.lon}&current=temperature_2m"
+)
 print(requests.get(url, timeout=5).text)
 ```
 
-*No YAML file present → registry auto-discovers.*
+*No YAML file present → registry auto-discovers via `get_tool_schema()` or falls back to `--help`.*
 
 ---
 
 ## 4.  Contract for auto-discoverable scripts
 
-| Requirement                                               | Why it matters                                                           | Python CLI (`python-cli`)                       | Bash CLI (`bash-cli`)                                    |
-| --------------------------------------------------------- | ------------------------------------------------------------------------ | ----------------------------------------------- | -------------------------------------------------------- |
-| **1. Must exit 0 on `--help`**                            | Registry interrogates the script; non-zero exit is assumed “not a tool”. | `argparse` does this by default.                | Add a `show_help` function + `[[ $1 == --help ]]` guard. |
-| **2. First non-blank help line is a short description**   | Shown in UI and prompt context.                                          | Provided by `description=` in `ArgumentParser`. | Put a plain sentence before “Usage: …”.                  |
-| **3. Options must be visible as `--flag ARG` in help**    | Regex / argparse walker extracts them into JSON schema.                  | `argparse` prints exactly that.                 | Document each flag in help block (see example).          |
-| **4. Script should print JSON on stdout** *(recommended)* | Allows LLM to keep reasoning on structured data.                         | `print(json.dumps(...))`                        | `echo '{"key":"value"}'`                                 |
+| Requirement                                                      | Why it matters                                                           | Python CLI (`python-cli`)                                   | Bash CLI (`bash-cli`)                                    |
+| ---------------------------------------------------------------- | ------------------------------------------------------------------------ | ----------------------------------------------------------- | -------------------------------------------------------- |
+| **1. Must exit 0 on `--help`**                                   | Registry interrogates the script; non-zero exit is assumed “not a tool”. | `argparse` does this by default.                             | Add a `show_help` function + `[[ $1 == --help ]]` guard. |
+| **2. First non-blank help line is a short description**          | Shown in UI and prompt context.                                          | Provided by `description=` in `ArgumentParser`.             | Put a plain sentence before “Usage: …”.                  |
+| **3. Options must be visible as `--flag ARG` in help**           | Regex / argparse walker extracts them into JSON schema.                  | `argparse` prints exactly that.                              | Document each flag in help block (see example).          |
+| **4. Every `add_argument` must include a `help` string**         | Ensures parameter descriptions show up in the generated schema.          | Use `help="..."` on all flags.                             |                                                          |
+| **5. Implement `get_tool_schema()` and support `--fractalic-dump-schema`** | Allows direct schema JSON output, bypassing fragile help parsing.         | Define `get_tool_schema()` returning full JSON schema object; check for `--fractalic-dump-schema` in `__main__`. |                                                          |
+| **6. Script should print JSON on stdout** *(recommended)*        | Allows LLM to keep reasoning on structured data.                         | `print(json.dumps(...))`                                     | `echo '{"key":"value"}'`                                 |
 
 *Violating the contract doesn’t break execution, but the model will see an
-empty parameter list and may fail to call the tool.*
+empty or incomplete parameter list and may fail to call the tool.*
 
 ---
 
@@ -170,8 +181,7 @@ empty parameter list and may fail to call the tool.*
 
 ## TL;DR for tool authors
 
-> 1. Write a script that **prints helpful `--help` text** and **returns JSON
->    on stdout**.
-> 2. Drop it under `tools/`.
+> 1. Write a script that **prints helpful `--help` text**, **returns JSON on stdout**, and **implements `get_tool_schema()` with `--fractalic-dump-schema` support**.
+> 2. Drop it under `tools/` (no YAML required for autodiscovery).
 > 3. Restart Fractalic (or call `registry.rescan()`).
 > 4. The LLM can now invoke your script as `tool_name(flag=value, …)`—done!
