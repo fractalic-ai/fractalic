@@ -61,9 +61,25 @@ def process_llm(ast: AST, current_node: Node) -> Optional[Node]:
     prompt = params.get('prompt')
     block_params = params.get('block', {})
 
-    # New optional fields
-    provider = params.get('provider')
+    # New optional field
     model = params.get('model')
+
+    # Always infer provider by matching model field in settings
+    found = False
+    all_models = Config.TOML_SETTINGS.get('settings', {})
+    provider = None
+    if model:
+        for key, conf in all_models.items():
+            name = conf.get('model', key)
+            if model == name or model == name.replace('.', '-') or model == name.replace('.', '_'):
+                provider = key
+                found = True
+                break
+        if not found:
+            raise KeyError(f'Model "{model}" not found under [settings] in settings.toml')
+    else:
+        # fallback to default provider from config
+        provider = Config.LLM_PROVIDER
 
     # Map the new stop-sequences parameter into stop_sequences for the LLM client
     stop_seqs = params.get('stop-sequences')
@@ -146,10 +162,14 @@ def process_llm(ast: AST, current_node: Node) -> Optional[Node]:
     prompt_text = "\n\n".join(part.strip() for part in prompt_parts if part.strip())
 
     # Call LLM - use messages if available, otherwise fall back to prompt_text
-    llm_provider = provider if provider else Config.LLM_PROVIDER
+    llm_provider = provider
     llm_model = model if model else Config.MODEL
+    Config.LLM_PROVIDER = llm_provider
+    Config.MODEL = llm_model
+    provider_cfg = Config.TOML_SETTINGS.get('settings', {}).get(llm_provider, {})
+    Config.API_KEY = provider_cfg.get('apiKey')
     llm_client = LLMClient(model=llm_model)
-    actual_model = model or (getattr(llm_client.client, "settings", {}).get("model"))
+    actual_model = model if model else getattr(llm_client.client, 'settings', {}).get('model', llm_model)
 
     # Always enable streaming
     params['stream'] = True
