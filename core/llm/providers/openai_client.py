@@ -72,13 +72,13 @@ class ToolExecutor:
         if fn not in self.tk:
             err = f"Tool '{fn}' not found."
             self.ui.error(err)
-            return json.dumps({"error": err}, indent=2)
+            return json.dumps({"error": err}, indent=2, ensure_ascii=False)
         try:
             res = self.tk[fn](**json.loads(args_json or "{}"))
-            return json.dumps(res, indent=2)
+            return json.dumps(res, indent=2, ensure_ascii=False)
         except Exception as e:
             self.ui.error(f"Tool '{fn}' failed: {e}")
-            return json.dumps({"error": str(e)}, indent=2)
+            return json.dumps({"error": str(e)}, indent=2, ensure_ascii=False)
 
 # ====================================================================
 #  Stream processor (trims stop-seq)
@@ -174,7 +174,7 @@ class liteclient:
     top_p: float = 1.0
     max_tokens: Optional[int] = None
     system_prompt: str = "You are a helpful assistant."
-    max_tool_turns: int = 5
+    max_tool_turns: int = 30
     settings: Optional[Dict[str, Any]] = field(default=None, repr=False)
     tools_dir: str | Path = "tools"  # NEW
     mcp_servers: List[str] = field(default_factory=list)  # NEW
@@ -322,7 +322,7 @@ class liteclient:
                 args = tc["function"]["arguments"]
                 call_log = (f"> TOOL CALL, id: {tc['id']}\n"
                             f"tool: {tc['function']['name']}\n"
-                            f"args: {json.dumps(json.loads(args), indent=2)}")
+                            f"args: {json.dumps(json.loads(args), indent=2, ensure_ascii=False)}")
                 self.ui.show("", call_log)
                 convo.append(call_log or "")
 
