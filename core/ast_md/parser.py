@@ -112,6 +112,15 @@ operations:
         items:
           type: string
         description: "List of strings where the model should stop generation (for Anthropic models it maps to stop_sequences parameter)."
+      tools:
+        oneOf:
+          - type: string
+            enum: ["none", "all"]
+          - type: array
+            items:
+              type: string
+        default: "none"
+        description: "Specify which tools to use: 'none' for no tools (default), 'all' for all tools, or an array of specific tool names"
     anyOf:
       - required: ["prompt"]
       - required: ["block"]

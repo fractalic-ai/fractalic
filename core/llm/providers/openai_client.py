@@ -50,13 +50,13 @@ class ConsoleManager:
     def __init__(self):
         self.c = Console()
 
-    def show(self, role: str, content: str):
+    def show(self, role: str, content: str, end: str = "\n"):
         colours = {"user": "cyan", "assistant": "green",
                    "error": "red", "status": "dim"}
         if role in colours:
-            self.c.print(f"[{colours[role]}]{role.upper()}:[/] {content}")
+            self.c.print(f"[{colours[role]}]{role.upper()}:[/] {content}", end=end)
         else:
-            self.c.print(content, highlight=False)
+            self.c.print(content, highlight=False, end=end)
 
     def status(self, m): self.show("status", m)
     def error(self, m):  self.show("error",  m)
@@ -86,20 +86,27 @@ class ToolExecutor:
 class StreamProcessor:
     def __init__(self, ui: ConsoleManager, stop: Optional[List[str]]):
         self.ui, self.stop = ui, stop or []
+        self.last_chunk = ""
 
     def process(self, stream_iter):
         buf = ""
         for chunk in stream_iter:
             delta = chunk["choices"][0]["delta"]
             txt = delta.get("content", "")
-            buf += txt
-            for s in self.stop:
-                if buf.endswith(s):
-                    buf = buf[:-len(s)]
-                    txt = txt[:-len(s)]
-            if txt:
-                self.ui.show("", txt)
-        return buf
+            if txt:  # Only process non-empty text
+                buf += txt
+                for s in self.stop:
+                    if buf.endswith(s):
+                        buf = buf[:-len(s)]
+                        txt = txt[:-len(s)]
+                if txt:  # Only show non-empty text
+                    # Only show new content since last chunk
+                    if txt != self.last_chunk:
+                        self.ui.show("", txt, end="")
+                        self.last_chunk = txt
+        # Add final newline after streaming is complete
+        self.ui.show("", "")
+        return buf or ""  # Ensure we always return a string, even if empty
 
 # ====================================================================
 #  Media helpers
@@ -262,9 +269,24 @@ class liteclient:
             max_tokens=op.get("max_tokens", self.max_tokens),
             stop=op.get("stop_sequences"),
             stream=stream,
-            tools=self.schema,
             api_key= self.api_key
         )
+
+        # Handle tools parameter
+        tools_param = op.get("tools", "none")
+        if tools_param == "none":
+            # No tools, ensure streaming is enabled
+            params["stream"] = True
+        elif tools_param == "all":
+            # Use all tools - copy the entire schema
+            params["tools"] = self.schema.copy()
+        elif isinstance(tools_param, list):
+            # Filter tools based on the provided list - create new list with matching tools
+            filtered_schema = [
+                tool for tool in self.schema 
+                if tool["function"]["name"] in tools_param
+            ]
+            params["tools"] = filtered_schema
 
         # ----- build messages -----
         if messages:
@@ -304,9 +326,14 @@ class liteclient:
                 tool_calls = []
             else:
                 rsp = completion(**params)
-                msg = rsp["choices"][0]["message"]
-                content = msg.get("content", "")
-                tool_calls = msg.get("tool_calls", [])
+                if hasattr(rsp, "choices"):  # Regular response
+                    msg = rsp["choices"][0]["message"]
+                    content = msg.get("content", "")
+                    tool_calls = msg.get("tool_calls", [])
+                else:  # Streaming response
+                    content = StreamProcessor(self.ui,
+                                            params["stop"]).process(rsp)
+                    tool_calls = []
 
             self.ui.show("assistant", content or "[tool call]")
             convo.append(content or "")
