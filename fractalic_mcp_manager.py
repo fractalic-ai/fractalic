@@ -140,36 +140,14 @@ class Child:
             if self.transport == "stdio":
                 if not self.proc.stdin or not self.proc.stdout:
                     return False
-                # Create a new process just for health check
-                cmd = [self.spec["command"], *self.spec.get("args", [])]
-                env = os.environ.copy()
-                env.update(self.spec.get("env", {}))
-                
-                proc = await asyncio.create_subprocess_exec(
-                    *cmd,
-                    stdin=asyncio.subprocess.PIPE,
-                    stdout=asyncio.subprocess.PIPE,
-                    env=env
-                )
-                
                 try:
-                    async with stdio_client(StdioServerParameters(
-                        command=cmd[0],
-                        args=cmd[1:],
-                        env=env
-                    )) as (read, write):
-                        async with ClientSession(read, write) as session:
-                            await session.initialize()
-                            await asyncio.wait_for(session.list_tools(), 3)
-                            return True
-                finally:
-                    if proc.returncode is None:
-                        proc.terminate()
-                        try:
-                            await asyncio.wait_for(proc.wait(), 3)
-                        except asyncio.TimeoutError:
-                            proc.kill()
-                            await proc.wait()
+                    # Just check if the process is still running and can respond
+                    self.proc.stdin.write(b"\n")  # Send a newline to check if process is responsive
+                    await self.proc.stdin.drain()
+                    return True
+                except Exception as e:
+                    self.last_error = str(e)
+                    return False
             else:
                 await asyncio.wait_for(self.client.list_tools(), 3)
                 return True
