@@ -68,8 +68,6 @@ class Child:
         self.started_at  = None
         self._cmd_q      : asyncio.Queue = asyncio.Queue()
         self._runner     = asyncio.create_task(self._loop())
-        self._resources  = None
-        self._CLEANUP_TIMEOUT = 3.0
 
     async def start(self):
         await self._cmd_q.put(("start",))
@@ -126,6 +124,8 @@ class Child:
         self.proc, self.pid = None, None
         self.state          = "stopped"
         log(f"{self.name} ↓")
+        if self._runner:
+            self._runner.cancel()
 
     async def _spawn_if_needed(self):
         if self.transport == "http":
@@ -168,6 +168,7 @@ class Child:
                 ClientSession(*transport)
             )
         self.session_at = time.time()
+        self.started_at = self.started_at or self.session_at
 
     async def _close_session(self):
         if self._exit_stack:
@@ -198,8 +199,8 @@ class Child:
             self.state = "errored"
             log(f"{self.name} exceeded retries → errored")
             return
-        backoff = BACKOFF_BASE ** self.retries
         self.retries += 1
+        backoff = BACKOFF_BASE ** self.retries
         self.state   = "retrying"
         log(f"{self.name} retrying in {backoff}s …")
         await asyncio.sleep(backoff)
