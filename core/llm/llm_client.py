@@ -12,12 +12,14 @@ class LLMClient:
     def _initialize_client(self):
         api_key = Config.API_KEY
         cfg = Config.TOML_SETTINGS.get("settings", {}).get(self.provider, {})
+        mcp_servers = Config.TOML_SETTINGS.get("mcp", {}).get("mcpServers", [])
         client_class = self._get_provider_client()
         # pass model into the client constructor
         return client_class(
             model=cfg.get("model"),
             api_key=api_key,
-            settings=cfg
+            settings=cfg,
+            mcp_servers=mcp_servers
         )
 
     def _get_provider_client(self):

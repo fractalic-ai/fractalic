@@ -188,6 +188,14 @@ class liteclient:
     registry: ToolRegistry = field(init=False)  # NEW
 
     def __post_init__(self):
+        from core.config import Config
+        print(f"[DEBUG] Config.TOML_SETTINGS at liteclient init: {Config.TOML_SETTINGS}")
+        # Use config value if mcp_servers is empty
+        if not self.mcp_servers:
+            mcp_from_config = Config.TOML_SETTINGS.get("mcp", {}).get("mcpServers", [])
+            if mcp_from_config:
+                print(f"[DEBUG] Overriding mcp_servers with config value: {mcp_from_config}")
+                self.mcp_servers = mcp_from_config
         if self.settings:
             s = self.settings
             self.model = s.get("model", self.model)
@@ -201,6 +209,7 @@ class liteclient:
 
         self.registry = ToolRegistry(self.tools_dir, self.mcp_servers)  # NEW
         print(f"[DEBUG] ToolRegistry tools_dir: {self.registry.tools_dir.resolve()}")
+        print(f"[DEBUG] ToolRegistry MCP servers: {self.mcp_servers}")
         # Debug print: show discovered tools and schema
         print("[DEBUG] Discovered tools:", list(self.registry.keys()))
         print("[DEBUG] Tool schema:", json.dumps(self.registry.generate_schema(), indent=2))

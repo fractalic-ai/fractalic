@@ -100,11 +100,18 @@ class ToolRegistry(dict):
             self._register(manifest, runner_override=runner)
 
     def _load_mcp(self):
+        print(f"[ToolRegistry] MCP servers to load: {self.mcp_servers}")
         for srv in self.mcp_servers:
             try:
-                for m in mcp_list(srv):
+                response = mcp_list(srv)
+                print(f"[ToolRegistry] MCP {srv} raw response: {response} (type: {type(response)})")
+                if not response:
+                    print(f"[ToolRegistry] MCP {srv} returned empty or None response.")
+                for m in response:
+                    print(f"[ToolRegistry] Registering MCP tool manifest: {m}")
                     m["_mcp"] = srv
                     self._register(m, from_mcp=True)
+                    print(f"[ToolRegistry] Registered MCP tool: {m.get('name', '<no name>')} from {srv}")
             except Exception as e:
                 print(f"[ToolRegistry] MCP {srv} skipped: {e}", file=sys.stderr)
 

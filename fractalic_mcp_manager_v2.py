@@ -268,6 +268,7 @@ def build_app(sup: Supervisor, stop_event: asyncio.Event):
     app = web.Application()
     app.router.add_get ("/status",      lambda r: _json(r, sup.status()))
     app.router.add_get ("/tools",       lambda r: _await_json(r, sup.tools()))
+    app.router.add_get ("/list_tools",  lambda r: _await_json(r, sup.tools()))
     app.router.add_post("/start/{n}",   lambda r: _mut(r, sup, "start"))
     app.router.add_post("/stop/{n}",    lambda r: _mut(r, sup, "stop"))
     app.router.add_post("/call_tool",   lambda r: _call(r, sup))
