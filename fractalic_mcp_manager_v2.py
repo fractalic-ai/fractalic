@@ -35,6 +35,13 @@ MAX_RETRY     = 5
 BACKOFF_BASE  = 2          # exponential back-off
 
 # -------------------------------------------------------------------- helpers
+def tool_to_obj(t):
+    if isinstance(t, dict):
+        return t                          # already JSON-ready
+    if dataclasses.is_dataclass(t):
+        return dataclasses.asdict(t)      # MCP canonical form
+    return json.loads(t.model_dump_json()) if hasattr(t, "model_dump_json") else str(t)
+
 def ts() -> str: return time.strftime("%H:%M:%S", time.localtime())
 def log(msg: str): print(f"[{ts()}] {msg}", file=sys.stderr)
 
@@ -231,12 +238,7 @@ class Supervisor:
         for n, c in self.children.items():
             try:
                 tl = await c.list_tools()
-                tools_list = []
-                for t in tl.tools:
-                    if isinstance(t, dict):
-                        tools_list.append(t)
-                    else:
-                        tools_list.append(str(t))
+                tools_list = [tool_to_obj(t) for t in tl.tools]
                 out[n] = {"tools": tools_list}
             except Exception as e:
                 out[n] = {"error": str(e)}
