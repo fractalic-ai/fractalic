@@ -34,6 +34,20 @@ SESSION_TTL   = 3600       # s – refresh session after this period
 MAX_RETRY     = 5
 BACKOFF_BASE  = 2          # exponential back-off
 
+# -------------------------------------------------------------------- Custom JSON encoder
+class MCPEncoder(json.JSONEncoder):
+    def default(self, obj):
+        # Handle dataclasses
+        if dataclasses.is_dataclass(obj):
+            return dataclasses.asdict(obj)
+        # Handle Pydantic models
+        if hasattr(obj, "model_dump_json"):
+            return json.loads(obj.model_dump_json())
+        # Handle CallToolResult objects and other custom classes
+        if hasattr(obj, "__dict__"):
+            return obj.__dict__
+        return super().default(obj)
+
 # -------------------------------------------------------------------- helpers
 def tool_to_obj(t):
     if isinstance(t, dict):
@@ -132,17 +146,36 @@ class Child:
             return
         if self.proc and self.proc.returncode is None:
             return
-        env = {**os.environ, **self.spec.get("env", {})}
-        self.proc = await asyncio.create_subprocess_exec(
-            *shlex.split(self.spec["command"]),
-            *self.spec.get("args", []),
-            stdin=asyncio.subprocess.PIPE,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-            env=env,
-        )
-        self.pid        = self.proc.pid
-        self.started_at = time.time()
+        try:
+            env = {**os.environ, **self.spec.get("env", {})}
+            command_parts = shlex.split(self.spec["command"])
+            args = self.spec.get("args", [])
+            log(f"Spawning {self.name} with command: {command_parts} {args}")
+            
+            self.proc = await asyncio.create_subprocess_exec(
+                *command_parts,
+                *args,
+                stdin=asyncio.subprocess.PIPE,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                env=env,
+            )
+            self.pid = self.proc.pid
+            self.started_at = time.time()
+            
+            # Log stderr output from the process for better debugging
+            async def log_stderr():
+                while True:
+                    line = await self.proc.stderr.readline()
+                    if not line:
+                        break
+                    log(f"{self.name} stderr: {line.decode('utf-8', errors='replace').strip()}")
+                    
+            asyncio.create_task(log_stderr())
+            
+        except Exception as e:
+            log(f"Error spawning {self.name}: {e}")
+            raise
 
     async def _ensure_session(self, force=False):
         if (not force and self.session
@@ -242,7 +275,8 @@ class Supervisor:
                 tools_list = [tool_to_obj(t) for t in tl.tools]
                 out[n] = {"tools": tools_list}
             except Exception as e:
-                out[n] = {"error": str(e)}
+                log(f"Error getting tools from {n}: {e}")
+                out[n] = {"error": str(e) or f"Unknown error from {n}", "tools": []}
         return out
 
     async def call_tool(self, name: str, args: Dict[str, Any]):
@@ -276,26 +310,26 @@ def build_app(sup: Supervisor, stop_event: asyncio.Event):
     return app
 
 async def _json(_, coro):
-    return web.json_response(await coro)
+    return web.json_response(await coro, dumps=lambda obj: json.dumps(obj, cls=MCPEncoder))
 
 async def _await_json(_, coro):
-    return web.json_response(await coro)
+    return web.json_response(await coro, dumps=lambda obj: json.dumps(obj, cls=MCPEncoder))
 
 async def _mut(req, sup, act):
     await getattr(sup, act)(req.match_info["n"])
-    return web.json_response(await sup.status())
+    return web.json_response(await sup.status(), dumps=lambda obj: json.dumps(obj, cls=MCPEncoder))
 
 async def _call(req, sup):
     body = await req.json()
     res  = await sup.call_tool(body["name"], body.get("arguments", {}))
-    return web.json_response(res)
+    return web.json_response(res, dumps=lambda obj: json.dumps(obj, cls=MCPEncoder))
 
 async def _kill(req, sup: Supervisor, stop_ev: asyncio.Event):
     # 1) stop all child servers
     await sup.stop("all")
     # 2) tell the main loop in run_serve() to exit
     stop_ev.set()
-    return web.json_response({"status": "shutting-down"})
+    return web.json_response({"status": "shutting-down"}, dumps=lambda obj: json.dumps(obj, cls=MCPEncoder))
 
 # ==================================================================== runners
 async def run_serve(port: int):

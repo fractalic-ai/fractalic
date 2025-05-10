@@ -104,14 +104,56 @@ class ToolRegistry(dict):
         for srv in self.mcp_servers:
             try:
                 response = mcp_list(srv)
-                print(f"[ToolRegistry] MCP {srv} raw response: {response} (type: {type(response)})")
+                print(f"[ToolRegistry] MCP {srv} raw response: {response}")
                 if not response:
                     print(f"[ToolRegistry] MCP {srv} returned empty or None response.")
-                for m in response:
-                    print(f"[ToolRegistry] Registering MCP tool manifest: {m}")
-                    m["_mcp"] = srv
-                    self._register(m, from_mcp=True)
-                    print(f"[ToolRegistry] Registered MCP tool: {m.get('name', '<no name>')} from {srv}")
+                    continue
+                    
+                # Force restart of the MCP server if we're having issues
+                if all("error" in service_data for service_data in response.values()):
+                    print(f"[ToolRegistry] All services have errors. Attempting to restart MCP server...")
+                    try:
+                        import subprocess, time
+                        subprocess.run(["pkill", "-f", "fractalic_mcp_manager_v2"], check=False)
+                        time.sleep(2)
+                        subprocess.Popen(["python3", "fractalic_mcp_manager_v2.py", "serve"])
+                        time.sleep(5)  # Give it time to start
+                        # Try again
+                        response = mcp_list(srv)
+                    except Exception as restart_err:
+                        print(f"[ToolRegistry] Failed to restart MCP server: {restart_err}")
+                
+                # response is a dict of {service_name: {"tools": [...]}}
+                if not isinstance(response, dict):
+                    print(f"[ToolRegistry] MCP {srv} returned non-dict response: {type(response)}")
+                    continue
+                    
+                for service_name, service_data in response.items():
+                    if isinstance(service_data, dict) and "error" in service_data:
+                        print(f"[ToolRegistry] Error in service {service_name}: {service_data['error']}")
+                        continue
+                        
+                    if not isinstance(service_data, dict) or "tools" not in service_data:
+                        print(f"[ToolRegistry] Invalid service data format for {service_name}: {service_data}")
+                        continue
+                        
+                    tools = service_data.get("tools", [])
+                    if not tools:
+                        print(f"[ToolRegistry] No tools found for service {service_name}")
+                        continue
+                        
+                    print(f"[ToolRegistry] Processing {len(tools)} tools from service: {service_name}")
+                    for tool in tools:
+                        if "name" not in tool:
+                            print(f"[ToolRegistry] Tool missing name: {tool}")
+                            continue
+                            
+                        print(f"[ToolRegistry] Registering MCP tool manifest: {tool}")
+                        tool["_mcp"] = srv
+                        # Add service name to help identify the tool source
+                        tool["_service"] = service_name
+                        self._register(tool, from_mcp=True)
+                        print(f"[ToolRegistry] Registered MCP tool: {tool.get('name')} from {srv} ({service_name})")
             except Exception as e:
                 print(f"[ToolRegistry] MCP {srv} skipped: {e}", file=sys.stderr)
 
@@ -123,7 +165,33 @@ class ToolRegistry(dict):
             if explicit and self[name].__dict__.get("_auto"):
                 pass
             else:
+                print(f"[ToolRegistry] Tool '{name}' already registered, skipping")
                 return
+
+        # Special handling for MCP tools (no 'entry' field, use mcp_call)
+        if from_mcp:
+            srv = meta.get("_mcp") or meta.get("mcp_server")
+            if not srv:
+                print(f"[ToolRegistry] MCP tool '{name}' missing server information, skipping")
+                return
+                
+            # Set up the runner function to call the MCP server
+            runner = lambda **kw: mcp_call(srv, name, kw)
+            self[name] = runner
+            
+            # Patch manifest to OpenAI schema style if needed
+            # Use 'inputSchema' as 'parameters' if present
+            if "inputSchema" in meta and "parameters" not in meta:
+                meta["parameters"] = meta["inputSchema"]
+                
+            # Ensure parameters exists and has the right structure
+            if "parameters" not in meta or not isinstance(meta["parameters"], dict):
+                print(f"[ToolRegistry] MCP tool '{name}' missing valid parameters schema, creating empty schema")
+                meta["parameters"] = {"type": "object", "properties": {}, "required": []}
+                
+            # Add to manifests list so it appears in the schema sent to the LLM
+            self._manifests.append(meta)
+            return
 
         cmd = meta.get("command", "python")
         if runner_override:
