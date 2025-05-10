@@ -52,188 +52,163 @@ class Child:
         self.proc = None
         self.pid = None
         self.last_error = None
-        self._task_local = {}
-        self._cleanup_lock = asyncio.Lock()
-        self._session_lock = asyncio.Lock()
+        self._cmd_queue = asyncio.Queue()
+        self._main_task = None
+        self._resources = None
         self._session_init_time = None
         self._SESSION_TTL = 3600
         self._cleanup_event = asyncio.Event()
-        self._main_task = None
         self._health = None
+        self._CLEANUP_TIMEOUT = 3.0
+        self._task = asyncio.create_task(self._run())
 
-    def _get_task_local(self):
-        task = asyncio.current_task()
-        if task not in self._task_local:
-            self._task_local[task] = {
-                'exit_stack': None,
-                'session': None,
-                'stdio': None,
-                'write': None,
-                'stdio_context': None
-            }
-        return self._task_local[task]
+    async def _run(self):
+        while True:
+            cmd, args = await self._cmd_queue.get()
+            if cmd == "start":
+                await self._do_start()
+            elif cmd == "stop":
+                await self._do_stop()
+            elif cmd == "exit":
+                await self._do_stop()
+                break
+
+    async def start(self):
+        await self._cmd_queue.put(("start", None))
+
+    async def stop(self):
+        await self._cmd_queue.put(("stop", None))
+        await self._cleanup_event.wait()
+        self._cleanup_event.clear()
+
+    async def _do_start(self):
+        if self.state == "running":
+            return
+        self.state = "starting"
+        try:
+            await self._spawn()
+            self.state = "running"
+        except Exception as e:
+            self.last_error = str(e)
+            self.state = "stopped"
+            log(f"Error starting {self.spec['name']}: {e}")
+            await self._do_stop()
+
+    async def _spawn(self):
+        if self.proc:
+            return
+        log(f"Starting process for {self.spec['name']}...")
+        self.proc = await asyncio.create_subprocess_exec(
+            *shlex.split(self.spec["command"]),
+            stdin=asyncio.subprocess.PIPE,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE
+        )
+        self.pid = self.proc.pid
+        log(f"Process started with PID {self.pid}")
+        await self._initialize_session()
+        self._health = asyncio.create_task(self._health_check())
 
     async def _initialize_session(self):
-        if not self.proc or not self.proc.stdin or not self.proc.stdout:
-            raise RuntimeError("Process not properly initialized")
-
         server_params = StdioServerParameters(
             command=self.spec["command"],
             args=self.spec.get("args", []),
             env=self.spec.get("env", {})
         )
-
+        self._resources = {}
         try:
-            task_local = self._get_task_local()
-            
-            # Create a new exit stack for this session
-            task_local['exit_stack'] = AsyncExitStack()
-            
-            # Store the current task as the main task for this session
-            self._main_task = asyncio.current_task()
-            
-            # Initialize stdio client in the same task context
+            exit_stack = AsyncExitStack()
             stdio_context = stdio_client(server_params)
-            task_local['stdio_context'] = stdio_context
-            stdio_transport = await task_local['exit_stack'].enter_async_context(stdio_context)
-            task_local['stdio'], task_local['write'] = stdio_transport
-            
-            # Initialize session
-            task_local['session'] = await task_local['exit_stack'].enter_async_context(
-                ClientSession(task_local['stdio'], task_local['write'])
+            stdio_transport = await exit_stack.enter_async_context(stdio_context)
+            http_client = await exit_stack.enter_async_context(
+                MCPHttpClient(f"http://localhost:{self.spec.get('port', DEFAULT_PORT)}")
             )
-            
+            session = await exit_stack.enter_async_context(
+                ClientSession(stdio_transport[0], stdio_transport[1])
+            )
+            self._resources = {
+                'exit_stack': exit_stack,
+                'session': session,
+                'stdio': stdio_transport[0],
+                'write': stdio_transport[1],
+                'stdio_context': stdio_context,
+                'http_client': http_client
+            }
             self._session_init_time = time.time()
             log(f"Session initialized for {self.spec['name']}")
-            
         except Exception as e:
             log(f"Error initializing session: {e}")
             self._session_init_time = None
-            task_local = self._get_task_local()
-            if task_local['exit_stack']:
-                await task_local['exit_stack'].aclose()
-            task_local['exit_stack'] = None
-            task_local['stdio_context'] = None
-            await self._cleanup()
+            if self._resources and self._resources.get('exit_stack'):
+                try:
+                    await self._resources['exit_stack'].aclose()
+                except Exception as e:
+                    log(f"Error closing exit stack during initialization: {e}")
+            self._resources = None
+            await self._do_stop()
             raise
 
-    async def _cleanup(self):
-        async with self._cleanup_lock:
-            log(f"Cleaning up resources for {self.spec['name']}...")
-            
-            # Cancel health check task if it exists
-            if self._health is not None:
-                self._health.cancel()
-                try:
-                    await self._health
-                except asyncio.CancelledError:
-                    pass
-                self._health = None
-
-            # Clean up task-local resources
-            task = asyncio.current_task()
-            if task in self._task_local:
-                task_local = self._task_local[task]
-                
-                # Close stdio transport first
-                if task_local['stdio']:
-                    try:
-                        await task_local['stdio'].aclose()
-                    except Exception as e:
-                        log(f"Error closing stdio: {e}")
-                if task_local['write']:
-                    try:
-                        await task_local['write'].aclose()
-                    except Exception as e:
-                        log(f"Error closing write: {e}")
-                
-                # Close session
-                if task_local['session']:
-                    try:
-                        await task_local['session'].aclose()
-                    except Exception as e:
-                        log(f"Error closing session: {e}")
-                    task_local['session'] = None
-                
-                # Close exit stack in the same task context
-                if task_local['exit_stack']:
-                    try:
-                        await task_local['exit_stack'].aclose()
-                    except Exception as e:
-                        log(f"Error closing exit stack: {e}")
-                    task_local['exit_stack'] = None
-                
-                # Clean up stdio context
-                if task_local['stdio_context']:
-                    task_local['stdio_context'] = None
-                
-                del self._task_local[task]
-            
-            self._session_init_time = None
-            self._main_task = None
-
-            # Terminate process
-            if self.proc:
-                try:
+    async def _do_stop(self):
+        log(f"Stopping {self.spec['name']}...")
+        self.state = "stopping"
+        if self._health:
+            self._health.cancel()
+            try:
+                await asyncio.wait_for(self._health, timeout=1.0)
+            except (asyncio.CancelledError, asyncio.TimeoutError):
+                pass
+            self._health = None
+        if self._resources:
+            try:
+                await asyncio.wait_for(self._resources['exit_stack'].aclose(), timeout=self._CLEANUP_TIMEOUT)
+            except Exception as e:
+                log(f"Error closing exit stack: {e}")
+            self._resources = None
+        self._session_init_time = None
+        if self.proc:
+            try:
+                if self.proc.returncode is None:
                     self.proc.terminate()
                     try:
-                        await asyncio.wait_for(self.proc.wait(), timeout=5.0)
+                        await asyncio.wait_for(self.proc.wait(), timeout=2.0)
                     except asyncio.TimeoutError:
+                        log(f"Process termination timeout for {self.spec['name']}, sending SIGKILL")
                         self.proc.kill()
-                        await self.proc.wait()
-                except Exception as e:
-                    log(f"Error terminating process: {e}")
+                        try:
+                            await asyncio.wait_for(self.proc.wait(), timeout=1.0)
+                        except asyncio.TimeoutError:
+                            log(f"Failed to kill process {self.spec['name']}")
+            except Exception as e:
+                log(f"Error terminating process: {e}")
+            finally:
+                for pipe in [self.proc.stdin, self.proc.stdout, self.proc.stderr]:
+                    if pipe:
+                        try:
+                            pipe.close()
+                        except Exception:
+                            pass
                 self.proc = None
                 self.pid = None
+        self.state = "stopped"
+        self._cleanup_event.set()
+        log(f"Cleanup completed for {self.spec['name']}")
 
-            self.state = "stopped"
-            self._cleanup_event.set()
-            log(f"Cleanup completed for {self.spec['name']}")
+    def info(self):
+        return {
+            "state": self.state,
+            "pid": self.pid,
+            "last_error": self.last_error
+        }
 
-    async def start(self):
-        if self.state == "running":
-            return
-            
-        log(f"Starting {self.spec['name']}...")
-        self.state = "starting"
-        
-        try:
-            await self._spawn()
-            log(f"Started {self.spec['name']}")
-        except Exception as e:
-            self.last_error = str(e)
-            self.state = "stopped"
-            log(f"Error starting {self.spec['name']}: {e}")
-            raise
-
-    async def _spawn(self):
-        if self.proc:
-            return
-
-        log(f"Starting process for {self.spec['name']}...")
-        
-        try:
-            self.proc = await asyncio.create_subprocess_exec(
-                *shlex.split(self.spec["command"]),
-                stdin=asyncio.subprocess.PIPE,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE
-            )
-            self.pid = self.proc.pid
-            
-            log(f"Process started with PID {self.pid}")
-            
+    async def list_tools(self):
+        if not self._resources:
             await self._initialize_session()
-            
-            self._health = asyncio.create_task(self._health_check())
-            self.state = "running"
-            
-        except Exception as e:
-            self.last_error = str(e)
-            self.state = "stopped"
-            log(f"Error starting process: {e}")
-            await self._cleanup()
-            raise
+        return await self._resources['session'].list_tools()
+
+    async def call_tool(self, name: str, arguments: dict):
+        if not self._resources:
+            await self._initialize_session()
+        return await self._resources['session'].call_tool(name, arguments)
 
     async def _health_check(self):
         while True:
@@ -250,50 +225,6 @@ class Child:
                 log(f"Health check error for {self.spec['name']}: {e}")
                 await self.stop()
                 break
-
-    def info(self):
-        return {
-            "state": self.state,
-            "pid": self.pid,
-            "last_error": self.last_error
-        }
-
-    async def list_tools(self):
-        try:
-            await self._initialize_session()
-            task_local = self._get_task_local()
-            return await task_local['session'].list_tools()
-        except Exception as e:
-            self.last_error = str(e)
-            return {"error": str(e)}
-
-    async def call_tool(self, name: str, arguments: dict):
-        try:
-            await self._initialize_session()
-            task_local = self._get_task_local()
-            return await task_local['session'].call_tool(name, arguments)
-        except Exception as e:
-            self.last_error = str(e)
-            return {"error": str(e)}
-
-    async def stop(self):
-        log(f"Stopping {self.spec['name']}...")
-        self.state = "stopping"
-        
-        # If we're not in the main task, create a new task for cleanup
-        if self._main_task and self._main_task != asyncio.current_task():
-            cleanup_task = asyncio.create_task(self._cleanup())
-            try:
-                await asyncio.wait_for(cleanup_task, timeout=5.0)
-            except asyncio.TimeoutError:
-                log(f"Cleanup timeout for {self.spec['name']}, forcing termination")
-                if self.proc:
-                    self.proc.kill()
-                    await self.proc.wait()
-        else:
-            await self._cleanup()
-            
-        log(f"Stopped {self.spec['name']}")
 
 class Supervisor:
     def __init__(self, cfg_file: Path = CONF_PATH):
@@ -385,80 +316,101 @@ async def _call(req, sup):
     return web.json_response(res)
 
 async def run_serve(port: int):
+    runner = None
+    sup = None
     try:
         log("Initializing supervisor...")
         sup = Supervisor()
-        
         log("Starting all servers...")
         await sup.start("all")
-        
         log("Setting up web application...")
         runner = web.AppRunner(build_app(sup))
         await runner.setup()
-        
         log(f"Starting web server on port {port}...")
-        site = web.TCPSite(runner, "127.0.0.1", port)
-        await site.start()
-        
+        try:
+            site = web.TCPSite(runner, "127.0.0.1", port)
+            await site.start()
+        except OSError as e:
+            if e.errno == 48:
+                log(f"Port {port} is already in use. Exiting.")
+                return
+            else:
+                raise
         print(f"[{ts()}] API on http://127.0.0.1:{port} – Ctrl-C to quit")
-        
-        loop = asyncio.get_running_loop()
         stop_event = asyncio.Event()
-        
+        loop = asyncio.get_running_loop()
         def handle_signal():
             if not stop_event.is_set():
                 log("Received shutdown signal")
                 stop_event.set()
-        
         for sig in (signal.SIGTERM, signal.SIGINT):
             loop.add_signal_handler(sig, handle_signal)
-            
         try:
             await stop_event.wait()
         finally:
             log("Shutting down servers...")
-            await sup.stop("all")
-            await runner.cleanup()
+            try:
+                await sup.stop("all")
+            except Exception as e:
+                log(f"Error stopping servers: {e}")
+            if runner is not None:
+                try:
+                    await runner.cleanup()
+                except Exception as e:
+                    log(f"Error cleaning up runner: {e}")
+            for sig in (signal.SIGTERM, signal.SIGINT):
+                try:
+                    loop.remove_signal_handler(sig)
+                except Exception:
+                    pass
             log("Shutdown complete")
-            
     except Exception as e:
         log(f"Error in run_serve: {e}")
+        if sup is not None:
+            try:
+                await sup.stop("all")
+            except Exception as cleanup_err:
+                log(f"Error during cleanup after error: {cleanup_err}")
+        if runner is not None:
+            try:
+                await runner.cleanup()
+            except Exception as cleanup_err:
+                log(f"Error cleaning up runner after error: {cleanup_err}")
         raise
 
 async def client_call(port: int, verb: str, tgt: Optional[str] = None):
     url = f"http://127.0.0.1:{port}"
     
-    async with aiohttp.ClientSession() as s:
+    async with aiohttp.ClientSession() as session:
         try:
             if verb == "status":
-                r = await asyncio.wait_for(s.get(f"{url}/status"), TIMEOUT_RPC)
-                print(json.dumps(await r.json(), indent=2))
+                async with session.get(f"{url}/status") as r:
+                    r = await asyncio.wait_for(r.json(), TIMEOUT_RPC)
+                    print(json.dumps(r, indent=2))
                 
             elif verb == "tools":
-                r = await asyncio.wait_for(s.get(f"{url}/tools"), TIMEOUT_RPC)
-                print(json.dumps(await r.json(), indent=2))
+                async with session.get(f"{url}/tools") as r:
+                    r = await asyncio.wait_for(r.json(), TIMEOUT_RPC)
+                    print(json.dumps(r, indent=2))
                 
             elif verb in ("start", "stop"):
                 if not tgt:
                     print(f"Error: {verb} requires a target")
                     sys.exit(1)
                     
-                r = await asyncio.wait_for(s.post(f"{url}/{verb}/{tgt}"), TIMEOUT_RPC)
-                if r.status != 200:
-                    print(f"Error: {r.status} {await r.text()}")
-                    sys.exit(1)
+                async with session.post(f"{url}/{verb}/{tgt}") as r:
+                    if r.status != 200:
+                        print(f"Error: {r.status} {await r.text()}")
+                        sys.exit(1)
                     
             elif verb == "kill":
-                r = await asyncio.wait_for(s.post(f"{url}/kill"), TIMEOUT_RPC)
-                if r.status != 200:
-                    print(f"Error: {r.status} {await r.text()}")
-                    sys.exit(1)
+                async with session.post(f"{url}/kill") as r:
+                    if r.status != 200:
+                        print(f"Error: {r.status} {await r.text()}")
+                        sys.exit(1)
                     
         except asyncio.TimeoutError:
             print(f"Error: Operation timed out after {TIMEOUT_RPC}s")
-            sys.exit(1)
-        except aiohttp.ClientError as e:
-            print(f"Error: {e}")
             sys.exit(1)
         except Exception as e:
             print(f"Unexpected error: {e}")
@@ -467,52 +419,90 @@ async def client_call(port: int, verb: str, tgt: Optional[str] = None):
 async def kill_server(port: int):
     log("Initiating server shutdown...")
     
-    # First try to stop all servers gracefully with a short timeout
+    # First try to stop all servers gracefully through the API
     try:
         url = f"http://127.0.0.1:{port}"
-        async with aiohttp.ClientSession() as s:
+        async with aiohttp.ClientSession() as session:
             try:
-                # Use a shorter timeout for graceful shutdown attempt
-                r = await asyncio.wait_for(s.post(f"{url}/stop/all"), timeout=5.0)
-                if r.status == 200:
-                    log("Servers stopped gracefully")
-                    await asyncio.sleep(1)  # Give servers time to cleanup
-            except asyncio.TimeoutError:
-                log("Graceful shutdown timed out")
+                async with session.post(f"{url}/stop/all", timeout=5) as r:
+                    if r.status == 200:
+                        log("Servers stopped gracefully through API")
+                        await asyncio.sleep(1)
             except Exception as e:
-                log(f"Error during graceful shutdown: {e}")
+                log(f"Could not stop servers through API: {e}")
     except Exception:
         pass
 
-    # Force kill any remaining processes
+    # Get all Python processes related to our script
     try:
-        # First try SIGTERM
-        subprocess.run(["pkill", "-TERM", "-f", "python fractalic_mcp_manager_v2.py"], check=False)
-        await asyncio.sleep(2)  # Give processes time to handle SIGTERM
+        result = subprocess.run(
+            ["pgrep", "-f", "python.*fractalic_mcp_manager_v2.py"],
+            capture_output=True, text=True, check=False
+        )
         
-        # Then check if any processes remain
-        result = subprocess.run(["pgrep", "-f", "python fractalic_mcp_manager_v2.py"], 
-                              capture_output=True, text=True, check=False)
-        
-        # If processes still exist, use SIGKILL
         if result.returncode == 0:
-            log("Some processes still running, forcing termination...")
-            subprocess.run(["pkill", "-KILL", "-f", "python fractalic_mcp_manager_v2.py"], check=False)
+            pids = result.stdout.strip().split('\n')
+            log(f"Found {len(pids)} processes to terminate")
             
-        log("Server processes terminated")
+            # First try SIGTERM
+            for pid in pids:
+                try:
+                    pid = int(pid)
+                    os.kill(pid, signal.SIGTERM)
+                    log(f"Sent SIGTERM to process {pid}")
+                except ProcessLookupError:
+                    continue
+                except Exception as e:
+                    log(f"Error sending SIGTERM to {pid}: {e}")
+            
+            # Wait a bit and check if processes are still running
+            await asyncio.sleep(2)
+            
+            # Check remaining processes
+            result = subprocess.run(
+                ["pgrep", "-f", "python.*fractalic_mcp_manager_v2.py"],
+                capture_output=True, text=True, check=False
+            )
+            
+            if result.returncode == 0:
+                remaining_pids = result.stdout.strip().split('\n')
+                if remaining_pids:
+                    log(f"{len(remaining_pids)} processes still running, sending SIGKILL")
+                    for pid in remaining_pids:
+                        try:
+                            pid = int(pid)
+                            os.kill(pid, signal.SIGKILL)
+                            log(f"Sent SIGKILL to process {pid}")
+                        except ProcessLookupError:
+                            continue
+                        except Exception as e:
+                            log(f"Error sending SIGKILL to {pid}: {e}")
+            
+            # Final verification
+            await asyncio.sleep(1)
+            result = subprocess.run(
+                ["pgrep", "-f", "python.*fractalic_mcp_manager_v2.py"],
+                capture_output=True, text=True, check=False
+            )
+            
+            if result.returncode == 0:
+                log("Warning: Some processes may still be running")
+            else:
+                log("All processes successfully terminated")
     except Exception as e:
-        log(f"Warning: Error killing processes: {e}")
-    
-    # Final verification
+        log(f"Error during process termination: {e}")
+        
+    # Clean up any remaining port bindings
     try:
-        result = subprocess.run(["pgrep", "-f", "python fractalic_mcp_manager_v2.py"], 
-                              capture_output=True, text=True, check=False)
-        if result.returncode == 0:
-            log("Warning: Some processes may still be running")
-        else:
-            log("All processes successfully terminated")
-    except Exception as e:
-        log(f"Warning: Error verifying process termination: {e}")
+        async with aiohttp.ClientSession() as session:
+            try:
+                async with session.get(f"http://127.0.0.1:{port}/status", timeout=1) as r:
+                    if r.status == 200:
+                        log(f"Warning: Port {port} is still in use")
+            except:
+                log(f"Port {port} is free")
+    except Exception:
+        pass
 
 def build_parser():
     p = argparse.ArgumentParser()
