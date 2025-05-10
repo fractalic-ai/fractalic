@@ -52,11 +52,143 @@ class Child:
         self.proc = None
         self.pid = None
         self.last_error = None
-        self.session = None
-        self._task_group = None
-        self._health = None
+        self._task_local = {}
         self._cleanup_lock = asyncio.Lock()
-        self.exit_stack = AsyncExitStack()
+        self._session_lock = asyncio.Lock()
+        self._session_init_time = None
+        self._SESSION_TTL = 3600
+        self._cleanup_event = asyncio.Event()
+        self._main_task = None
+        self._health = None
+
+    def _get_task_local(self):
+        task = asyncio.current_task()
+        if task not in self._task_local:
+            self._task_local[task] = {
+                'exit_stack': None,
+                'session': None,
+                'stdio': None,
+                'write': None,
+                'stdio_context': None
+            }
+        return self._task_local[task]
+
+    async def _initialize_session(self):
+        if not self.proc or not self.proc.stdin or not self.proc.stdout:
+            raise RuntimeError("Process not properly initialized")
+
+        server_params = StdioServerParameters(
+            command=self.spec["command"],
+            args=self.spec.get("args", []),
+            env=self.spec.get("env", {})
+        )
+
+        try:
+            task_local = self._get_task_local()
+            
+            # Create a new exit stack for this session
+            task_local['exit_stack'] = AsyncExitStack()
+            
+            # Store the current task as the main task for this session
+            self._main_task = asyncio.current_task()
+            
+            # Initialize stdio client in the same task context
+            stdio_context = stdio_client(server_params)
+            task_local['stdio_context'] = stdio_context
+            stdio_transport = await task_local['exit_stack'].enter_async_context(stdio_context)
+            task_local['stdio'], task_local['write'] = stdio_transport
+            
+            # Initialize session
+            task_local['session'] = await task_local['exit_stack'].enter_async_context(
+                ClientSession(task_local['stdio'], task_local['write'])
+            )
+            
+            self._session_init_time = time.time()
+            log(f"Session initialized for {self.spec['name']}")
+            
+        except Exception as e:
+            log(f"Error initializing session: {e}")
+            self._session_init_time = None
+            task_local = self._get_task_local()
+            if task_local['exit_stack']:
+                await task_local['exit_stack'].aclose()
+            task_local['exit_stack'] = None
+            task_local['stdio_context'] = None
+            await self._cleanup()
+            raise
+
+    async def _cleanup(self):
+        async with self._cleanup_lock:
+            log(f"Cleaning up resources for {self.spec['name']}...")
+            
+            # Cancel health check task if it exists
+            if self._health is not None:
+                self._health.cancel()
+                try:
+                    await self._health
+                except asyncio.CancelledError:
+                    pass
+                self._health = None
+
+            # Clean up task-local resources
+            task = asyncio.current_task()
+            if task in self._task_local:
+                task_local = self._task_local[task]
+                
+                # Close stdio transport first
+                if task_local['stdio']:
+                    try:
+                        await task_local['stdio'].aclose()
+                    except Exception as e:
+                        log(f"Error closing stdio: {e}")
+                if task_local['write']:
+                    try:
+                        await task_local['write'].aclose()
+                    except Exception as e:
+                        log(f"Error closing write: {e}")
+                
+                # Close session
+                if task_local['session']:
+                    try:
+                        await task_local['session'].aclose()
+                    except Exception as e:
+                        log(f"Error closing session: {e}")
+                    task_local['session'] = None
+                
+                # Close exit stack in the same task context
+                if task_local['exit_stack']:
+                    try:
+                        await task_local['exit_stack'].aclose()
+                    except Exception as e:
+                        log(f"Error closing exit stack: {e}")
+                    task_local['exit_stack'] = None
+                
+                # Clean up stdio context
+                if task_local['stdio_context']:
+                    task_local['stdio_context'] = None
+                
+                del self._task_local[task]
+            
+            self._session_init_time = None
+            self._main_task = None
+
+            # Terminate process
+            if self.proc:
+                try:
+                    self.proc.terminate()
+                    try:
+                        await asyncio.wait_for(self.proc.wait(), timeout=5.0)
+                    except asyncio.TimeoutError:
+                        self.proc.kill()
+                        await self.proc.wait()
+                except Exception as e:
+                    log(f"Error terminating process: {e}")
+                self.proc = None
+                self.pid = None
+
+            self.state = "stopped"
+            self._cleanup_event.set()
+            log(f"Cleanup completed for {self.spec['name']}")
 
     async def start(self):
         if self.state == "running":
@@ -103,87 +235,6 @@ class Child:
             await self._cleanup()
             raise
 
-    async def _initialize_session(self):
-        if not self.proc or not self.proc.stdin or not self.proc.stdout:
-            raise RuntimeError("Process not properly initialized")
-
-        server_params = StdioServerParameters(
-            command=self.spec["command"],
-            args=self.spec.get("args", []),
-            env=self.spec.get("env", {})
-        )
-
-        try:
-            # Create a new task group for this session
-            self._task_group = asyncio.TaskGroup()
-            async with self._task_group as tg:
-                stdio_transport = await self.exit_stack.enter_async_context(stdio_client(server_params))
-                self.stdio, self.write = stdio_transport
-                self.session = await self.exit_stack.enter_async_context(ClientSession(self.stdio, self.write))
-                log(f"Session initialized for {self.spec['name']}")
-        except Exception as e:
-            log(f"Error initializing session: {e}")
-            await self._cleanup()
-            raise
-
-    async def _cleanup(self):
-        async with self._cleanup_lock:
-            log(f"Cleaning up resources for {self.spec['name']}...")
-            
-            # Cancel health check task
-            if self._health:
-                self._health.cancel()
-                try:
-                    await self._health
-                except asyncio.CancelledError:
-                    pass
-                self._health = None
-
-            # Cancel task group
-            if self._task_group:
-                try:
-                    await self._task_group.__aexit__(None, None, None)
-                except Exception as e:
-                    log(f"Error cancelling task group: {e}")
-                self._task_group = None
-
-            # Close session
-            if self.session:
-                try:
-                    await self.session.close()
-                except Exception as e:
-                    log(f"Error closing session: {e}")
-                self.session = None
-
-            # Terminate process
-            if self.proc:
-                try:
-                    self.proc.terminate()
-                    try:
-                        await asyncio.wait_for(self.proc.wait(), timeout=5.0)
-                    except asyncio.TimeoutError:
-                        self.proc.kill()
-                        await self.proc.wait()
-                except Exception as e:
-                    log(f"Error terminating process: {e}")
-                self.proc = None
-                self.pid = None
-
-            # Close exit stack
-            try:
-                await self.exit_stack.aclose()
-            except Exception as e:
-                log(f"Error closing exit stack: {e}")
-
-            self.state = "stopped"
-            log(f"Cleanup completed for {self.spec['name']}")
-
-    async def stop(self):
-        log(f"Stopping {self.spec['name']}...")
-        self.state = "stopping"
-        await self._cleanup()
-        log(f"Stopped {self.spec['name']}")
-
     async def _health_check(self):
         while True:
             try:
@@ -209,21 +260,40 @@ class Child:
 
     async def list_tools(self):
         try:
-            if not self.session:
-                await self._initialize_session()
-            return await self.session.list_tools()
+            await self._initialize_session()
+            task_local = self._get_task_local()
+            return await task_local['session'].list_tools()
         except Exception as e:
             self.last_error = str(e)
             return {"error": str(e)}
 
     async def call_tool(self, name: str, arguments: dict):
         try:
-            if not self.session:
-                await self._initialize_session()
-            return await self.session.call_tool(name, arguments)
+            await self._initialize_session()
+            task_local = self._get_task_local()
+            return await task_local['session'].call_tool(name, arguments)
         except Exception as e:
             self.last_error = str(e)
             return {"error": str(e)}
+
+    async def stop(self):
+        log(f"Stopping {self.spec['name']}...")
+        self.state = "stopping"
+        
+        # If we're not in the main task, create a new task for cleanup
+        if self._main_task and self._main_task != asyncio.current_task():
+            cleanup_task = asyncio.create_task(self._cleanup())
+            try:
+                await asyncio.wait_for(cleanup_task, timeout=5.0)
+            except asyncio.TimeoutError:
+                log(f"Cleanup timeout for {self.spec['name']}, forcing termination")
+                if self.proc:
+                    self.proc.kill()
+                    await self.proc.wait()
+        else:
+            await self._cleanup()
+            
+        log(f"Stopped {self.spec['name']}")
 
 class Supervisor:
     def __init__(self, cfg_file: Path = CONF_PATH):
