@@ -10,7 +10,7 @@
 # ---------------------------------------------------------
 from __future__ import annotations
 
-import argparse, asyncio, contextlib, dataclasses, json, os, shlex, signal, subprocess, sys, time
+import argparse, asyncio, contextlib, dataclasses, json, os, shlex, signal, subprocess, sys, time, gc
 from pathlib import Path
 from typing import Any, Dict, Literal, Optional
 
@@ -263,13 +263,14 @@ class Supervisor:
             await getattr(c, meth)()
 
 # ==================================================================== aiohttp façade
-def build_app(sup: Supervisor):
+def build_app(sup: Supervisor, stop_event: asyncio.Event):
     app = web.Application()
     app.router.add_get ("/status",      lambda r: _json(r, sup.status()))
     app.router.add_get ("/tools",       lambda r: _await_json(r, sup.tools()))
     app.router.add_post("/start/{n}",   lambda r: _mut(r, sup, "start"))
     app.router.add_post("/stop/{n}",    lambda r: _mut(r, sup, "stop"))
     app.router.add_post("/call_tool",   lambda r: _call(r, sup))
+    app.router.add_post("/kill",        lambda r: _kill(r, sup, stop_event))
     return app
 
 async def _json(_, coro):
@@ -287,14 +288,21 @@ async def _call(req, sup):
     res  = await sup.call_tool(body["name"], body.get("arguments", {}))
     return web.json_response(res)
 
+async def _kill(req, sup: Supervisor, stop_ev: asyncio.Event):
+    # 1) stop all child servers
+    await sup.stop("all")
+    # 2) tell the main loop in run_serve() to exit
+    stop_ev.set()
+    return web.json_response({"status": "shutting-down"})
+
 # ==================================================================== runners
 async def run_serve(port: int):
     sup = Supervisor(); await sup.start("all")
-    runner = web.AppRunner(build_app(sup)); await runner.setup()
+    stop_ev = asyncio.Event()
+    runner = web.AppRunner(build_app(sup, stop_ev)); await runner.setup()
     site   = web.TCPSite(runner, "127.0.0.1", port); await site.start()
     log(f"API http://127.0.0.1:{port}  – Ctrl-C to quit")
 
-    stop_ev = asyncio.Event()
     def _stop(*_): stop_ev.set()
 
     # cross-platform signal handling
@@ -305,16 +313,24 @@ async def run_serve(port: int):
     await stop_ev.wait()
     log("shutting down …")
     await sup.stop("all"); await runner.cleanup()
+    await asyncio.sleep(0.1)  # Give time for all async cleanup
+    gc.collect()              # Force garbage collection
+    await asyncio.sleep(0.1)  # Allow any finalizers to run
 
 async def client_call(port: int, verb: str, tgt: Optional[str] = None):
     url = f"http://127.0.0.1:{port}"
     async with aiohttp.ClientSession() as s:
-        if verb in ("status", "tools"):
-            r = await s.get(f"{url}/{verb}"); print(json.dumps(await r.json(), indent=2))
-        elif verb in ("start", "stop"):
-            await s.post(f"{url}/{verb}/{tgt}")
-        else:
-            raise SystemExit(f"unknown verb {verb}")
+        try:
+            if verb in ("status", "tools"):
+                r = await s.get(f"{url}/{verb}"); print(json.dumps(await r.json(), indent=2))
+            elif verb in ("start", "stop"):
+                await s.post(f"{url}/{verb}/{tgt}")
+            elif verb == "kill":
+                await s.post(f"{url}/kill")
+            else:
+                raise SystemExit(f"unknown verb {verb}")
+        except aiohttp.ClientConnectorError:
+            print("Error: Could not connect to server (is it running?)")
 
 # ==================================================================== CLI
 def _parser():
@@ -322,6 +338,7 @@ def _parser():
     p.add_argument("--port", type=int, default=DEFAULT_PORT)
     sub = p.add_subparsers(dest="cmd", required=True)
     sub.add_parser("serve"); sub.add_parser("status"); sub.add_parser("tools")
+    sub.add_parser("kill")
     for v in ("start", "stop"):
         sc = sub.add_parser(v); sc.add_argument("target")
     return p
