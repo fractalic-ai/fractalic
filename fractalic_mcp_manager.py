@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
-# fractalic_mcp_manager_v3b.py – Fractalic MCP supervisor (auto-transport, health, back-off)
+# fractalic_mcp_manager.py – Fractalic MCP supervisor (auto-transport, health, back-off)
 #
 # CLI -----------------------------------------------------
-#   python fractalic_mcp_manager_v3b.py serve        [--port 5859]
-#   python fractalic_mcp_manager_v3b.py status       [--port 5859]
-#   python fractalic_mcp_manager_v3b.py tools        [--port 5859]
-#   python fractalic_mcp_manager_v3b.py start NAME   [--port 5859]
-#   python fractalic_mcp_manager_v3b.py stop  NAME   [--port 5859]
+#   python fractalic_mcp_manager.py serve        [--port 5859]
+#   python fractalic_mcp_manager.py status       [--port 5859]
+#   python fractalic_mcp_manager.py tools        [--port 5859]
+#   python fractalic_mcp_manager.py start NAME   [--port 5859]
+#   python fractalic_mcp_manager.py stop  NAME   [--port 5859]
 # ---------------------------------------------------------
 from __future__ import annotations
 
