@@ -19,7 +19,9 @@ from aiohttp import web
 
 from mcp.client.session          import ClientSession
 from mcp.client.stdio            import stdio_client, StdioServerParameters
-from mcp.client.sse              import sse_client
+from mcp.client.streamable_http  import streamablehttp_client
+
+import errno
 
 # -------------------------------------------------------------------- constants
 CONF_PATH    = Path(__file__).parent / "mcp_servers.json"
@@ -29,7 +31,7 @@ State     = Literal["starting", "running", "retrying", "stopped", "errored"]
 Transport = Literal["stdio", "http"]
 
 TIMEOUT_RPC   = 30         # s – RPC time-out
-HEALTH_INT    = 10         # s – between health probes
+HEALTH_INT    = 45         # s – between health probes (increased to avoid heartbeat clashes)
 SESSION_TTL   = 3600       # s – refresh session after this period
 MAX_RETRY     = 5
 BACKOFF_BASE  = 2          # exponential back-off
@@ -152,12 +154,15 @@ class Child:
                 await self._health
         await self._close_session()
         if self.proc:
-            self.proc.terminate()
             try:
+                self.proc.terminate()
                 await asyncio.wait_for(self.proc.wait(), timeout=5)
-            except asyncio.TimeoutError:
-                self.proc.kill()
-                await self.proc.wait()
+            except (asyncio.TimeoutError, ProcessLookupError):
+                try:
+                    self.proc.kill()
+                    await self.proc.wait()
+                except ProcessLookupError:
+                    pass  # Process already gone
             for pipe in [self.proc.stdin, self.proc.stdout, self.proc.stderr]:
                 if pipe:
                     try:
@@ -202,7 +207,7 @@ class Child:
                     
             asyncio.create_task(log_stderr())
             
-        except Exception as e:
+        except (Exception, asyncio.SubprocessError) as e:
             log(f"Error spawning {self.name}: {e}")
             raise
 
@@ -214,10 +219,13 @@ class Child:
         self._exit_stack = contextlib.AsyncExitStack()
         if self.transport == "http":
             transport = await self._exit_stack.enter_async_context(
-                sse_client(self.spec["url"])
+                streamablehttp_client(self.spec["url"])
             )
             self.session = await self._exit_stack.enter_async_context(
-                ClientSession(transport)
+                ClientSession(
+                    transport,
+                    client_info={"name": "Fractalic MCP Manager", "version": "0.3.0"},
+                )
             )
         else:
             stdio_ctx = stdio_client(StdioServerParameters(
@@ -229,6 +237,8 @@ class Child:
             self.session = await self._exit_stack.enter_async_context(
                 ClientSession(*transport)
             )
+        # Mandatory MCP handshake
+        await self.session.initialize()
         self.session_at = time.time()
         self.started_at = self.started_at or self.session_at
 
