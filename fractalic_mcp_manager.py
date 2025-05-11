@@ -84,6 +84,9 @@ class Child:
         self.started_at  = None
         self._cmd_q      : asyncio.Queue = asyncio.Queue()
         self._runner     = asyncio.create_task(self._loop())
+        self.healthy     = False          # Track liveness separately from readiness
+        self.restart_count = 0            # Track total number of restarts
+        self.last_error   = None          # Store last error message
 
     async def start(self):
         if self.state == "running": return
@@ -106,6 +109,8 @@ class Child:
                 tools = await self.list_tools()
                 if tools and not isinstance(tools, dict) or "error" not in tools:
                     log(f"{self.name} tools available after {attempt + 1} attempts")
+                    self.state = "running"           # Set state to running after successful tool probe
+                    self.healthy = True              # Mark as healthy since tools are available
                     return
             except Exception as e:
                 log(f"Attempt {attempt + 1} failed for {self.name}: {e}")
@@ -241,6 +246,7 @@ class Child:
         await self.session.initialize()
         self.session_at = time.time()
         self.started_at = self.started_at or self.session_at
+        self.healthy = True               # Mark as healthy after successful handshake
 
     async def _close_session(self):
         if self._exit_stack:
@@ -254,9 +260,12 @@ class Child:
                 await asyncio.sleep(HEALTH_INT)
                 await self._ensure_session()
                 await asyncio.wait_for(self.session.list_tools(), timeout=TIMEOUT_RPC / 3)
+                self.healthy = True        # Mark as healthy after successful tool list
             except asyncio.CancelledError:
                 break
             except Exception as e:
+                self.healthy = False       # Mark as unhealthy before retry
+                self.last_error = str(e)   # Store the error message
                 log(f"{self.name} unhealthy: {e}")
                 await self._schedule_retry()
                 break
@@ -276,6 +285,7 @@ class Child:
         self.state   = "retrying"
         log(f"{self.name} retrying in {backoff}s …")
         await asyncio.sleep(backoff)
+        self.restart_count += 1           # Increment restart count before retry
         await self._do_start()
 
     async def list_tools(self):
@@ -294,6 +304,9 @@ class Child:
             "transport":  self.transport,
             "retries":    self.retries,
             "uptime":     round(time.time() - self.started_at, 1) if self.started_at else None,
+            "healthy":    self.healthy,    # Expose health status
+            "restarts":   self.restart_count,  # Expose restart count
+            "last_error": self.last_error,     # Expose last error if any
         }
 
 # ==================================================================== Supervisor
