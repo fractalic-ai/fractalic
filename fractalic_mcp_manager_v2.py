@@ -19,7 +19,7 @@ from aiohttp import web
 
 from mcp.client.session          import ClientSession
 from mcp.client.stdio            import stdio_client, StdioServerParameters
-from mcp.client.streamable_http  import streamablehttp_client
+from mcp.client.sse              import sse_client
 
 # -------------------------------------------------------------------- constants
 CONF_PATH    = Path(__file__).parent / "mcp_servers.json"
@@ -84,7 +84,36 @@ class Child:
         self._runner     = asyncio.create_task(self._loop())
 
     async def start(self):
-        await self._cmd_q.put(("start",))
+        if self.state == "running": return
+        self.state = "starting"; self.retries = 0
+        
+        # Add startup delay if specified
+        startup_delay = int(self.spec.get("env", {}).get("STARTUP_DELAY", "0"))
+        if startup_delay > 0:
+            log(f"Waiting {startup_delay}ms for {self.name} to initialize...")
+            await asyncio.sleep(startup_delay / 1000)
+            
+        await self._spawn_if_needed()
+        
+        # Wait for tools to be available
+        retry_count = int(self.spec.get("env", {}).get("RETRY_COUNT", "3"))
+        retry_delay = int(self.spec.get("env", {}).get("RETRY_DELAY", "2000")) / 1000
+        
+        for attempt in range(retry_count):
+            try:
+                tools = await self.list_tools()
+                if tools and not isinstance(tools, dict) or "error" not in tools:
+                    log(f"{self.name} tools available after {attempt + 1} attempts")
+                    return
+            except Exception as e:
+                log(f"Attempt {attempt + 1} failed for {self.name}: {e}")
+            
+            if attempt < retry_count - 1:
+                await asyncio.sleep(retry_delay)
+        
+        self.state = "errored"
+        self.last_error = f"Failed to get tools after {retry_count} attempts"
+
     async def stop(self):
         await self._cmd_q.put(("stop",))
 
@@ -185,7 +214,7 @@ class Child:
         self._exit_stack = contextlib.AsyncExitStack()
         if self.transport == "http":
             transport = await self._exit_stack.enter_async_context(
-                streamablehttp_client(self.spec["url"])
+                sse_client(self.spec["url"])
             )
             self.session = await self._exit_stack.enter_async_context(
                 ClientSession(transport)

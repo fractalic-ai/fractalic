@@ -24,7 +24,6 @@ import aiohttp
 from aiohttp import web
 from mcp.client.stdio import stdio_client, StdioServerParameters
 from mcp.client.session import ClientSession
-from mcp.client.streamable_http import streamablehttp_client as MCPHttpClient
 
 # Add these imports
 import asyncio.subprocess
@@ -68,7 +67,7 @@ class Child:
     async def start(self):
         if self.state == "running": return
         self.state = "starting"; self.retries = 0
-        await self._spawn()
+        await self._spawn_if_needed()
 
     async def stop(self):
         self.state = "stopped"
@@ -96,7 +95,7 @@ class Child:
                 "last_error": self.last_error}
 
     # ───────────────────── spawn / health / retry ──────────────────
-    async def _spawn(self):
+    async def _spawn_if_needed(self):
         cmd = [self.spec["command"], *self.spec.get("args", [])]
         env = os.environ.copy(); env.update(self.spec.get("env", {}))
 
@@ -160,7 +159,7 @@ class Child:
             self.state = "errored"; return
         self.retries += 1; self.state = "retrying"
         await self.stop(); await asyncio.sleep(2)
-        await self._spawn()
+        await self._spawn_if_needed()
 
     # ───────────────────── tool ops (SDK) ──────────────────────────
     async def list_tools(self):

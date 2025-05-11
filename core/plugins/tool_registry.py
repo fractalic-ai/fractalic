@@ -103,59 +103,76 @@ class ToolRegistry(dict):
         print(f"[ToolRegistry] MCP servers to load: {self.mcp_servers}")
         for srv in self.mcp_servers:
             try:
+                print(f"[ToolRegistry] Attempting to load tools from {srv}")
                 response = mcp_list(srv)
                 print(f"[ToolRegistry] MCP {srv} raw response: {response}")
+                
                 if not response:
                     print(f"[ToolRegistry] MCP {srv} returned empty or None response.")
                     continue
-                    
-                # Force restart of the MCP server if we're having issues
-                if all("error" in service_data for service_data in response.values()):
+                
+                # Check if all services have errors
+                if isinstance(response, dict) and all(isinstance(service_data, dict) and "error" in service_data for service_data in response.values()):
                     print(f"[ToolRegistry] All services have errors. Attempting to restart MCP server...")
                     try:
                         import subprocess, time
+                        # Kill existing server
                         subprocess.run(["pkill", "-f", "fractalic_mcp_manager_v2"], check=False)
                         time.sleep(2)
-                        subprocess.Popen(["python3", "fractalic_mcp_manager_v2.py", "serve"])
-                        time.sleep(5)  # Give it time to start
-                        # Try again
+                        
+                        # Start new server with increased timeout
+                        proc = subprocess.Popen([
+                            "python3", 
+                            "fractalic_mcp_manager_v2.py", 
+                            "serve",
+                            "--port", "5859"
+                        ])
+                        
+                        # Wait for server to start
+                        time.sleep(5)
+                        
+                        # Try again with increased timeout
                         response = mcp_list(srv)
-                    except Exception as restart_err:
-                        print(f"[ToolRegistry] Failed to restart MCP server: {restart_err}")
-                
-                # response is a dict of {service_name: {"tools": [...]}}
-                if not isinstance(response, dict):
-                    print(f"[ToolRegistry] MCP {srv} returned non-dict response: {type(response)}")
-                    continue
-                    
-                for service_name, service_data in response.items():
-                    if isinstance(service_data, dict) and "error" in service_data:
-                        print(f"[ToolRegistry] Error in service {service_name}: {service_data['error']}")
-                        continue
-                        
-                    if not isinstance(service_data, dict) or "tools" not in service_data:
-                        print(f"[ToolRegistry] Invalid service data format for {service_name}: {service_data}")
-                        continue
-                        
-                    tools = service_data.get("tools", [])
-                    if not tools:
-                        print(f"[ToolRegistry] No tools found for service {service_name}")
-                        continue
-                        
-                    print(f"[ToolRegistry] Processing {len(tools)} tools from service: {service_name}")
-                    for tool in tools:
-                        if "name" not in tool:
-                            print(f"[ToolRegistry] Tool missing name: {tool}")
+                        if not response or all("error" in service_data for service_data in response.values()):
+                            print(f"[ToolRegistry] Server restart failed. Last error: {response}")
                             continue
                             
-                        print(f"[ToolRegistry] Registering MCP tool manifest: {tool}")
-                        tool["_mcp"] = srv
-                        # Add service name to help identify the tool source
-                        tool["_service"] = service_name
-                        self._register(tool, from_mcp=True)
-                        print(f"[ToolRegistry] Registered MCP tool: {tool.get('name')} from {srv} ({service_name})")
+                    except Exception as restart_err:
+                        print(f"[ToolRegistry] Failed to restart MCP server: {restart_err}")
+                        continue
+                
+                # Process tools from each service
+                if isinstance(response, dict):
+                    for service_name, service_data in response.items():
+                        if isinstance(service_data, dict) and "error" in service_data:
+                            print(f"[ToolRegistry] Error in service {service_name}: {service_data['error']}")
+                            continue
+                            
+                        if not isinstance(service_data, dict) or "tools" not in service_data:
+                            print(f"[ToolRegistry] Invalid service data format for {service_name}: {service_data}")
+                            continue
+                            
+                        tools = service_data.get("tools", [])
+                        if not tools:
+                            print(f"[ToolRegistry] No tools found for service {service_name}")
+                            continue
+                            
+                        print(f"[ToolRegistry] Processing {len(tools)} tools from service: {service_name}")
+                        for tool in tools:
+                            if "name" not in tool:
+                                print(f"[ToolRegistry] Tool missing name: {tool}")
+                                continue
+                                
+                            print(f"[ToolRegistry] Registering MCP tool manifest: {tool}")
+                            tool["_mcp"] = srv
+                            tool["_service"] = service_name
+                            self._register(tool, from_mcp=True)
+                            print(f"[ToolRegistry] Registered MCP tool: {tool.get('name')} from {srv} ({service_name})")
+                else:
+                    print(f"[ToolRegistry] Invalid response format from {srv}: {type(response)}")
+                    
             except Exception as e:
-                print(f"[ToolRegistry] MCP {srv} skipped: {e}", file=sys.stderr)
+                print(f"[ToolRegistry] Error loading MCP server {srv}: {e}", file=sys.stderr)
 
     def _register(self, meta: Dict[str, Any],
                   explicit=False, runner_override: Callable | None = None,
