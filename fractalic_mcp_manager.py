@@ -88,39 +88,52 @@ class Child:
         self.healthy     = False          # Track liveness separately from readiness
         self.restart_count = 0            # Track total number of restarts
         self.last_error   = None          # Store last error message
+        self.health_failures = 0          # Track consecutive health check failures
 
     async def start(self):
         if self.state == "running": return
         self.state = "starting"; self.retries = 0
-        
-        # Add startup delay if specified
         startup_delay = int(self.spec.get("env", {}).get("STARTUP_DELAY", "0"))
         if startup_delay > 0:
             log(f"Waiting {startup_delay}ms for {self.name} to initialize...")
             await asyncio.sleep(startup_delay / 1000)
-            
         await self._spawn_if_needed()
-        
-        # Wait for tools to be available
         retry_count = int(self.spec.get("env", {}).get("RETRY_COUNT", "3"))
         retry_delay = int(self.spec.get("env", {}).get("RETRY_DELAY", "2000")) / 1000
-        
         for attempt in range(retry_count):
             try:
-                tools = await self.list_tools()
+                tools = await asyncio.wait_for(self.list_tools(), timeout=10)
                 if tools and not isinstance(tools, dict) or "error" not in tools:
                     log(f"{self.name} tools available after {attempt + 1} attempts")
-                    self.state = "running"           # Set state to running after successful tool probe
-                    self.healthy = True              # Mark as healthy since tools are available
+                    self.state = "running"
+                    self.healthy = True
                     return
             except Exception as e:
                 log(f"Attempt {attempt + 1} failed for {self.name}: {e}")
-            
             if attempt < retry_count - 1:
                 await asyncio.sleep(retry_delay)
-        
+        # If we reach here, all attempts failed: kill process, mark errored
+        log(f"{self.name} failed to expose tools after {retry_count} attempts, killing process and marking as errored.")
+        await self._close_session()
+        if self.proc:
+            try:
+                log(f"Killing {self.name} (pid {self.pid}) after failed tool exposure.")
+                self.proc.kill()
+                await asyncio.wait_for(self.proc.wait(), timeout=5)
+            except Exception as kill_exc:
+                log(f"Kill failed for {self.name}: {kill_exc}")
+            if self.pid:
+                try:
+                    import signal
+                    log(f"Trying os.kill on {self.name} (pid {self.pid}) after failed tool exposure.")
+                    os.kill(self.pid, signal.SIGKILL)
+                except Exception as oskill_exc:
+                    log(f"os.kill failed for {self.name}: {oskill_exc}")
+        self.proc, self.pid = None, None
         self.state = "errored"
         self.last_error = f"Failed to get tools after {retry_count} attempts"
+        log(f"{self.name} is now marked as errored and will not be restarted.")
+        return  # Always return so supervisor can proceed
 
     async def stop(self):
         await self._cmd_q.put(("stop",))
@@ -262,14 +275,38 @@ class Child:
                 await self._ensure_session()
                 await asyncio.wait_for(self.session.list_tools(), timeout=TIMEOUT_RPC / 3)
                 self.healthy = True        # Mark as healthy after successful tool list
+                self.health_failures = 0   # Reset on success
             except asyncio.CancelledError:
                 break
             except Exception as e:
                 self.healthy = False       # Mark as unhealthy before retry
                 self.last_error = str(e)   # Store the error message
-                log(f"{self.name} unhealthy: {e}")
-                await self._schedule_retry()
-                break
+                self.health_failures += 1
+                log(f"{self.name} unhealthy: {e} (failure {self.health_failures})")
+                if self.health_failures >= 2:
+                    log(f"{self.name} failed health check twice, killing process and marking as errored.")
+                    await self._close_session()
+                    if self.proc:
+                        try:
+                            log(f"Attempting graceful kill of {self.name} (pid {self.pid})")
+                            self.proc.kill()
+                            await self.proc.wait()
+                        except Exception as kill_exc:
+                            log(f"Graceful kill failed for {self.name}: {kill_exc}")
+                        # Fallback: try os.kill if process still exists
+                        if self.pid:
+                            try:
+                                log(f"Trying os.kill on {self.name} (pid {self.pid})")
+                                os.kill(self.pid, signal.SIGKILL)
+                            except Exception as oskill_exc:
+                                log(f"os.kill failed for {self.name}: {oskill_exc}")
+                    self.proc, self.pid = None, None
+                    self.state = "errored"
+                    log(f"{self.name} is now marked as errored and will not be restarted.")
+                    break
+                else:
+                    await self._schedule_retry()
+                    break
 
     async def _schedule_retry(self):
         await self._close_session()
@@ -316,13 +353,27 @@ class Supervisor:
         cfg = json.loads(file.read_text())
         self.children = {n: Child(n, spec) for n, spec in cfg["mcpServers"].items()}
 
-    async def start (self, tgt): await self._each("start", tgt)
-    async def stop  (self, tgt): await self._each("stop",  tgt)
+    async def start(self, tgt):
+        if tgt == "all":
+            # Launch all children as background tasks so API can start even if some fail
+            for c in self.children.values():
+                asyncio.create_task(c.start())
+        else:
+            c = self.children.get(tgt)
+            if not c: raise web.HTTPNotFound(text=f"{tgt} unknown")
+            await c.start()
+
+    async def stop(self, tgt):
+        await self._each("stop", tgt)
+
     async def status(self):      return {n: c.info() for n, c in self.children.items()}
 
     async def tools(self):
         out = {}
         for n, c in self.children.items():
+            if c.state != "running":
+                out[n] = {"error": f"MCP state is {c.state}", "tools": []}
+                continue
             try:
                 tl = await c.list_tools()
                 tools_list = [tool_to_obj(t) for t in tl.tools]
@@ -334,6 +385,8 @@ class Supervisor:
 
     async def call_tool(self, name: str, args: Dict[str, Any]):
         for c in self.children.values():
+            if c.state == "errored":
+                continue  # Skip errored children
             try:
                 tl = await c.list_tools()
                 if any(t.name == name for t in tl.tools):
