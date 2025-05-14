@@ -16,6 +16,7 @@ from typing import Any, Dict, Literal, Optional
 
 import aiohttp
 from aiohttp import web
+from aiohttp_cors import setup as cors_setup, ResourceOptions, CorsViewMixin
 
 from mcp.client.session          import ClientSession
 from mcp.client.stdio            import stdio_client, StdioServerParameters
@@ -352,6 +353,24 @@ class Supervisor:
 # ==================================================================== aiohttp façade
 def build_app(sup: Supervisor, stop_event: asyncio.Event):
     app = web.Application()
+    
+    # Setup CORS
+    cors = cors_setup(app, defaults={
+        "*": ResourceOptions(
+            allow_credentials=True,
+            expose_headers="*",
+            allow_headers="*",
+            allow_methods="*"
+        ),
+        "http://localhost:3000": ResourceOptions(
+            allow_credentials=True,
+            expose_headers="*",
+            allow_headers="*",
+            allow_methods="*"
+        )
+    })
+    
+    # Add routes
     app.router.add_get ("/status",      lambda r: _json(r, sup.status()))
     app.router.add_get ("/tools",       lambda r: _await_json(r, sup.tools()))
     app.router.add_get ("/list_tools",  lambda r: _await_json(r, sup.tools()))
@@ -359,6 +378,11 @@ def build_app(sup: Supervisor, stop_event: asyncio.Event):
     app.router.add_post("/stop/{n}",    lambda r: _mut(r, sup, "stop"))
     app.router.add_post("/call_tool",   lambda r: _call(r, sup))
     app.router.add_post("/kill",        lambda r: _kill(r, sup, stop_event))
+    
+    # Configure CORS for all routes
+    for route in list(app.router.routes()):
+        cors.add(route)
+    
     return app
 
 async def _json(_, coro):
