@@ -89,6 +89,11 @@ class Child:
         self.restart_count = 0            # Track total number of restarts
         self.last_error   = None          # Store last error message
         self.health_failures = 0          # Track consecutive health check failures
+        # --- New fields for output capture ---
+        self.stdout_buffer = []  # List of dicts: {"timestamp": str, "line": str}
+        self.stderr_buffer = []  # List of dicts: {"timestamp": str, "line": str}
+        self.last_output_renewal = None  # ISO8601 string of last output change
+        self._output_buffer_limit = 1000  # Max lines to keep per buffer
 
     async def start(self):
         if self.state == "running": return
@@ -216,15 +221,26 @@ class Child:
             self.pid = self.proc.pid
             self.started_at = time.time()
             
-            # Log stderr output from the process for better debugging
-            async def log_stderr():
+            # --- New: Capture stdout and stderr output with timestamps ---
+            import datetime
+            def iso_now():
+                return datetime.datetime.now().isoformat()
+            async def capture_output(stream, buffer, stream_name):
                 while True:
-                    line = await self.proc.stderr.readline()
+                    line = await stream.readline()
                     if not line:
                         break
-                    log(f"{self.name} stderr: {line.decode('utf-8', errors='replace').strip()}")
-                    
-            asyncio.create_task(log_stderr())
+                    decoded = line.decode('utf-8', errors='replace').rstrip('\n')
+                    entry = {"timestamp": iso_now(), "line": decoded}
+                    buffer.append(entry)
+                    # Limit buffer size
+                    if len(buffer) > self._output_buffer_limit:
+                        del buffer[0:len(buffer)-self._output_buffer_limit]
+                    self.last_output_renewal = entry["timestamp"]
+                    log(f"{self.name} {stream_name}: {decoded}")
+            
+            asyncio.create_task(capture_output(self.proc.stdout, self.stdout_buffer, 'stdout'))
+            asyncio.create_task(capture_output(self.proc.stderr, self.stderr_buffer, 'stderr'))
             
         except (Exception, asyncio.SubprocessError) as e:
             log(f"Error spawning {self.name}: {e}")
@@ -345,6 +361,10 @@ class Child:
             "healthy":    self.healthy,    # Expose health status
             "restarts":   self.restart_count,  # Expose restart count
             "last_error": self.last_error,     # Expose last error if any
+            # --- New fields ---
+            "stdout":     self.stdout_buffer[-50:],  # Last 50 lines, each with timestamp
+            "stderr":     self.stderr_buffer[-50:],  # Last 50 lines, each with timestamp
+            "last_output_renewal": self.last_output_renewal,
         }
 
 # ==================================================================== Supervisor
