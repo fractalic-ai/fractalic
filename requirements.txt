@@ -14,4 +14,5 @@ PyYAML==6.0.2
 rich==13.9.4
 toml==0.10.2
 mcp>=1.8.0
+tiktoken
 

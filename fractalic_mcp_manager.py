@@ -23,6 +23,7 @@ from mcp.client.stdio            import stdio_client, StdioServerParameters
 from mcp.client.streamable_http  import streamablehttp_client
 
 import errno
+import tiktoken
 
 # -------------------------------------------------------------------- constants
 CONF_PATH    = Path(__file__).parent / "mcp_servers.json"
@@ -367,6 +368,22 @@ class Child:
             "last_output_renewal": self.last_output_renewal,
         }
 
+    async def get_tools_info(self):
+        """Return tool count and token count of the schema for this child/server."""
+        if self.state != "running":
+            return {"tool_count": 0, "token_count": 0, "tools_error": f"MCP state is {self.state}"}
+        try:
+            tl = await self.list_tools()
+            tools_list = [tool_to_obj(t) for t in tl.tools]
+            tool_count = len(tools_list)
+            # Token count: serialize tools_list to JSON and count tokens
+            enc = tiktoken.encoding_for_model("gpt-3.5-turbo")
+            schema_json = json.dumps(tools_list)
+            token_count = len(enc.encode(schema_json))
+            return {"tool_count": tool_count, "token_count": token_count}
+        except Exception as e:
+            return {"tool_count": 0, "token_count": 0, "tools_error": str(e)}
+
 # ==================================================================== Supervisor
 class Supervisor:
     def __init__(self, file: Path = CONF_PATH):
@@ -386,7 +403,17 @@ class Supervisor:
     async def stop(self, tgt):
         await self._each("stop", tgt)
 
-    async def status(self):      return {n: c.info() for n, c in self.children.items()}
+    async def status(self):
+        # Gather base info
+        base = {n: c.info() for n, c in self.children.items()}
+        # Gather tools info (tool count, token count) for each child
+        tools_info = {}
+        for n, c in self.children.items():
+            tools_info[n] = await c.get_tools_info()
+        # Merge tools info into base info
+        for n in base:
+            base[n].update(tools_info[n])
+        return base
 
     async def tools(self):
         out = {}
