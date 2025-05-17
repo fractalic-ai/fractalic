@@ -553,12 +553,31 @@ def _parser():
     sub.add_parser("kill")
     for v in ("start", "stop"):
         sc = sub.add_parser(v); sc.add_argument("target")
+    # Add tools-dump command
+    dump = sub.add_parser("tools-dump")
+    dump.add_argument("output_file", help="Path to output JSON file")
+    dump.add_argument("target", nargs="?", default="all", help="Optional: server name (default: all)")
     return p
 
 def main():
     a = _parser().parse_args()
     if a.cmd == "serve":
         asyncio.run(run_serve(a.port))
+    elif a.cmd == "tools-dump":
+        # Dump tools schema to file using HTTP API
+        async def dump_tools():
+            url = f"http://127.0.0.1:{a.port}"
+            async with aiohttp.ClientSession() as s:
+                r = await s.get(f"{url}/tools")
+                all_tools = await r.json()
+                if a.target == "all":
+                    tools = all_tools
+                else:
+                    tools = {a.target: all_tools.get(a.target, {"error": "Not found", "tools": []})}
+                with open(a.output_file, "w", encoding="utf-8") as f:
+                    json.dump(tools, f, indent=2)
+                print(f"Tools schema dumped to {a.output_file}")
+        asyncio.run(dump_tools())
     else:
         asyncio.run(client_call(a.port, a.cmd, getattr(a, "target", None)))
 
