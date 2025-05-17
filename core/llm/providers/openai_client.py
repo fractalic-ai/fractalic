@@ -222,6 +222,11 @@ class liteclient:
         return "openai"
 
     # -----------------------------------------------------------------
+    class LLMCallException(Exception):
+        def __init__(self, message, partial_result=None):
+            super().__init__(message)
+            self.partial_result = partial_result
+
     def llm_call(
         self,
         prompt_text: Optional[str] = None,
@@ -327,53 +332,67 @@ class liteclient:
 
         # ----- conversation loop -----
         convo = []
-        for _ in range(self.max_tool_turns):
-            if stream:
-                rsp = completion(stream=True, **params)
-                content = StreamProcessor(self.ui,
-                                          params["stop"]).process(rsp)
-                tool_calls = []
-            else:
-                rsp = completion(**params)
-                if hasattr(rsp, "choices"):  # Regular response
-                    msg = rsp["choices"][0]["message"]
-                    content = msg.get("content", "")
-                    tool_calls = msg.get("tool_calls", [])
-                else:  # Streaming response
-                    content = StreamProcessor(self.ui,
-                                            params["stop"]).process(rsp)
+        try:
+            for _ in range(self.max_tool_turns):
+                if stream:
+                    try:
+                        sp = StreamProcessor(self.ui, params["stop"])
+                        rsp = completion(stream=True, **params)
+                        content = sp.process(rsp)
+                    except Exception as e:
+                        # On streaming error, propagate buffer so far
+                        raise self.LLMCallException(f"Streaming error: {e}", partial_result=sp.last_chunk) from e
                     tool_calls = []
+                else:
+                    try:
+                        rsp = completion(**params)
+                        if hasattr(rsp, "choices"):  # Regular response
+                            msg = rsp["choices"][0]["message"]
+                            content = msg.get("content", "")
+                            tool_calls = msg.get("tool_calls", [])
+                        else:  # Streaming response
+                            sp = StreamProcessor(self.ui, params["stop"])
+                            content = sp.process(rsp)
+                            tool_calls = []
+                    except Exception as e:
+                        # On error, propagate convo so far
+                        raise self.LLMCallException(f"Completion error: {e}", partial_result="\n\n".join(convo)) from e
 
-            self.ui.show("assistant", content or "[tool call]")
-            convo.append(content or "")
-            hist.append({"role": "assistant",
-                         "content": content,
-                         "tool_calls": tool_calls or None})
+                self.ui.show("assistant", content or "[tool call]")
+                convo.append(content or "")
+                hist.append({"role": "assistant",
+                             "content": content,
+                             "tool_calls": tool_calls or None})
 
-            if not tool_calls:
-                break
+                if not tool_calls:
+                    break
 
-            # ---- execute tool calls ----
-            for tc in tool_calls:
-                args = tc["function"]["arguments"]
-                call_log = (f"> TOOL CALL, id: {tc['id']}\n"
-                            f"tool: {tc['function']['name']}\n"
-                            f"args: {json.dumps(json.loads(args), indent=2, ensure_ascii=False)}")
-                self.ui.show("", call_log)
-                convo.append(call_log or "")
+                # ---- execute tool calls ----
+                for tc in tool_calls:
+                    args = tc["function"]["arguments"]
+                    call_log = (f"> TOOL CALL, id: {tc['id']}\n"
+                                f"tool: {tc['function']['name']}\n"
+                                f"args: {json.dumps(json.loads(args), indent=2, ensure_ascii=False)}")
+                    self.ui.show("", call_log)
+                    convo.append(call_log or "")
 
-                res = self.exec.execute(tc["function"]["name"], args)
-                resp_log = (f"> TOOL RESPONSE, id: {tc['id']}\n"
-                            f"response: {res}")
-                self.ui.show("", resp_log)
-                convo.append(resp_log or "")
+                    res = self.exec.execute(tc["function"]["name"], args)
+                    resp_log = (f"> TOOL RESPONSE, id: {tc['id']}\n"
+                                f"response: {res}")
+                    self.ui.show("", resp_log)
+                    convo.append(resp_log or "")
 
-                hist.append({"role": "tool",
-                             "tool_call_id": tc["id"],
-                             "name": tc["function"]["name"],
-                             "content": res})
-            params["messages"] = hist
-
+                    hist.append({"role": "tool",
+                                 "tool_call_id": tc["id"],
+                                 "name": tc["function"]["name"],
+                                 "content": res})
+                params["messages"] = hist
+        except self.LLMCallException as e:
+            # Propagate with partial result
+            raise
+        except Exception as e:
+            # Catch-all: propagate convo so far
+            raise self.LLMCallException(f"Unexpected LLM error: {e}", partial_result="\n\n".join(convo)) from e
         return "\n\n".join(convo)
 
 # -------- legacy alias --------

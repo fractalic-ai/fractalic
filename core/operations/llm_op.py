@@ -194,9 +194,16 @@ def process_llm(ast: AST, current_node: Node) -> Optional[Node]:
         )
         
     except Exception as e:
+        # Check for LLMCallException with partial result
+        partial = None
+        if hasattr(e, 'partial_result') and getattr(e, 'partial_result'):
+            partial = getattr(e, 'partial_result')
+            console.print(f"[yellow]Partial LLM response before error:[/yellow]\n{partial}")
+            current_node.response_content = f"PARTIAL RESPONSE BEFORE ERROR:\n{partial}\n\nERROR: {str(e)}"
+        else:
+            current_node.response_content = f"ERROR: {str(e)}"
         console.print(f"[bold red]✗ Failed: {str(e)}[/bold red]")
         console.print(f"[bold red]  Operation content:[/bold red]\n{current_node.content}")
-        current_node.response_content = f"ERROR: {str(e)}"
         raise
 
     # Get save-to-file parameter
