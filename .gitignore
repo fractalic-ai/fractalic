@@ -171,3 +171,4 @@ cython_debug/
 .pypirc
 .DS_Store
 mcp_servers.json
+DBG_TOOLS.json
