@@ -234,7 +234,7 @@ class liteclient:
         operation_params: Optional[Dict[str, Any]] = None,
         *,
         stream: bool = False
-    ) -> str:
+    ) -> Dict[str, Any]:
 
         op = operation_params or {}
         provider = self._provider(op)
@@ -270,7 +270,7 @@ class liteclient:
             resp = client.responses.create(**payload)
             content = resp.output_text      # correct property per SDK documentation
             self.ui.show("", content)
-            return content             # ← early exit
+            return {"text": content}             # ← early exit
         # ----------------------------------------------------------------
 
         # ------------ Chat-Completions branch -------------------------
@@ -393,7 +393,7 @@ class liteclient:
         except Exception as e:
             # Catch-all: propagate convo so far
             raise self.LLMCallException(f"Unexpected LLM error: {e}", partial_result="\n\n".join(convo)) from e
-        return "\n\n".join(convo)
+        return {"text": "\n\n".join(convo), "messages": hist}
 
 # -------- legacy alias --------
 openaiclient = liteclient

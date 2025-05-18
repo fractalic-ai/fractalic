@@ -42,6 +42,7 @@ class Node:
     created_by: Optional[str] = None  # Store the key of the operation node that triggered this response
     # here we need to store the path of parent file file path for this run operation
     created_by_file : Optional[str] = None
+    response_messages: Optional[list] = None  # Store full LLM/tool message trace
 
     @property
     def hash(self) -> str:

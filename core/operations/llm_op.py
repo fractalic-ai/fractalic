@@ -180,9 +180,15 @@ def process_llm(ast: AST, current_node: Node) -> Optional[Node]:
     start_time = time.time()
     try:
         response = llm_client.llm_call(prompt_text, messages, params)
-
-        # Store the raw response on the current node for export
-        current_node.response_content = response
+        # Always extract text for use, and only save messages for trace
+        if isinstance(response, dict) and 'text' in response:
+            response_text = response['text']
+            current_node.response_content = response_text
+            if 'messages' in response:
+                current_node.response_messages = response['messages']
+        else:
+            response_text = response
+            current_node.response_content = response_text
 
         duration = time.time() - start_time
         mins, secs = divmod(int(duration), 60)
@@ -224,7 +230,7 @@ def process_llm(ast: AST, current_node: Node) -> Optional[Node]:
     else:
         header = "# LLM response block\n"
 
-    response_ast = AST(f"{header}{response}\n")
+    response_ast = AST(f"{header}{response_text}\n")
     for node_key, node in response_ast.parser.nodes.items():
         node.role = "assistant"
         node.created_by = current_node.key  # Store the ID of the operation node that triggered this response

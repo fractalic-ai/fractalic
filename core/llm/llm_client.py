@@ -27,7 +27,7 @@ class LLMClient:
         from core.llm.providers.openai_client import liteclient
         return liteclient
   
-    def llm_call(self, prompt_text: str, messages: list = None, operation_params: dict = None) -> str:
+    def llm_call(self, prompt_text: str, messages: list = None, operation_params: dict = None) -> dict:
         """
         Call the LLM with either a text prompt or structured messages.
         
@@ -37,7 +37,7 @@ class LLMClient:
             operation_params: Additional parameters for the LLM call
         
         Returns:
-            String response from the LLM
+            dict: { 'text': str, 'messages': list }
         """
         # Forward the call to the provider-specific implementation
         return self.client.llm_call(prompt_text, messages, operation_params)
