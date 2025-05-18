@@ -219,7 +219,7 @@ def process_llm(ast: AST, current_node: Node) -> Optional[Node]:
     if save_to_file:
         file_path = Path(save_to_file)
         file_path.parent.mkdir(parents=True, exist_ok=True)
-        file_path.write_text(response)
+        file_path.write_text(response_text)
 
     # Handle header
     header = ""
