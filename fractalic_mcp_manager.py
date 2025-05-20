@@ -244,6 +244,8 @@ class Child:
                     if len(buffer) > self._output_buffer_limit:
                         del buffer[0:len(buffer)-self._output_buffer_limit]
                     self.last_output_renewal = entry["timestamp"]
+                    # Add prefix with process name, stream, and timestamp
+                    print(f"[{entry['timestamp']}] [{self.name} {stream_name}] {decoded}")
                     log(f"{self.name} {stream_name}: {decoded}")
             
             asyncio.create_task(capture_output(self.proc.stdout, self.stdout_buffer, 'stdout'))
