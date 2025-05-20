@@ -11,6 +11,19 @@ import json
 import os
 import toml
 from fastapi.responses import FileResponse, Response
+import logging
+
+# --- Robust import for ToolRegistry regardless of working directory ---
+import sys
+import os
+current_dir = os.path.dirname(os.path.abspath(__file__))
+project_root = os.path.abspath(os.path.join(current_dir, '..', '..'))
+if project_root not in sys.path:
+    sys.path.insert(0, project_root)
+from core.plugins.tool_registry import ToolRegistry
+
+logging.getLogger("git").setLevel(logging.CRITICAL)
+logging.getLogger("git.cmd").setLevel(logging.CRITICAL)
 
 app = FastAPI()
 
@@ -409,3 +422,15 @@ async def run_fractalic(request: Request):
         await process.wait()
 
     return StreamingResponse(stream_fractalic(), media_type="text/plain")
+
+@app.get("/tools_schema/")
+async def tools_schema(tools_dir: str = Query("tools", description="Path to the tools directory")):
+    """
+    Autodiscover tools from the specified tools_dir and return their schema in OpenAI/MCP-compatible JSON format.
+    """
+    try:
+        registry = ToolRegistry(tools_dir=tools_dir)
+        schema = registry.generate_schema()
+        return JSONResponse(content=schema)
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"detail": f"Internal Server Error: {str(e)}"})
