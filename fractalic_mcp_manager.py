@@ -25,6 +25,8 @@ from mcp.client.streamable_http  import streamablehttp_client
 import errno
 import tiktoken
 
+TOKENIZER = tiktoken.get_encoding("cl100k_base")
+
 # -------------------------------------------------------------------- constants
 CONF_PATH    = Path(__file__).parent / "mcp_servers.json"
 DEFAULT_PORT = 5859
@@ -95,6 +97,10 @@ class Child:
         self.stderr_buffer = []  # List of dicts: {"timestamp": str, "line": str}
         self.last_output_renewal = None  # ISO8601 string of last output change
         self._output_buffer_limit = 1000  # Max lines to keep per buffer
+        # --- Caching for tools_info ---
+        self._last_tools_list = None
+        self._last_token_count = None
+        self._last_schema_json = None
 
     async def start(self):
         if self.state == "running": return
@@ -375,12 +381,17 @@ class Child:
         try:
             tl = await self.list_tools()
             tools_list = [tool_to_obj(t) for t in tl.tools]
-            tool_count = len(tools_list)
-            # Token count: serialize tools_list to JSON and count tokens
-            enc = tiktoken.encoding_for_model("gpt-3.5-turbo")
+            if tools_list == self._last_tools_list:
+                return {
+                    "tool_count": len(self._last_tools_list),
+                    "token_count": self._last_token_count
+                }
             schema_json = json.dumps(tools_list)
-            token_count = len(enc.encode(schema_json))
-            return {"tool_count": tool_count, "token_count": token_count}
+            token_count = len(TOKENIZER.encode(schema_json))
+            self._last_tools_list = tools_list
+            self._last_token_count = token_count
+            self._last_schema_json = schema_json
+            return {"tool_count": len(tools_list), "token_count": token_count}
         except Exception as e:
             return {"tool_count": 0, "token_count": 0, "tools_error": str(e)}
 
