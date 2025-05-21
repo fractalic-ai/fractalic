@@ -370,22 +370,34 @@ class liteclient:
                 # ---- execute tool calls ----
                 for tc in tool_calls:
                     args = tc["function"]["arguments"]
-                    call_log = (f"> TOOL CALL, id: {tc['id']}\n"
-                                f"tool: {tc['function']['name']}\n"
-                                f"args: {json.dumps(json.loads(args), indent=2, ensure_ascii=False)}")
-                    self.ui.show("", call_log)
-                    convo.append(call_log or "")
+                    try:
+                        parsed_args = json.loads(args) if args else {}
+                        call_log = (f"> TOOL CALL, id: {tc['id']}\n"
+                                    f"tool: {tc['function']['name']}\n"
+                                    f"args: {json.dumps(parsed_args, indent=2, ensure_ascii=False)}")
+                        self.ui.show("", call_log)
+                        convo.append(call_log or "")
 
-                    res = self.exec.execute(tc["function"]["name"], args)
-                    resp_log = (f"> TOOL RESPONSE, id: {tc['id']}\n"
-                                f"response: {res}")
-                    self.ui.show("", resp_log)
-                    convo.append(resp_log or "")
+                        res = self.exec.execute(tc["function"]["name"], args)
+                        resp_log = (f"> TOOL RESPONSE, id: {tc['id']}\n"
+                                    f"response: {res}")
+                        self.ui.show("", resp_log)
+                        convo.append(resp_log or "")
 
-                    hist.append({"role": "tool",
-                                 "tool_call_id": tc["id"],
-                                 "name": tc["function"]["name"],
-                                 "content": res})
+                        hist.append({"role": "tool",
+                                     "tool_call_id": tc["id"],
+                                     "name": tc["function"]["name"],
+                                     "content": res})
+                    except json.JSONDecodeError:
+                        error_msg = f"Invalid JSON arguments for tool {tc['function']['name']}: {args}"
+                        self.ui.error(error_msg)
+                        convo.append(error_msg)
+                        hist.append({"role": "tool",
+                                     "tool_call_id": tc["id"],
+                                     "name": tc["function"]["name"],
+                                     "content": json.dumps({"error": error_msg}, indent=2)})
+                        # Break the tool call loop and return current conversation
+                        return {"text": "\n\n".join(convo), "messages": hist}
                 params["messages"] = hist
         except self.LLMCallException as e:
             # Propagate with partial result
