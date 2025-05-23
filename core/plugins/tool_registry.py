@@ -65,14 +65,24 @@ class ToolRegistry(dict):
         self._load_mcp()
 
     def generate_schema(self) -> List[Dict[str, Any]]:
-        return [{
-            "type": "function",
-            "function": {
+        """Generate OpenAI-compatible schema for all registered tools."""
+        schema = []
+        for m in self._manifests:
+            # Skip invalid manifests
+            if not isinstance(m, dict) or "name" not in m:
+                continue
+            # Create the function schema
+            function_schema = {
                 "name": m["name"],
-                "description": m["description"],
-                "parameters": m["parameters"],
-            },
-        } for m in self._manifests]
+                "description": m.get("description", ""),
+                "parameters": m.get("parameters", {"type": "object", "properties": {}})
+            }
+            # Add to schema list
+            schema.append({
+                "type": "function",
+                "function": function_schema
+            })
+        return schema
 
     def _load_yaml_manifests(self):
         for y in self.tools_dir.rglob("*.yaml"):
@@ -86,9 +96,23 @@ class ToolRegistry(dict):
                 continue
             if src.with_suffix(".yaml").exists():
                 continue
-            name = src.stem
             cmd_type = "python-cli" if src.suffix == ".py" else "bash-cli"
             schema, desc, runner = sniff_cli(src, cmd_type)
+            if isinstance(schema, list):
+                # Register each manifest in the list (multi-tool)
+                for manifest in schema:
+                    # Ensure the manifest has the required fields
+                    if not isinstance(manifest, dict) or "name" not in manifest:
+                        print(f"[ToolRegistry] Invalid manifest format in {src}: {manifest}")
+                        continue
+                    manifest["entry"] = str(src)
+                    manifest["command"] = cmd_type
+                    manifest["_auto"] = True
+                    self._register(manifest, runner_override=runner)
+                # If multi-tool, do NOT register the script stem as a tool
+                continue
+            # Single-tool fallback
+            name = src.stem
             manifest = {
                 "name": name,
                 "description": desc,
@@ -178,6 +202,7 @@ class ToolRegistry(dict):
                   explicit=False, runner_override: Callable | None = None,
                   from_mcp=False):
         name = meta["name"]
+        print(f"[ToolRegistry] Registering tool: {name} with manifest: {meta}")
         if name in self:
             if explicit and self[name].__dict__.get("_auto"):
                 pass

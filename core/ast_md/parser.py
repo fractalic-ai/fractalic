@@ -116,6 +116,8 @@ operations:
         oneOf:
           - type: string
             enum: ["none", "all"]
+          - type: string
+            description: "Single tool name"
           - type: array
             items:
               type: string

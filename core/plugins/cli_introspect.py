@@ -8,8 +8,8 @@ Better CLI introspection:
  • Detects `required=True` arguments.
  • Still falls back to GNU-style help-text regex for shell scripts.
 
-Contract: the script must print *something* on “--help”, but for Python we
-                                    don’t need to parse it anymore.
+Contract: the script must print *something* on "--help", but for Python we
+                                    don't need to parse it anymore.
 """
 from __future__ import annotations
 import json, re, subprocess, sys, runpy, types, argparse
@@ -117,22 +117,44 @@ def sniff(path: Path, kind: str):
     """
     path = path.expanduser().absolute()
     if kind == "python-cli":
-        # 1) Try direct JSON schema dump via --fractalic-dump-schema
+        # 1) Try multi-schema dump
+        try:
+            res = subprocess.run(
+                [sys.executable, str(path), "--fractalic-dump-multi-schema"],
+                capture_output=True, text=True, timeout=3, check=False
+            )
+            if res.returncode == 0 and res.stdout:
+                try:
+                    parsed = json.loads(res.stdout)
+                    if isinstance(parsed, list):
+                        # Return the list of manifests (multi-tool)
+                        return parsed, None, None
+                except json.JSONDecodeError:
+                    pass
+        except Exception:
+            pass
+        # 2) Fallback: single schema dump
         try:
             res = subprocess.run(
                 [sys.executable, str(path), SCHEMA_DUMP_FLAG],
                 capture_output=True, text=True, timeout=3, check=False
             )
             if res.returncode == 0 and res.stdout:
-                parsed = json.loads(res.stdout)
-                params = parsed.get("parameters") if isinstance(parsed, dict) else None
-                desc = parsed.get("description") if isinstance(parsed, dict) else None
-                if params and desc is not None:
-                    runner = _make_runner([sys.executable, str(path)])
-                    return params, desc, runner
+                try:
+                    parsed = json.loads(res.stdout)
+                    if isinstance(parsed, list):
+                        # Return the list of manifests (multi-tool)
+                        return parsed, None, None
+                    params = parsed.get("parameters") if isinstance(parsed, dict) else None
+                    desc = parsed.get("description") if isinstance(parsed, dict) else None
+                    if params and desc is not None:
+                        runner = _make_runner([sys.executable, str(path)])
+                        return params, desc, runner
+                except json.JSONDecodeError:
+                    pass
         except Exception:
             pass
-        # 2) Fallback: argparse capture via --help
+        # 3) Fallback: argparse capture via --help
         parser = _capture_argparse(path)
         if parser:
             props, req, desc = _schema_from_parser(parser)
@@ -143,7 +165,6 @@ def sniff(path: Path, kind: str):
         schema = {"type": "object", "properties": props, "required": req}
         runner = _make_runner([sys.executable, str(path)])
         return schema, desc, runner
-
     # ---------- bash-cli -------------
     help_txt = subprocess.run([str(path), "--help"],
                               capture_output=True, text=True).stdout
@@ -189,6 +210,9 @@ def introspect_script(script_path: str) -> Optional[Dict[str, Any]]:
         if result.returncode == 0 and result.stdout:
             try:
                 schema = json.loads(result.stdout)
+                # If schema is a list, it's a multi-tool schema
+                if isinstance(schema, list):
+                    return schema
                 # Basic validation: check for top-level keys
                 if isinstance(schema, dict) and "name" in schema and "parameters" in schema:
                      # Wrap it in the standard function structure
