@@ -8,15 +8,52 @@ prompt: |
   Just run a simple command like "ls" or "dir" depending on the system.
 tools: all
 
+# LLM response block
 
-# Exception Trace
-@llm operation requires either 'prompt' or 'block' parameter
-```
-Traceback (most recent call last):
-  File "/Users/marina/llexem-jan-25-deploy/llexem_deploy_2025/fractalic/core/operations/runner.py", line 194, in run
-    current_node = process_llm(ast, current_node)
-                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/Users/marina/llexem-jan-25-deploy/llexem_deploy_2025/fractalic/core/operations/llm_op.py", line 91, in process_llm
-    raise ValueError("@llm operation requires either 'prompt' or 'block' parameter")
-ValueError: @llm operation requires either 'prompt' or 'block' parameter
-```
+
+> TOOL CALL, id: call_xYl8iUMjcXDl9Q1drGTMsBu7
+tool: list_directory
+args: {
+  "path": "/"
+}
+
+> TOOL RESPONSE, id: call_xYl8iUMjcXDl9Q1drGTMsBu7
+response: {
+  "meta": null,
+  "content": [
+    {
+      "type": "text",
+      "text": "[FILE] .VolumeIcon.icns\n[FILE] .file\n[DIR] .nofollow\n[DIR] .resolve\n[DIR] .vol\n[DIR] Applications\n[DIR] Library\n[DIR] System\n[DIR] Users\n[DIR] Volumes\n[DIR] bin\n[DIR] cores\n[DIR] dev\n[FILE] etc\n[FILE] home\n[DIR] opt\n[DIR] private\n[DIR] sbin\n[FILE] tmp\n[DIR] usr\n[FILE] var",
+      "annotations": null
+    }
+  ],
+  "isError": false
+}
+
+The current directory contents are as follows:
+
+- **Files:**
+  - .VolumeIcon.icns
+  - .file
+  - etc
+  - home
+  - tmp
+  - var
+
+- **Directories:**
+  - .nofollow
+  - .resolve
+  - .vol
+  - Applications
+  - Library
+  - System
+  - Users
+  - Volumes
+  - bin
+  - cores
+  - dev
+  - opt
+  - private
+  - sbin
+  - usr
+

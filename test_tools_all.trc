@@ -11,9 +11,9 @@
         "source_block_id": null,
         "target_path": null,
         "target_block_id": null,
-        "key": "b750e131",
+        "key": "c3b58a66",
         "prev": null,
-        "next": "8d628957",
+        "next": "0ebf6d2e",
         "enabled": true,
         "role": "user",
         "response_content": null,
@@ -25,7 +25,11 @@
         "type": "operation",
         "name": "llm",
         "level": 1,
-        "params": {},
+        "params": {
+            "prompt": "Please use the fractalic_shell tool to list the current directory contents. \nJust run a simple command like \"ls\" or \"dir\" depending on the system.\n",
+            "tools": "all",
+            "stream": true
+        },
         "content": "@llm\nprompt: |\n  Please use the fractalic_shell tool to list the current directory contents. \n  Just run a simple command like \"ls\" or \"dir\" depending on the system.\ntools: all",
         "id": null,
         "indent": 4,
@@ -33,13 +37,73 @@
         "source_block_id": "",
         "target_path": "",
         "target_block_id": "",
-        "key": "8d628957",
-        "prev": "b750e131",
-        "next": null,
+        "key": "0ebf6d2e",
+        "prev": "c3b58a66",
+        "next": "b5503919",
         "enabled": true,
         "role": "user",
-        "response_content": null,
+        "response_content": "\n\n> TOOL CALL, id: call_xYl8iUMjcXDl9Q1drGTMsBu7\ntool: list_directory\nargs: {\n  \"path\": \"/\"\n}\n\n> TOOL RESPONSE, id: call_xYl8iUMjcXDl9Q1drGTMsBu7\nresponse: {\n  \"meta\": null,\n  \"content\": [\n    {\n      \"type\": \"text\",\n      \"text\": \"[FILE] .VolumeIcon.icns\\n[FILE] .file\\n[DIR] .nofollow\\n[DIR] .resolve\\n[DIR] .vol\\n[DIR] Applications\\n[DIR] Library\\n[DIR] System\\n[DIR] Users\\n[DIR] Volumes\\n[DIR] bin\\n[DIR] cores\\n[DIR] dev\\n[FILE] etc\\n[FILE] home\\n[DIR] opt\\n[DIR] private\\n[DIR] sbin\\n[FILE] tmp\\n[DIR] usr\\n[FILE] var\",\n      \"annotations\": null\n    }\n  ],\n  \"isError\": false\n}\n\nThe current directory contents are as follows:\n\n- **Files:**\n  - .VolumeIcon.icns\n  - .file\n  - etc\n  - home\n  - tmp\n  - var\n\n- **Directories:**\n  - .nofollow\n  - .resolve\n  - .vol\n  - Applications\n  - Library\n  - System\n  - Users\n  - Volumes\n  - bin\n  - cores\n  - dev\n  - opt\n  - private\n  - sbin\n  - usr",
         "created_by": null,
+        "created_by_file": "test_tools_all.md",
+        "response_messages": [
+            {
+                "role": "system",
+                "content": "You are a helpful assistant."
+            },
+            {
+                "role": "user",
+                "content": "# Test Tools All\n\nThis is a test to verify that `tools: all` parameter works correctly with LLM operations."
+            },
+            {
+                "role": "user",
+                "content": "Please use the fractalic_shell tool to list the current directory contents. \nJust run a simple command like \"ls\" or \"dir\" depending on the system.\n"
+            },
+            {
+                "role": "assistant",
+                "content": null,
+                "tool_calls": [
+                    {
+                        "function": {
+                            "arguments": "{\"path\":\"/\"}",
+                            "name": "list_directory"
+                        },
+                        "id": "call_xYl8iUMjcXDl9Q1drGTMsBu7",
+                        "type": "function"
+                    }
+                ]
+            },
+            {
+                "role": "tool",
+                "tool_call_id": "call_xYl8iUMjcXDl9Q1drGTMsBu7",
+                "name": "list_directory",
+                "content": "{\n  \"meta\": null,\n  \"content\": [\n    {\n      \"type\": \"text\",\n      \"text\": \"[FILE] .VolumeIcon.icns\\n[FILE] .file\\n[DIR] .nofollow\\n[DIR] .resolve\\n[DIR] .vol\\n[DIR] Applications\\n[DIR] Library\\n[DIR] System\\n[DIR] Users\\n[DIR] Volumes\\n[DIR] bin\\n[DIR] cores\\n[DIR] dev\\n[FILE] etc\\n[FILE] home\\n[DIR] opt\\n[DIR] private\\n[DIR] sbin\\n[FILE] tmp\\n[DIR] usr\\n[FILE] var\",\n      \"annotations\": null\n    }\n  ],\n  \"isError\": false\n}"
+            },
+            {
+                "role": "assistant",
+                "content": "The current directory contents are as follows:\n\n- **Files:**\n  - .VolumeIcon.icns\n  - .file\n  - etc\n  - home\n  - tmp\n  - var\n\n- **Directories:**\n  - .nofollow\n  - .resolve\n  - .vol\n  - Applications\n  - Library\n  - System\n  - Users\n  - Volumes\n  - bin\n  - cores\n  - dev\n  - opt\n  - private\n  - sbin\n  - usr",
+                "tool_calls": null
+            }
+        ]
+    },
+    {
+        "type": "heading",
+        "name": "# LLM response block",
+        "level": 1,
+        "params": null,
+        "content": "# LLM response block\n\n\n> TOOL CALL, id: call_xYl8iUMjcXDl9Q1drGTMsBu7\ntool: list_directory\nargs: {\n  \"path\": \"/\"\n}\n\n> TOOL RESPONSE, id: call_xYl8iUMjcXDl9Q1drGTMsBu7\nresponse: {\n  \"meta\": null,\n  \"content\": [\n    {\n      \"type\": \"text\",\n      \"text\": \"[FILE] .VolumeIcon.icns\\n[FILE] .file\\n[DIR] .nofollow\\n[DIR] .resolve\\n[DIR] .vol\\n[DIR] Applications\\n[DIR] Library\\n[DIR] System\\n[DIR] Users\\n[DIR] Volumes\\n[DIR] bin\\n[DIR] cores\\n[DIR] dev\\n[FILE] etc\\n[FILE] home\\n[DIR] opt\\n[DIR] private\\n[DIR] sbin\\n[FILE] tmp\\n[DIR] usr\\n[FILE] var\",\n      \"annotations\": null\n    }\n  ],\n  \"isError\": false\n}\n\nThe current directory contents are as follows:\n\n- **Files:**\n  - .VolumeIcon.icns\n  - .file\n  - etc\n  - home\n  - tmp\n  - var\n\n- **Directories:**\n  - .nofollow\n  - .resolve\n  - .vol\n  - Applications\n  - Library\n  - System\n  - Users\n  - Volumes\n  - bin\n  - cores\n  - dev\n  - opt\n  - private\n  - sbin\n  - usr",
+        "id": "llm-response-block",
+        "indent": 4,
+        "source_path": null,
+        "source_block_id": null,
+        "target_path": null,
+        "target_block_id": null,
+        "key": "b5503919",
+        "prev": "0ebf6d2e",
+        "next": null,
+        "enabled": true,
+        "role": "assistant",
+        "response_content": null,
+        "created_by": "0ebf6d2e",
         "created_by_file": "test_tools_all.md",
         "response_messages": null
     }
