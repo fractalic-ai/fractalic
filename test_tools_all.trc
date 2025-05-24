@@ -11,9 +11,9 @@
         "source_block_id": null,
         "target_path": null,
         "target_block_id": null,
-        "key": "66ea759a",
+        "key": "10234398",
         "prev": null,
-        "next": "a7ab7704",
+        "next": "389c4933",
         "enabled": true,
         "role": "user",
         "response_content": null,
@@ -37,12 +37,12 @@
         "source_block_id": "",
         "target_path": "",
         "target_block_id": "",
-        "key": "a7ab7704",
-        "prev": "66ea759a",
-        "next": "ebad8589",
+        "key": "389c4933",
+        "prev": "10234398",
+        "next": "9c2ed698",
         "enabled": true,
         "role": "user",
-        "response_content": "\n\n> TOOL CALL, id: call_kD49AicSZWevThVvu2oo0ReP\ntool: execute_command\nargs: {\n  \"command\": \"ls\",\n  \"timeout_ms\": 30000\n}\n\n> TOOL RESPONSE, id: call_kD49AicSZWevThVvu2oo0ReP\nresponse: {\n  \"meta\": null,\n  \"content\": [\n    {\n      \"type\": \"text\",\n      \"text\": \"Command started with PID 74430\\nInitial output:\\nDBG_TOOLS.json\\nLICENSE.txt\\nREADME.md\\n__pycache__\\ncall_tree.json\\ncore\\ndocker\\ndocker_build_run.sh\\ndocs\\nfractalic\\nfractalic.py\\nfractalic_mcp_manager.py\\nlogs\\nmcp_fix_summary.md\\nmcp_servers.json\\nreplicate_wan2v.log\\nrequirements.txt\\nrun_server.sh\\nrun_server_win.ps1\\nsettings.toml\\nsrc\\ntest_tools_all.ctx\\ntest_tools_all.md\\ntest_tools_all.trc\\ntest_tools_fix.ctx\\ntest_tools_fix.md\\ntest_tools_fix.trc\\ntutorials\\nvenv\\n\",\n      \"annotations\": null\n    }\n  ],\n  \"isError\": false\n}\n\nThe current directory contents are as follows:\n\n- DBG_TOOLS.json\n- LICENSE.txt\n- README.md\n- __pycache__\n- call_tree.json\n- core\n- docker\n- docker_build_run.sh\n- docs\n- fractalic\n- fractalic.py\n- fractalic_mcp_manager.py\n- logs\n- mcp_fix_summary.md\n- mcp_servers.json\n- replicate_wan2v.log\n- requirements.txt\n- run_server.sh\n- run_server_win.ps1\n- settings.toml\n- src\n- test_tools_all.ctx\n- test_tools_all.md\n- test_tools_all.trc\n- test_tools_fix.ctx\n- test_tools_fix.md\n- test_tools_fix.trc\n- tutorials\n- venv",
+        "response_content": "\n\n> TOOL CALL, id: call_6LNv8j8WQIpMUB0aZZDb6WXd\ntool: execute_command\nargs: {\n  \"command\": \"ls\",\n  \"timeout_ms\": 30000\n}\n\n> TOOL RESPONSE, id: call_6LNv8j8WQIpMUB0aZZDb6WXd\nresponse: {\n  \"meta\": null,\n  \"content\": [\n    {\n      \"type\": \"text\",\n      \"text\": \"Command started with PID 75879\\nInitial output:\\nDBG_TOOLS.json\\nLICENSE.txt\\nREADME.md\\n__pycache__\\ncall_tree.json\\ncore\\ndocker\\ndocker_build_run.sh\\ndocs\\nfractalic\\nfractalic.py\\nfractalic_mcp_manager.py\\nlogs\\nmcp_fix_summary.md\\nmcp_servers.json\\nreplicate_wan2v.log\\nrequirements.txt\\nrun_server.sh\\nrun_server_win.ps1\\nsettings.toml\\nsrc\\ntest_tools_all.ctx\\ntest_tools_all.md\\ntest_tools_all.trc\\ntest_tools_fix.ctx\\ntest_tools_fix.md\\ntest_tools_fix.trc\\ntutorials\\nvenv\\n\",\n      \"annotations\": null\n    }\n  ],\n  \"isError\": false\n}\n\nThe current directory contents are as follows:\n\n- DBG_TOOLS.json\n- LICENSE.txt\n- README.md\n- __pycache__\n- call_tree.json\n- core\n- docker\n- docker_build_run.sh\n- docs\n- fractalic\n- fractalic.py\n- fractalic_mcp_manager.py\n- logs\n- mcp_fix_summary.md\n- mcp_servers.json\n- replicate_wan2v.log\n- requirements.txt\n- run_server.sh\n- run_server_win.ps1\n- settings.toml\n- src\n- test_tools_all.ctx\n- test_tools_all.md\n- test_tools_all.trc\n- test_tools_fix.ctx\n- test_tools_fix.md\n- test_tools_fix.trc\n- tutorials\n- venv",
         "created_by": null,
         "created_by_file": "test_tools_all.md",
         "response_messages": [
@@ -67,16 +67,16 @@
                             "arguments": "{\"command\":\"ls\",\"timeout_ms\":30000}",
                             "name": "execute_command"
                         },
-                        "id": "call_kD49AicSZWevThVvu2oo0ReP",
+                        "id": "call_6LNv8j8WQIpMUB0aZZDb6WXd",
                         "type": "function"
                     }
                 ]
             },
             {
                 "role": "tool",
-                "tool_call_id": "call_kD49AicSZWevThVvu2oo0ReP",
+                "tool_call_id": "call_6LNv8j8WQIpMUB0aZZDb6WXd",
                 "name": "execute_command",
-                "content": "{\n  \"meta\": null,\n  \"content\": [\n    {\n      \"type\": \"text\",\n      \"text\": \"Command started with PID 74430\\nInitial output:\\nDBG_TOOLS.json\\nLICENSE.txt\\nREADME.md\\n__pycache__\\ncall_tree.json\\ncore\\ndocker\\ndocker_build_run.sh\\ndocs\\nfractalic\\nfractalic.py\\nfractalic_mcp_manager.py\\nlogs\\nmcp_fix_summary.md\\nmcp_servers.json\\nreplicate_wan2v.log\\nrequirements.txt\\nrun_server.sh\\nrun_server_win.ps1\\nsettings.toml\\nsrc\\ntest_tools_all.ctx\\ntest_tools_all.md\\ntest_tools_all.trc\\ntest_tools_fix.ctx\\ntest_tools_fix.md\\ntest_tools_fix.trc\\ntutorials\\nvenv\\n\",\n      \"annotations\": null\n    }\n  ],\n  \"isError\": false\n}"
+                "content": "{\n  \"meta\": null,\n  \"content\": [\n    {\n      \"type\": \"text\",\n      \"text\": \"Command started with PID 75879\\nInitial output:\\nDBG_TOOLS.json\\nLICENSE.txt\\nREADME.md\\n__pycache__\\ncall_tree.json\\ncore\\ndocker\\ndocker_build_run.sh\\ndocs\\nfractalic\\nfractalic.py\\nfractalic_mcp_manager.py\\nlogs\\nmcp_fix_summary.md\\nmcp_servers.json\\nreplicate_wan2v.log\\nrequirements.txt\\nrun_server.sh\\nrun_server_win.ps1\\nsettings.toml\\nsrc\\ntest_tools_all.ctx\\ntest_tools_all.md\\ntest_tools_all.trc\\ntest_tools_fix.ctx\\ntest_tools_fix.md\\ntest_tools_fix.trc\\ntutorials\\nvenv\\n\",\n      \"annotations\": null\n    }\n  ],\n  \"isError\": false\n}"
             },
             {
                 "role": "assistant",
@@ -90,20 +90,20 @@
         "name": "# LLM response block",
         "level": 1,
         "params": null,
-        "content": "# LLM response block\n\n\n> TOOL CALL, id: call_kD49AicSZWevThVvu2oo0ReP\ntool: execute_command\nargs: {\n  \"command\": \"ls\",\n  \"timeout_ms\": 30000\n}\n\n> TOOL RESPONSE, id: call_kD49AicSZWevThVvu2oo0ReP\nresponse: {\n  \"meta\": null,\n  \"content\": [\n    {\n      \"type\": \"text\",\n      \"text\": \"Command started with PID 74430\\nInitial output:\\nDBG_TOOLS.json\\nLICENSE.txt\\nREADME.md\\n__pycache__\\ncall_tree.json\\ncore\\ndocker\\ndocker_build_run.sh\\ndocs\\nfractalic\\nfractalic.py\\nfractalic_mcp_manager.py\\nlogs\\nmcp_fix_summary.md\\nmcp_servers.json\\nreplicate_wan2v.log\\nrequirements.txt\\nrun_server.sh\\nrun_server_win.ps1\\nsettings.toml\\nsrc\\ntest_tools_all.ctx\\ntest_tools_all.md\\ntest_tools_all.trc\\ntest_tools_fix.ctx\\ntest_tools_fix.md\\ntest_tools_fix.trc\\ntutorials\\nvenv\\n\",\n      \"annotations\": null\n    }\n  ],\n  \"isError\": false\n}\n\nThe current directory contents are as follows:\n\n- DBG_TOOLS.json\n- LICENSE.txt\n- README.md\n- __pycache__\n- call_tree.json\n- core\n- docker\n- docker_build_run.sh\n- docs\n- fractalic\n- fractalic.py\n- fractalic_mcp_manager.py\n- logs\n- mcp_fix_summary.md\n- mcp_servers.json\n- replicate_wan2v.log\n- requirements.txt\n- run_server.sh\n- run_server_win.ps1\n- settings.toml\n- src\n- test_tools_all.ctx\n- test_tools_all.md\n- test_tools_all.trc\n- test_tools_fix.ctx\n- test_tools_fix.md\n- test_tools_fix.trc\n- tutorials\n- venv",
+        "content": "# LLM response block\n\n\n> TOOL CALL, id: call_6LNv8j8WQIpMUB0aZZDb6WXd\ntool: execute_command\nargs: {\n  \"command\": \"ls\",\n  \"timeout_ms\": 30000\n}\n\n> TOOL RESPONSE, id: call_6LNv8j8WQIpMUB0aZZDb6WXd\nresponse: {\n  \"meta\": null,\n  \"content\": [\n    {\n      \"type\": \"text\",\n      \"text\": \"Command started with PID 75879\\nInitial output:\\nDBG_TOOLS.json\\nLICENSE.txt\\nREADME.md\\n__pycache__\\ncall_tree.json\\ncore\\ndocker\\ndocker_build_run.sh\\ndocs\\nfractalic\\nfractalic.py\\nfractalic_mcp_manager.py\\nlogs\\nmcp_fix_summary.md\\nmcp_servers.json\\nreplicate_wan2v.log\\nrequirements.txt\\nrun_server.sh\\nrun_server_win.ps1\\nsettings.toml\\nsrc\\ntest_tools_all.ctx\\ntest_tools_all.md\\ntest_tools_all.trc\\ntest_tools_fix.ctx\\ntest_tools_fix.md\\ntest_tools_fix.trc\\ntutorials\\nvenv\\n\",\n      \"annotations\": null\n    }\n  ],\n  \"isError\": false\n}\n\nThe current directory contents are as follows:\n\n- DBG_TOOLS.json\n- LICENSE.txt\n- README.md\n- __pycache__\n- call_tree.json\n- core\n- docker\n- docker_build_run.sh\n- docs\n- fractalic\n- fractalic.py\n- fractalic_mcp_manager.py\n- logs\n- mcp_fix_summary.md\n- mcp_servers.json\n- replicate_wan2v.log\n- requirements.txt\n- run_server.sh\n- run_server_win.ps1\n- settings.toml\n- src\n- test_tools_all.ctx\n- test_tools_all.md\n- test_tools_all.trc\n- test_tools_fix.ctx\n- test_tools_fix.md\n- test_tools_fix.trc\n- tutorials\n- venv",
         "id": "llm-response-block",
         "indent": 4,
         "source_path": null,
         "source_block_id": null,
         "target_path": null,
         "target_block_id": null,
-        "key": "ebad8589",
-        "prev": "a7ab7704",
+        "key": "9c2ed698",
+        "prev": "389c4933",
         "next": null,
         "enabled": true,
         "role": "assistant",
         "response_content": null,
-        "created_by": "a7ab7704",
+        "created_by": "389c4933",
         "created_by_file": "test_tools_all.md",
         "response_messages": null
     }
