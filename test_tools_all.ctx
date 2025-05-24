@@ -1,0 +1,13 @@
+# Test Tools All
+
+This is a test to verify that `tools: all` parameter works correctly with LLM operations.
+
+@llm
+prompt: |
+  Please use the fractalic_shell tool to list the current directory contents. 
+  Just run a simple command like "ls" or "dir" depending on the system.
+tools: all
+
+# LLM response block
+It seems that the `fractalic_shell` tool is not available in the current environment. However, I can assist you with other tasks or answer questions you may have. Please let me know how else I can help!
+

@@ -1,0 +1,90 @@
+[
+    {
+        "type": "heading",
+        "name": "# Test Tools All",
+        "level": 1,
+        "params": null,
+        "content": "# Test Tools All\n\nThis is a test to verify that `tools: all` parameter works correctly with LLM operations.",
+        "id": "test-tools-all",
+        "indent": 4,
+        "source_path": null,
+        "source_block_id": null,
+        "target_path": null,
+        "target_block_id": null,
+        "key": "0cd2aa19",
+        "prev": null,
+        "next": "5978387d",
+        "enabled": true,
+        "role": "user",
+        "response_content": null,
+        "created_by": null,
+        "created_by_file": "test_tools_all.md",
+        "response_messages": null
+    },
+    {
+        "type": "operation",
+        "name": "llm",
+        "level": 1,
+        "params": {
+            "prompt": "Please use the fractalic_shell tool to list the current directory contents. \nJust run a simple command like \"ls\" or \"dir\" depending on the system.\n",
+            "tools": "all",
+            "stream": true
+        },
+        "content": "@llm\nprompt: |\n  Please use the fractalic_shell tool to list the current directory contents. \n  Just run a simple command like \"ls\" or \"dir\" depending on the system.\ntools: all",
+        "id": null,
+        "indent": 4,
+        "source_path": "",
+        "source_block_id": "",
+        "target_path": "",
+        "target_block_id": "",
+        "key": "5978387d",
+        "prev": "0cd2aa19",
+        "next": "3708b6fd",
+        "enabled": true,
+        "role": "user",
+        "response_content": "It seems that the `fractalic_shell` tool is not available in the current environment. However, I can assist you with other tasks or answer questions you may have. Please let me know how else I can help!",
+        "created_by": null,
+        "created_by_file": "test_tools_all.md",
+        "response_messages": [
+            {
+                "role": "system",
+                "content": "You are a helpful assistant."
+            },
+            {
+                "role": "user",
+                "content": "# Test Tools All\n\nThis is a test to verify that `tools: all` parameter works correctly with LLM operations."
+            },
+            {
+                "role": "user",
+                "content": "Please use the fractalic_shell tool to list the current directory contents. \nJust run a simple command like \"ls\" or \"dir\" depending on the system.\n"
+            },
+            {
+                "role": "assistant",
+                "content": "It seems that the `fractalic_shell` tool is not available in the current environment. However, I can assist you with other tasks or answer questions you may have. Please let me know how else I can help!",
+                "tool_calls": null
+            }
+        ]
+    },
+    {
+        "type": "heading",
+        "name": "# LLM response block",
+        "level": 1,
+        "params": null,
+        "content": "# LLM response block\nIt seems that the `fractalic_shell` tool is not available in the current environment. However, I can assist you with other tasks or answer questions you may have. Please let me know how else I can help!",
+        "id": "llm-response-block",
+        "indent": 4,
+        "source_path": null,
+        "source_block_id": null,
+        "target_path": null,
+        "target_block_id": null,
+        "key": "3708b6fd",
+        "prev": "5978387d",
+        "next": null,
+        "enabled": true,
+        "role": "assistant",
+        "response_content": null,
+        "created_by": "5978387d",
+        "created_by_file": "test_tools_all.md",
+        "response_messages": null
+    }
+]
