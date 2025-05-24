@@ -11,20 +11,19 @@ tools: all
 # LLM response block
 
 
-> TOOL CALL, id: call_59gzh9y8dCATSqiUOQgvHchn
+> TOOL CALL, id: call_WVlQQ7F94k9SC5epFbgW35RD
 tool: execute_command
 args: {
-  "command": "ls",
-  "timeout_ms": 30000
+  "command": "ls"
 }
 
-> TOOL RESPONSE, id: call_59gzh9y8dCATSqiUOQgvHchn
+> TOOL RESPONSE, id: call_WVlQQ7F94k9SC5epFbgW35RD
 response: {
   "meta": null,
   "content": [
     {
       "type": "text",
-      "text": "Command started with PID 64029\nInitial output:\nDBG_TOOLS.json\nLICENSE.txt\nREADME.md\n__pycache__\ncall_tree.json\ncore\ndocker\ndocker_build_run.sh\ndocs\nfractalic\nfractalic.py\nfractalic_mcp_manager.py\nlogs\nmcp_fix_summary.md\nmcp_servers.json\nreplicate_wan2v.log\nrequirements.txt\nrun_server.sh\nrun_server_win.ps1\nsettings.toml\nsrc\ntest_tools_all.ctx\ntest_tools_all.md\ntest_tools_all.trc\ntest_tools_fix.ctx\ntest_tools_fix.md\ntest_tools_fix.trc\ntutorials\nvenv\n",
+      "text": "Command started with PID 64835\nInitial output:\nDBG_TOOLS.json\nLICENSE.txt\nREADME.md\n__pycache__\ncall_tree.json\ncore\ndocker\ndocker_build_run.sh\ndocs\nfractalic\nfractalic.py\nfractalic_mcp_manager.py\nlogs\nmcp_fix_summary.md\nmcp_servers.json\nreplicate_wan2v.log\nrequirements.txt\nrun_server.sh\nrun_server_win.ps1\nsettings.toml\nsrc\ntest_tools_all.ctx\ntest_tools_all.md\ntest_tools_all.trc\ntest_tools_fix.ctx\ntest_tools_fix.md\ntest_tools_fix.trc\ntutorials\nvenv\n",
       "annotations": null
     }
   ],
