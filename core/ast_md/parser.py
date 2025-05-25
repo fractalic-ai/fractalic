@@ -113,7 +113,7 @@ operations:
           type: string
         description: "List of strings where the model should stop generation (for Anthropic models it maps to stop_sequences parameter)."
       tools:
-        oneOf:
+        anyOf:
           - type: string
             enum: ["none", "all"]
           - type: string
