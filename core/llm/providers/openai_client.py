@@ -17,7 +17,11 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Callable
 
 from rich.console import Console
-from litellm import completion                          # chat-completions + Responses
+from litellm import (
+    completion,              # chat-completions + Responses
+    token_counter,
+    cost_per_token,
+)
 import openai                                           # raw SDK for file upload
 import requests
 import warnings
@@ -270,7 +274,29 @@ class liteclient:
             resp = client.responses.create(**payload)
             content = resp.output_text      # correct property per SDK documentation
             self.ui.show("", content)
-            return {"text": content}             # ← early exit
+            user_msg = {"role": "user", "content": prompt_text or ""}
+            assistant_msg = {"role": "assistant", "content": content}
+            prompt_tokens = token_counter(model=plain_model, messages=[user_msg])
+            completion_tokens = token_counter(model=plain_model, messages=[assistant_msg])
+            pc, cc = cost_per_token(
+                model=plain_model,
+                custom_llm_provider=provider,
+                prompt_tokens=prompt_tokens,
+                completion_tokens=completion_tokens,
+            )
+            assistant_msg["token_count"] = completion_tokens
+            assistant_msg["cost_usd"] = cc
+            user_msg["token_count"] = prompt_tokens
+            user_msg["cost_usd"] = pc
+            return {
+                "text": content,
+                "messages": [user_msg, assistant_msg],
+                "usage": {
+                    "prompt_tokens": prompt_tokens,
+                    "completion_tokens": completion_tokens,
+                    "total_cost": pc + cc,
+                },
+            }
         # ----------------------------------------------------------------
 
         # ------------ Chat-Completions branch -------------------------
@@ -340,11 +366,15 @@ class liteclient:
 
         # ----- conversation loop -----
         convo = []
+        total_prompt_tokens = 0
+        total_completion_tokens = 0
+        total_cost = 0.0
         try:
             for _ in range(self.max_tool_turns):
                 if stream:
                     try:
                         sp = StreamProcessor(self.ui, params["stop"])
+                        prompt_tokens = token_counter(model=params["model"], messages=params["messages"])
                         rsp = completion(stream=True, **params)
                         content = sp.process(rsp)
                     except Exception as e:
@@ -353,6 +383,7 @@ class liteclient:
                     tool_calls = []
                 else:
                     try:
+                        prompt_tokens = token_counter(model=params["model"], messages=params["messages"])
                         rsp = completion(**params)
                         if hasattr(rsp, "choices"):  # Regular response
                             msg = rsp["choices"][0]["message"]
@@ -366,11 +397,21 @@ class liteclient:
                         # On error, propagate convo so far
                         raise self.LLMCallException(f"Completion error: {e}", partial_result="\n\n".join(convo)) from e
 
+                completion_message = {"role": "assistant", "content": content, "tool_calls": tool_calls or None}
+                comp_tokens = token_counter(model=params["model"], messages=[completion_message])
                 self.ui.show("assistant", content or "[tool call]")
                 convo.append(content or "")
-                hist.append({"role": "assistant",
-                             "content": content,
-                             "tool_calls": tool_calls or None})
+                hist.append(completion_message)
+
+                total_prompt_tokens += prompt_tokens
+                total_completion_tokens += comp_tokens
+                cost_prompt, cost_completion = cost_per_token(
+                    model=params["model"],
+                    custom_llm_provider=provider,
+                    prompt_tokens=prompt_tokens,
+                    completion_tokens=comp_tokens,
+                )
+                total_cost += cost_prompt + cost_completion
 
                 if not tool_calls:
                     break
@@ -413,7 +454,26 @@ class liteclient:
         except Exception as e:
             # Catch-all: propagate convo so far
             raise self.LLMCallException(f"Unexpected LLM error: {e}", partial_result="\n\n".join(convo)) from e
-        return {"text": "\n\n".join(convo), "messages": hist}
+        # annotate each message with token counts and cost
+        for m in hist:
+            tokens = token_counter(model=params["model"], messages=[m])
+            m["token_count"] = tokens
+            if m.get("role") == "assistant":
+                _, cc = cost_per_token(model=params["model"], completion_tokens=tokens, custom_llm_provider=provider)
+                m["cost_usd"] = cc
+            else:
+                pc, _ = cost_per_token(model=params["model"], prompt_tokens=tokens, custom_llm_provider=provider)
+                m["cost_usd"] = pc
+
+        return {
+            "text": "\n\n".join(convo),
+            "messages": hist,
+            "usage": {
+                "prompt_tokens": total_prompt_tokens,
+                "completion_tokens": total_completion_tokens,
+                "total_cost": total_cost,
+            },
+        }
 
 # -------- legacy alias --------
 openaiclient = liteclient

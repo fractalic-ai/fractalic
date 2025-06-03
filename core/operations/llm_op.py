@@ -191,6 +191,11 @@ def process_llm(ast: AST, current_node: Node) -> Optional[Node]:
             current_node.response_content = response_text
             if 'messages' in response:
                 current_node.response_messages = response['messages']
+            if 'usage' in response:
+                u = response['usage']
+                current_node.response_prompt_tokens = u.get('prompt_tokens')
+                current_node.response_completion_tokens = u.get('completion_tokens')
+                current_node.response_total_cost = u.get('total_cost')
         else:
             response_text = response
             current_node.response_content = response_text

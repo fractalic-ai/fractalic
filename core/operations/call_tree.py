@@ -14,6 +14,9 @@ class CallTreeNode:
             self.trc_file = trc_file  # The .trc file being processed
             self.children = []  # Children nodes
             self.parent = parent  # The parent node
+            self.prompt_tokens = 0
+            self.completion_tokens = 0
+            self.cost = 0.0
 
     def add_child(self, child_node):
         self.children.append(child_node)
@@ -30,6 +33,9 @@ class CallTreeNode:
             "trc_file": self.trc_file,
             "trc_commit_hash": self.trc_commit_hash,
             "children": [child.to_dict() for child in self.children],
+            "prompt_tokens": self.prompt_tokens,
+            "completion_tokens": self.completion_tokens,
+            "cost": self.cost,
             "node_python" : str(self),
         }
 

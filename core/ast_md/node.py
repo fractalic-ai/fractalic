@@ -43,6 +43,9 @@ class Node:
     # here we need to store the path of parent file file path for this run operation
     created_by_file : Optional[str] = None
     response_messages: Optional[list] = None  # Store full LLM/tool message trace
+    response_prompt_tokens: Optional[int] = None
+    response_completion_tokens: Optional[int] = None
+    response_total_cost: Optional[float] = None
 
     @property
     def hash(self) -> str:

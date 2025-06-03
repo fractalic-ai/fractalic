@@ -58,6 +58,10 @@ def run(filename: str, param_node: Optional[Union[Node, AST]] = None, create_new
     goto_count = {}
     branch_name = None
     original_cwd = os.getcwd()
+
+    total_prompt_tokens = 0
+    total_completion_tokens = 0
+    total_cost = 0.0
     
     # Flag to track if execution ended with @return operation
     explicit_return = False
@@ -190,8 +194,17 @@ def run(filename: str, param_node: Optional[Union[Node, AST]] = None, create_new
                         file_commit_hashes=file_commit_hashes,
                         base_dir=base_dir
                     )
+                    if child_node:
+                        total_prompt_tokens += child_node.prompt_tokens
+                        total_completion_tokens += child_node.completion_tokens
+                        total_cost += child_node.cost
                 elif operation_name == "@llm":
+                    prev = current_node
                     current_node = process_llm(ast, current_node)
+                    if getattr(prev, "response_prompt_tokens", None) is not None:
+                        total_prompt_tokens += prev.response_prompt_tokens or 0
+                        total_completion_tokens += prev.response_completion_tokens or 0
+                        total_cost += prev.response_total_cost or 0.0
                 elif operation_name == "@goto":
                     current_node = process_goto(ast, current_node, goto_count)
                 elif operation_name == "@shell":
@@ -263,6 +276,9 @@ def run(filename: str, param_node: Optional[Union[Node, AST]] = None, create_new
         new_node.ctx_commit_hash = ctx_commit_hash
         new_node.trc_file = relative_trc_path
         new_node.trc_commit_hash = ctx_commit_hash  # Same commit hash as ctx
+        new_node.prompt_tokens = total_prompt_tokens
+        new_node.completion_tokens = total_completion_tokens
+        new_node.cost = total_cost
 
         return ast, new_node, relative_ctx_path, ctx_commit_hash, relative_trc_path, ctx_commit_hash, branch_name, explicit_return
 
@@ -308,6 +324,9 @@ def run(filename: str, param_node: Optional[Union[Node, AST]] = None, create_new
         new_node.ctx_commit_hash = ctx_commit_hash
         new_node.trc_file = relative_trc_path
         new_node.trc_commit_hash = ctx_commit_hash  # Same commit hash as ctx
+        new_node.prompt_tokens = total_prompt_tokens
+        new_node.completion_tokens = total_completion_tokens
+        new_node.cost = total_cost
 
         # Return results back to fractalic with trace information
         return ast, new_node, new_node.ctx_file, ctx_commit_hash, new_node.trc_file, new_node.trc_commit_hash, branch_name, explicit_return
