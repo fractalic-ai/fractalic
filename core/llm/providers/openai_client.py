@@ -443,6 +443,14 @@ class liteclient:
 
         op = operation_params or {}
         provider = self._provider(op)
+        
+        # Set OpenRouter-specific environment variables for custom app name display
+        model_name = op.get("model", self.model)
+        if "openrouter/" in model_name.lower():
+            # Set OpenRouter app name so it shows as "Fractalic" instead of "litellm" in dashboard
+            os.environ["OR_APP_NAME"] = "Fractalic"
+            # Optionally set site URL for better identification
+            os.environ["OR_SITE_URL"] = "https://fractalic.ai"
 
         # ── auto-upgrade to Responses API if any supplied media is a PDF ──
         wants_pdf = any(str(m).lower().endswith(".pdf") for m in op.get("media", []))
