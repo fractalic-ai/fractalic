@@ -18,6 +18,13 @@ from typing import Dict, List, Tuple, Callable, Any
 import os
 from core.config import Config
 
+# ─────────────────────────── Tool Execution Configuration ──────────────────────────
+TOOL_EXECUTION_TIMEOUT = None  # Default: No timeout. Set to number of seconds for timeout.
+# Examples:
+# TOOL_EXECUTION_TIMEOUT = None   # No timeout (default)
+# TOOL_EXECUTION_TIMEOUT = 30     # 30 second timeout  
+# TOOL_EXECUTION_TIMEOUT = 300    # 5 minute timeout
+
 import subprocess
 import json
 import sys
@@ -221,9 +228,11 @@ def sniff(path: Path, kind: str):
                                 if 'key' in item and 'value' in item:
                                     env[item['key']] = item['value']
                         
+                        # Set working directory to the tool's directory
+                        tool_dir = path.parent
                         result = subprocess.run(
                             [sys.executable, str(path), json_input],
-                            capture_output=True, text=True, env=env, timeout=30
+                            capture_output=True, text=True, env=env, timeout=TOOL_EXECUTION_TIMEOUT, cwd=str(tool_dir)
                         )
                         if result.returncode != 0:
                             try:

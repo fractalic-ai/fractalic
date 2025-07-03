@@ -28,6 +28,13 @@ from .cli_introspect import sniff as sniff_cli
 from .mcp_client import list_tools as mcp_list, call_tool as mcp_call
 from core.config import Config
 
+# ─────────────────────────── Tool Execution Configuration ──────────────────────────
+TOOL_EXECUTION_TIMEOUT = None  # Default: No timeout. Set to number of seconds for timeout.
+# Examples:
+# TOOL_EXECUTION_TIMEOUT = None   # No timeout (default)
+# TOOL_EXECUTION_TIMEOUT = 30     # 30 second timeout
+# TOOL_EXECUTION_TIMEOUT = 300    # 5 minute timeout
+
 # Import sanitization function for Gemini compatibility
 def _sanitize_schema_for_gemini(schema: dict, max_depth: int = 6, current_depth: int = 0) -> dict:
     """Sanitize JSON schema for Gemini/Vertex AI compatibility."""
@@ -317,9 +324,11 @@ class ToolRegistry(dict):
                         if 'key' in item and 'value' in item:
                             env[item['key']] = item['value']
                 
+                # Set working directory to the tool's directory
+                tool_dir = path.parent
                 result = subprocess.run(
                     [sys.executable, str(path), json_input],
-                    capture_output=True, text=True, env=env, timeout=30
+                    capture_output=True, text=True, env=env, timeout=TOOL_EXECUTION_TIMEOUT, cwd=str(tool_dir)
                 )
                 if result.returncode != 0:
                     try:
