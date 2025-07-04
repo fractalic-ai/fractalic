@@ -92,7 +92,7 @@ async def execute_script(request: ExecuteRequest):
                 os.rmdir(temp_dir)
             
             # Debug: log what we got from run_fractalic
-            print(f"[DEBUG] run_fractalic returned: {result}")
+            # print(f"[DEBUG] run_fractalic returned: {result}")
             
             # Ensure we always return the expected format
             if not isinstance(result, dict):

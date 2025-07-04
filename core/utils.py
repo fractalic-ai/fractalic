@@ -45,7 +45,7 @@ def read_file(file_path: str) -> str:
 def print_ast_nodes(ast: AST) -> None:
     current_node = ast.get_first_node()
     if current_node is None:
-        print("[Debug: print_ast_nodes] AST is empty.")
+        # print("[Debug: print_ast_nodes] AST is empty.")
         return
 
     while current_node is not None:

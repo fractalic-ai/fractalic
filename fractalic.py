@@ -225,18 +225,20 @@ def run_fractalic(input_file, task_file=None, param_input_user_request=None, cap
                         os.unlink(temp_path)
                         
                     except Exception as e:
-                        print(f"DEBUG: Error in AST rendering: {e}")
+                        # print(f"DEBUG: Error in AST rendering: {e}")
                         # Fallback: try to read from the ctx_file if it exists
                         if ctx_file and os.path.exists(ctx_file):
                             try:
                                 with open(ctx_file, 'r', encoding='utf-8') as f:
                                     return_content = f.read()
-                                print(f"DEBUG: Successfully read content from ctx_file: {ctx_file}")
+                                # print(f"DEBUG: Successfully read content from ctx_file: {ctx_file}")
                             except Exception as ctx_e:
-                                print(f"DEBUG: Failed to read ctx_file {ctx_file}: {ctx_e}")
+                                # print(f"DEBUG: Failed to read ctx_file {ctx_file}: {ctx_e}")
+                                pass
                                 
             except Exception as e:
-                print(f"DEBUG: Exception in return content extraction: {e}")
+                # print(f"DEBUG: Exception in return content extraction: {e}")
+                pass
                 
         except (BlockNotFoundError, UnknownOperationError, FileNotFoundError, ValueError) as e:
             print(f"[ERROR] Known exception during execution: {str(e)}")

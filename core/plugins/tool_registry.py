@@ -370,12 +370,13 @@ class ToolRegistry(dict):
                         if 'key' in env_var and 'value' in env_var:
                             env[env_var['key']] = env_var['value']
                     # --- BEGIN DEBUG PRINT ---
-                    print(f"DEBUG: Injecting env for {name}: { {k: ('***' if 'KEY' in k.upper() else v) for k, v in env.items() if k == 'TAVILY_API_KEY'} }", file=sys.stderr)
+                    # print(f"DEBUG: Injecting env for {name}: { {k: ('***' if 'KEY' in k.upper() else v) for k, v in env.items() if k == 'TAVILY_API_KEY'} }", file=sys.stderr)
                     # --- END DEBUG PRINT ---
                 else:
                     # --- BEGIN DEBUG PRINT ---
-                    print(f"DEBUG: NOT Injecting env for {name}. Config.TOML_SETTINGS: {Config.TOML_SETTINGS is not None}, 'environment' in settings: {'environment' in Config.TOML_SETTINGS if Config.TOML_SETTINGS else 'N/A'}", file=sys.stderr)
+                    # print(f"DEBUG: NOT Injecting env for {name}. Config.TOML_SETTINGS: {Config.TOML_SETTINGS is not None}, 'environment' in settings: {'environment' in Config.TOML_SETTINGS if Config.TOML_SETTINGS else 'N/A'}", file=sys.stderr)
                     # --- END DEBUG PRINT ---
+                    pass
 
                 # Convert boolean args to flags, handle other types
                 args = [str(path)]

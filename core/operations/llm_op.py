@@ -31,20 +31,20 @@ def process_tool_calls(ast: AST, tool_messages: list) -> AST:
         if message.get('role') == 'tool':
             # Extract content from tool response
             content = message.get('content', '')
-            print(f"[DEBUG] Processing tool message with content length: {len(content)}")
+            # print(f"[DEBUG] Processing tool message with content length: {len(content)}")
             
             # Try to parse as JSON to extract response fields
             try:
                 # First try direct JSON parsing
                 tool_response = json.loads(content)
-                print(f"[DEBUG] Parsed tool response JSON with keys: {tool_response.keys()}")
+                # print(f"[DEBUG] Parsed tool response JSON with keys: {tool_response.keys()}")
                 if isinstance(tool_response, dict):
                     # Look for common response fields that contain content
                     content_fields = ['return_content', 'content', 'result', 'response', 'output']
                     for field in content_fields:
                         if field in tool_response and tool_response[field]:
                             field_content = tool_response[field]
-                            print(f"[DEBUG] Found content field '{field}' with length: {len(str(field_content))}")
+                            # print(f"[DEBUG] Found content field '{field}' with length: {len(str(field_content))}")
                             if isinstance(field_content, str) and field_content.strip():
                                 # Handle escaped newlines in JSON strings
                                 if '\\n' in field_content:
@@ -54,17 +54,17 @@ def process_tool_calls(ast: AST, tool_messages: list) -> AST:
                                 if '\\t' in field_content:
                                     field_content = field_content.replace('\\t', '\t')
                                 all_tool_content.append(field_content)
-                                print(f"[DEBUG] Added content from field '{field}' to tool content list")
+                                # print(f"[DEBUG] Added content from field '{field}' to tool content list")
                             break
                     else:
                         # If no recognized content field, use the raw JSON
-                        print(f"[DEBUG] No recognized content field found, using raw JSON")
+                        # print(f"[DEBUG] No recognized content field found, using raw JSON")
                         all_tool_content.append(content)
                 else:
-                    print(f"[DEBUG] Tool response is not a dict, using as-is")
+                    # print(f"[DEBUG] Tool response is not a dict, using as-is")
                     all_tool_content.append(content)
             except json.JSONDecodeError as e:
-                print(f"[DEBUG] JSON decode error: {e}")
+                # print(f"[DEBUG] JSON decode error: {e}")
                 # Try to extract the return_content field specifically for fractalic_run responses
                 try:
                     # Look for return_content field with proper JSON string handling
@@ -98,20 +98,20 @@ def process_tool_calls(ast: AST, tool_messages: list) -> AST:
                                     if '\\t' in field_content:
                                         field_content = field_content.replace('\\t', '\t')
                                     all_tool_content.append(field_content)
-                                    print(f"[DEBUG] Extracted return_content with manual parsing, length: {len(field_content)}")
+                                    # print(f"[DEBUG] Extracted return_content with manual parsing, length: {len(field_content)}")
                                     break
                                 pos += 1
                             else:
-                                print(f"[DEBUG] Could not find closing quote for return_content")
+                                # print(f"[DEBUG] Could not find closing quote for return_content")
                                 all_tool_content.append(content)
                         else:
-                            print(f"[DEBUG] Could not find return_content value start")
+                            # print(f"[DEBUG] Could not find return_content value start")
                             all_tool_content.append(content)
                     else:
-                        print(f"[DEBUG] No return_content field found, using content as-is")
+                        # print(f"[DEBUG] No return_content field found, using content as-is")
                         all_tool_content.append(content)
                 except Exception as parse_error:
-                    print(f"[DEBUG] Manual parsing failed: {parse_error}, using content as-is")
+                    # print(f"[DEBUG] Manual parsing failed: {parse_error}, using content as-is")
                     all_tool_content.append(content)
     
     # Extract attribution metadata from tool responses first
@@ -137,7 +137,7 @@ def process_tool_calls(ast: AST, tool_messages: list) -> AST:
         for node in tool_loop_ast.parser.nodes.values():
             node.role = "user"  # Use user role so content is treated as context, not tool responses
             node.is_tool_generated = True
-            print(f"[DEBUG] Tool Loop AST node with preserved attribution: key={node.key}, id={node.id}, created_by={node.created_by}, created_by_file={node.created_by_file}")
+            # print(f"[DEBUG] Tool Loop AST node with preserved attribution: key={node.key}, id={node.id}, created_by={node.created_by}, created_by_file={node.created_by_file}")
     
     return tool_loop_ast
 
@@ -183,7 +183,7 @@ def insert_direct_context(ast: AST, tool_loop_ast: AST, current_node: Node):
         # Move insertion point for next node
         insertion_point = new_node
         
-        print(f"[DEBUG] Direct AST merge: inserted node {new_node.key} (id: {new_node.id}) with preserved identity")
+        # print(f"[DEBUG] Direct AST merge: inserted node {new_node.key} (id: {new_node.id}) with preserved identity")
     
     # Update current node's response to include reference markers
     if hasattr(current_node, 'response_content'):
@@ -499,9 +499,10 @@ def process_llm(ast: AST, current_node: Node, call_tree_node=None, committed_fil
                             for key, new_node in new_tool_ast.parser.nodes.items():
                                 if key not in tool_loop_ast.parser.nodes:
                                     tool_loop_ast.parser.nodes[key] = new_node
-                                    print(f"[DEBUG] Added new Tool Loop AST node: {key} (id: {new_node.id})")
+                                    # print(f"[DEBUG] Added new Tool Loop AST node: {key} (id: {new_node.id})")
                                 else:
-                                    print(f"[DEBUG] Skipped duplicate Tool Loop AST node: {key} (id: {new_node.id})")
+                                    # print(f"[DEBUG] Skipped duplicate Tool Loop AST node: {key} (id: {new_node.id})")
+                                    pass
                             
                             # Update head and tail based on document order
                             all_nodes = list(tool_loop_ast.parser.nodes.values())
@@ -623,7 +624,7 @@ def process_llm(ast: AST, current_node: Node, call_tree_node=None, committed_fil
             operation=operation_type
         )
     else:
-        print(f"[DEBUG] Skipping AST operation - direct context already inserted {len(tool_loop_ast.parser.nodes) if tool_loop_ast else 0} nodes")
+        # print(f"[DEBUG] Skipping AST operation - direct context already inserted {len(tool_loop_ast.parser.nodes) if tool_loop_ast else 0} nodes")
         # When skipping AST operation, append response content to current node to preserve tool calls in context file
         
         # Check if header-auto-align is enabled
@@ -647,6 +648,6 @@ def process_llm(ast: AST, current_node: Node, call_tree_node=None, committed_fil
         
         # Append response content to current node's content to ensure it appears in context file
         current_node.content += f"{header}{processed_response_text}\n"
-        print(f"[DEBUG] Appended response content to current node to preserve tool calls in context file")
+        # print(f"[DEBUG] Appended response content to current node to preserve tool calls in context file")
 
     return current_node.next

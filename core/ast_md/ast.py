@@ -57,11 +57,11 @@ class AST:
                     original_key = attribution.get('node_key')
                     if original_key:
                         node.key = original_key
-                        print(f"[DEBUG] Identity preservation: matched content to original key {original_key}")
+                        # print(f"[DEBUG] Identity preservation: matched content to original key {original_key}")
                     else:
                         # Use content-based key for deterministic identity
                         node.key = node.hash
-                        print(f"[DEBUG] Identity preservation: using content-based key {node.hash}")
+                        # print(f"[DEBUG] Identity preservation: using content-based key {node.hash}")
                     
                     # Apply attribution metadata
                     node.created_by = attribution.get('created_by')
@@ -70,7 +70,7 @@ class AST:
                     new_nodes_dict[node.key] = node
                 else:
                     # New content gets content-based key for deterministic identity across contexts
-                    print(f"[DEBUG] Identity preservation: new content using content-based key {node.hash}")
+                    # print(f"[DEBUG] Identity preservation: new content using content-based key {node.hash}")
                     node.key = node.hash
                     new_nodes_dict[node.key] = node
             
