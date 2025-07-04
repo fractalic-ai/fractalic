@@ -3,9 +3,9 @@ from core.config import Config
 from core.utils import load_settings
 
 class LLMClient:
-    def __init__(self, model: str):
-        # pick provider from global config (set in main())
-        self.provider = Config.LLM_PROVIDER or "openai"
+    def __init__(self, model: str, provider: str = None):
+        # Use provided provider or fallback to global config
+        self.provider = provider or Config.LLM_PROVIDER or "openai"
         self.model    = model
         self.client   = self._initialize_client()
 

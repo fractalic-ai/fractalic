@@ -434,12 +434,24 @@ def process_llm(ast: AST, current_node: Node, call_tree_node=None, committed_fil
 
     # Call LLM - use messages if available, otherwise fall back to prompt_text
     llm_provider = provider
-    llm_model = model if model else Config.MODEL
-    Config.LLM_PROVIDER = llm_provider
-    Config.MODEL = llm_model
+    
+    # Get the correct model - if no explicit model specified, use the provider's default model
+    if model:
+        llm_model = model
+    else:
+        # Get the default model from the provider's settings
+        provider_cfg = Config.TOML_SETTINGS.get('settings', {}).get(llm_provider, {})
+        llm_model = provider_cfg.get('model', llm_provider)  # fallback to provider name as model
+    
+    # Don't modify global Config values - use local variables only
     provider_cfg = Config.TOML_SETTINGS.get('settings', {}).get(llm_provider, {})
-    Config.API_KEY = provider_cfg.get('apiKey')
-    llm_client = LLMClient(model=llm_model)
+    local_api_key = provider_cfg.get('apiKey')
+    
+    # Temporarily set the API key for this operation only
+    original_api_key = Config.API_KEY
+    Config.API_KEY = local_api_key
+    
+    llm_client = LLMClient(model=llm_model, provider=llm_provider)
     
     # Set execution context for tool registry if available
     if hasattr(llm_client.client, 'registry'):
@@ -529,6 +541,9 @@ def process_llm(ast: AST, current_node: Node, call_tree_node=None, committed_fil
         )
         
     except Exception as e:
+        # Restore original API key on error
+        Config.API_KEY = original_api_key
+        
         # Check for LLMCallException with partial result
         partial = None
         if hasattr(e, 'partial_result') and getattr(e, 'partial_result'):
@@ -540,6 +555,9 @@ def process_llm(ast: AST, current_node: Node, call_tree_node=None, committed_fil
         console.print(f"[bold red]✗ Failed: {str(e)}[/bold red]")
         console.print(f"[bold red]  Operation content:[/bold red]\n{current_node.content}")
         raise
+    
+    # Restore original API key after successful operation
+    Config.API_KEY = original_api_key
 
     # Get save-to-file parameter
     save_to_file = params.get('save-to-file')
