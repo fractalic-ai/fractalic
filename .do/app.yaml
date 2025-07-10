@@ -1,19 +1,18 @@
 name: fractalic
 services:
-- name: fractalic-app
-  source_dir: /
-  github:
-    repo: fractalic-ai/fractalic
-    branch: main
-  run_command: python fractalic.py
-  environment_slug: python
-  instance_count: 1
-  instance_size_slug: basic-xxs
-  http_port: 3000
-  env:
-  - key: NODE_ENV
-    value: "production"
-  - key: PYTHONPATH
-    value: "/app"
-  routes:
-  - path: /
+  - name: fractalic
+    image:
+      registry_type: ghcr
+      registry: ghcr.io
+      repository: fractalic-ai/fractalic
+      tag: main           # <- dev tag
+    instance_count: 1
+    instance_size_slug: basic-xs
+    http_port: 3000
+    routes:
+      - path: /
+    envs:
+      - key: NODE_ENV
+        value: "production"
+      - key: PYTHONPATH
+        value: "/app"

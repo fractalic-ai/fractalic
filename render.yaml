@@ -1,15 +1,14 @@
 services:
   - type: web
     name: fractalic
-    env: docker
-    dockerfilePath: ./docker/Dockerfile
+    image: ghcr.io/fractalic-ai/fractalic:main   # <- no build
     plan: free
-    healthCheckPath: /
     envVars:
       - key: NODE_ENV
         value: production
-      - key: PORT
-        value: 3000
+      - key: PYTHONPATH
+        value: /app
+    healthCheckPath: /
     scaling:
       minInstances: 1
       maxInstances: 1

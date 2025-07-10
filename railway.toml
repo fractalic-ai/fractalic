@@ -1,6 +1,7 @@
+# railway.toml – use pre-built image instead of DOCKERFILE
 [build]
-builder = "DOCKERFILE"
-dockerfilePath = "docker/Dockerfile"
+builder = "IMAGE"
+image = "ghcr.io/fractalic-ai/fractalic:main"
 
 [deploy]
 startCommand = "supervisord -c /etc/supervisor/conf.d/supervisord.conf"
@@ -10,17 +11,15 @@ restartPolicyType = "ON_FAILURE"
 restartPolicyMaxRetries = 10
 
 [[services]]
-name = "fractalic-frontend"
+name = "frontend"
 port = 3000
-
 [[services]]
-name = "fractalic-backend" 
+name = "backend"
 port = 8000
-
 [[services]]
-name = "fractalic-ai-server"
+name = "ai-server"
 port = 8001
 
 [env]
-NODE_ENV = "production"
+NODE_ENV  = "production"
 PYTHONPATH = "/app"

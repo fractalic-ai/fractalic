@@ -18,18 +18,18 @@ Fractalic combines Markdown and YAML to create agentic AI systems using straight
 
 Deploy Fractalic instantly to the cloud using our pre-built Docker container:
 
-### ⚡ Railway (Recommended - Free & Instant)
-[![Deploy on Railway](https://railway.app/button.svg)](https://railway.app/template/docker)
+### ⚡ Railway (Recommended – Free & Instant)
+[![Deploy on Railway](https://railway.app/button.svg)](https://railway.app/new/template?image=ghcr.io/fractalic-ai/fractalic:main)
 
 *🎯 **2-3 minutes** → Live app with custom URL*
 
 ### 🎨 Render (Free Tier Available)  
-[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy)
+[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/fractalic-ai/fractalic)
 
 *🎯 **3-5 minutes** → Auto HTTPS + Custom domain*
 
 ### 🌊 DigitalOcean App Platform
-[![Deploy to DO](https://www.deploytodo.com/do-btn-blue.svg)](https://cloud.digitalocean.com/apps/new)
+[![Deploy to DO](https://www.deploytodo.com/do-btn-blue.svg)](https://cloud.digitalocean.com/apps/new?repo=https://github.com/fractalic-ai/fractalic)
 
 *🎯 **5 minutes** → Production-ready scaling*
 
@@ -44,13 +44,8 @@ docker run -p 3000:3000 -p 8000:8000 -p 8001:8001 ghcr.io/fractalic-ai/fractalic
 - ⚙️ **Backend API**: http://localhost:8000  
 - 🤖 **AI Server**: http://localhost:8001
 
-### 🌐 Cloud Deploy (Coming Soon)
-
-[![Deploy on Railway](https://img.shields.io/badge/Deploy-Railway-0B0D0E?style=for-the-badge&logo=railway&logoColor=white)](https://railway.app/template/docker)
-[![Deploy to Render](https://img.shields.io/badge/Deploy-Render-46E3B7?style=for-the-badge&logo=render&logoColor=white)](https://render.com/deploy)
-[![Deploy to Fly.io](https://img.shields.io/badge/Deploy-Fly.io-8B5CF6?style=for-the-badge&logo=fly.io&logoColor=white)](https://fly.io/launch)
-
-*Cloud deployment plugins coming soon! The new plugin-based publisher will support one-click deployment to Railway, Render, Fly.io and more.*
+### 🚀 Fly.io
+[![Deploy to Fly.io](https://img.shields.io/badge/Deploy-Fly.io-8B5CF6?style=for-the-badge&logo=fly.io&logoColor=white)](https://fly.io/launch?source=https://github.com/fractalic-ai/fractalic)
 
 ### 📋 What You Get After Deployment:
 - 🖥️ **Frontend UI**: http://localhost:3000 (Interactive notebook-style interface)
