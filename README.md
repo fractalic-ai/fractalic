@@ -16,36 +16,41 @@ Fractalic combines Markdown and YAML to create agentic AI systems using straight
 
 ## 🚀 One-Click Cloud Deploy
 
-Deploy Fractalic instantly to the cloud using our pre-built Docker container:
+Deploy Fractalic instantly using our pre-built Docker container `ghcr.io/fractalic-ai/fractalic:main`:
 
-### ⚡ Railway (Recommended – Free & Instant)
-[![Deploy on Railway](https://railway.app/button.svg)](https://railway.app/new/template?image=ghcr.io/fractalic-ai/fractalic:main)
-
-*🎯 **2-3 minutes** → Live app with custom URL*
-
-### 🎨 Render (Free Tier Available)  
-[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/fractalic-ai/fractalic)
-
-*🎯 **3-5 minutes** → Auto HTTPS + Custom domain*
-
-### 🌊 DigitalOcean App Platform
-[![Deploy to DO](https://www.deploytodo.com/do-btn-blue.svg)](https://cloud.digitalocean.com/apps/new?repo=https://github.com/fractalic-ai/fractalic)
-
-*🎯 **5 minutes** → Production-ready scaling*
-
-### 🐳 Docker Registry
+### 🐳 Docker (Local/VPS - Recommended)
 ```bash
-# Pull and run anywhere Docker is supported
-docker run -p 3000:3000 -p 8000:8000 -p 8001:8001 ghcr.io/fractalic-ai/fractalic:main
+# Pull and run the complete Python + React application with Docker access
+docker run -d --name fractalic \
+  --network bridge \
+  -p 3000:3000 -p 8000:8000 -p 8001:8001 -p 5859:5859 \
+  -v /var/run/docker.sock:/var/run/docker.sock \
+  --env HOST=0.0.0.0 \
+  ghcr.io/fractalic-ai/fractalic:main
 ```
+
+*🎯 **2-3 minutes** → Complete full-stack application with Docker deployment capabilities*
+
+### ☁️ Koyeb (True One-Click Cloud)
+[![Deploy to Koyeb](https://www.koyeb.com/static/images/deploy/button.svg)](https://app.koyeb.com/deploy?type=docker&image=ghcr.io/fractalic-ai/fractalic:main&name=fractalic&ports=3000;http;/&ports=8000;http;/api&ports=8001;http;/ai&ports=5859;http;/mcp)
+
+*🎯 **3-4 minutes** → Serverless cloud deployment with auto-scaling*
+
+### 🚀 Zeabur (One-Click Template)
+> **Note**: Requires creating a Zeabur template first. Visit [Zeabur Dashboard](https://zeabur.com) to create a template with the Docker image `ghcr.io/fractalic-ai/fractalic:main`.
+
+*🎯 **2-3 minutes** → Fast cloud deployment with global CDN*
 
 **Access after deployment:**
 - 🖥️ **Frontend UI**: http://localhost:3000
 - ⚙️ **Backend API**: http://localhost:8000  
 - 🤖 **AI Server**: http://localhost:8001
 
-### 🚀 Fly.io
-[![Deploy to Fly.io](https://img.shields.io/badge/Deploy-Fly.io-8B5CF6?style=for-the-badge&logo=fly.io&logoColor=white)](https://fly.io/launch?source=https://github.com/fractalic-ai/fractalic)
+### 🆕 GitHub Codespaces (Development Environment)
+[![Open in GitHub Codespaces](https://github.com/codespaces/badge.svg)](https://codespaces.new/fractalic-ai/fractalic)
+
+*🎯 **3-4 minutes** → Full development environment in the browser*  
+*Perfect for testing, development, and learning Fractalic*
 
 ### 📋 What You Get After Deployment:
 - 🖥️ **Frontend UI**: http://localhost:3000 (Interactive notebook-style interface)
@@ -56,10 +61,13 @@ docker run -p 3000:3000 -p 8000:8000 -p 8001:8001 ghcr.io/fractalic-ai/fractalic
 ### 🎯 Choose Your Deployment:
 | Method | Best For | Time | Requirements |
 |--------|----------|------|--------------|
-| 🐳 **Docker** | Local development, demos | 2-3 min | Docker Desktop |
-| ☁️ **Codespaces** | No-install testing, learning | 3-4 min | GitHub account |
-| 🔧 **Plugin CLI** | Advanced users, CI/CD | 2-5 min | Python + Docker |
-| 🌐 **Cloud** | Production, sharing | 1-2 min | Platform account |
+| 🐳 **Docker** | Local/VPS, production ready | 2-3 min | Docker Desktop |
+| ☁️ **Koyeb** | Serverless cloud, auto-scaling | 3-4 min | Koyeb account |
+| 🚀 **Zeabur** | Fast cloud deployment | 2-3 min | Zeabur account + template |
+| ☁️ **Codespaces** | No-install testing, development | 3-4 min | GitHub account |
+| 🏗️ **Manual Build** | Custom setup, advanced users | 5-10 min | Python + Node.js |
+
+> **Note**: Fractalic is a full-stack Python + React application. Platforms like Vercel and Netlify only support static frontends and cannot run the Python backend services required for Fractalic to function properly.
 
 ## Tutorial 101 
 Watch this video with quick project overview and 101 concepts how to use it (picture is clickable YouTube [link](https://www.youtube.com/watch?v=iRqIzmKE8uw))
@@ -94,9 +102,12 @@ Watch this video with quick project overview and 101 concepts how to use it (pic
 
 ### Option 1: Pre-built Container (Fastest)
 ```bash
-# Pull and run from GitHub Container Registry
+# Pull and run from GitHub Container Registry with Docker access
 docker run -d --name fractalic \
-  -p 3000:3000 -p 8000:8000 -p 8001:8001 \
+  --network bridge \
+  -p 3000:3000 -p 8000:8000 -p 8001:8001 -p 5859:5859 \
+  -v /var/run/docker.sock:/var/run/docker.sock \
+  --env HOST=0.0.0.0 \
   ghcr.io/fractalic-ai/fractalic:main
 ```
 
@@ -118,18 +129,24 @@ cp mcp_servers.json.sample fractalic-config/mcp_servers.json
 # Edit with your API keys and settings
 nano fractalic-config/settings.toml
 
-# Run with your config
+# Run with your config and Docker access
 docker run -d --name fractalic \
-  -p 3000:3000 -p 8000:8000 -p 8001:8001 \
+  --network bridge \
+  -p 3000:3000 -p 8000:8000 -p 8001:8001 -p 5859:5859 \
+  -v /var/run/docker.sock:/var/run/docker.sock \
+  --env HOST=0.0.0.0 \
   -v $(pwd)/fractalic-config:/app \
   ghcr.io/fractalic-ai/fractalic:main
 ```
 
 ### 🌍 With Environment Variables
 ```bash
-# Run with API keys as environment variables
+# Run with API keys as environment variables and Docker access
 docker run -d --name fractalic \
-  -p 3000:3000 -p 8000:8000 -p 8001:8001 \
+  --network bridge \
+  -p 3000:3000 -p 8000:8000 -p 8001:8001 -p 5859:5859 \
+  -v /var/run/docker.sock:/var/run/docker.sock \
+  --env HOST=0.0.0.0 \
   -e OPENAI_API_KEY=sk-your-openai-key \
   -e ANTHROPIC_API_KEY=sk-ant-your-anthropic-key \
   ghcr.io/fractalic-ai/fractalic:main

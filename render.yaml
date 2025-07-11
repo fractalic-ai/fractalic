@@ -1,7 +1,9 @@
 services:
   - type: web
+    runtime: image
     name: fractalic
-    image: ghcr.io/fractalic-ai/fractalic:main   # <- no build
+    image:
+      url: ghcr.io/fractalic-ai/fractalic:main
     plan: free
     envVars:
       - key: NODE_ENV
