@@ -111,7 +111,8 @@ def process_tool_calls(ast: AST, tool_messages: list) -> AST:
                         # print(f"[DEBUG] No return_content field found, using content as-is")
                         all_tool_content.append(content)
                 except Exception as parse_error:
-                    # print(f"[DEBUG] Manual parsing failed: {parse_error}, using content as-is")
+                    # CRITICAL: Log manual parsing failures that could stop tool processing
+                    print(f"[ERROR] Tool parsing failed completely: {parse_error}")
                     all_tool_content.append(content)
     
     # Extract attribution metadata from tool responses first
@@ -138,6 +139,9 @@ def process_tool_calls(ast: AST, tool_messages: list) -> AST:
             node.role = "user"  # Use user role so content is treated as context, not tool responses
             node.is_tool_generated = True
             # print(f"[DEBUG] Tool Loop AST node with preserved attribution: key={node.key}, id={node.id}, created_by={node.created_by}, created_by_file={node.created_by_file}")
+    else:
+        # CRITICAL: Log when no tool content is found - this could indicate silent tool failure
+        print(f"[ERROR] No tool content extracted from {len(tool_messages)} tool messages - tool processing may have failed silently")
     
     return tool_loop_ast
 
@@ -456,16 +460,21 @@ def process_llm(ast: AST, current_node: Node, call_tree_node=None, committed_fil
     # Set execution context for tool registry if available
     if hasattr(llm_client.client, 'registry'):
         current_file = getattr(current_node, 'created_by_file', None)
-        llm_client.client.registry.set_execution_context(
-            ast=ast,
-            current_file=current_file,
-            call_tree_node=call_tree_node,
-            committed_files=committed_files,
-            file_commit_hashes=file_commit_hashes,
-            base_dir=base_dir,
-            tool_loop_ast=tool_loop_ast,  # Pass Tool Loop AST to registry
-            current_node=current_node  # Pass current @llm operation node for attribution
-        )
+        try:
+            llm_client.client.registry.set_execution_context(
+                ast=ast,
+                current_file=current_file,
+                call_tree_node=call_tree_node,
+                committed_files=committed_files,
+                file_commit_hashes=file_commit_hashes,
+                base_dir=base_dir,
+                tool_loop_ast=tool_loop_ast,  # Pass Tool Loop AST to registry
+                current_node=current_node  # Pass current @llm operation node for attribution
+            )
+        except Exception as registry_error:
+            # CRITICAL: Registry context setting failure could break tool execution
+            print(f"[ERROR] Failed to set tool registry context: {registry_error}")
+            # Continue execution but tools may not work properly
         
         # Pass Tool Loop AST to the LLM client for real-time updates (only if using tools)
         if hasattr(llm_client.client, 'tool_loop_ast') and tool_loop_ast is not None:
@@ -525,9 +534,18 @@ def process_llm(ast: AST, current_node: Node, call_tree_node=None, committed_fil
                         # Update the tool registry with the new Tool Loop AST
                         if hasattr(llm_client.client, 'registry'):
                             llm_client.client.registry._tool_loop_ast = tool_loop_ast
+                    else:
+                        # CRITICAL: Tool messages exist but no AST nodes created - this indicates silent tool failure
+                        print(f"[ERROR] Tool messages processed but no Tool Loop AST nodes created - tool execution may have failed silently")
                     
                     # Insert context integration markers
                     insert_direct_context(ast, tool_loop_ast, current_node)
+                elif tool_messages and tool_loop_ast is None:
+                    # CRITICAL: Tool messages found but Tool Loop AST is None - configuration error
+                    print(f"[ERROR] Tool messages found but Tool Loop AST is None - tools may not be properly configured")
+                elif not tool_messages and using_tools:
+                    # CRITICAL: Tools configured but no tool messages returned - possible silent tool failure
+                    print(f"[ERROR] Tools configured but no tool messages found in response - tool execution may have failed silently")
         else:
             response_text = response
             current_node.response_content = response_text
