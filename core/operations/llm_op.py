@@ -506,6 +506,19 @@ def process_llm(ast: AST, current_node: Node, call_tree_node=None, committed_fil
     console.print(f"[cyan]@llm ({llm_provider}/{actual_model}) streaming...[/cyan]")
 
     start_time = time.time()
+    
+    # Preserve context for error recovery
+    operation_context = {
+        'prompt_text': prompt_text,
+        'messages': messages.copy() if messages else None,
+        'params': params.copy(),
+        'model': actual_model,
+        'provider': llm_provider,
+        'operation_id': f"llm_{current_node.id}",
+        'source_file': getattr(ast, 'source_file', None) or getattr(ast, 'filename', None) or 'unknown',
+        'start_time': start_time
+    }
+    
     try:
         response = llm_client.llm_call(prompt_text, messages, params)
         
@@ -618,17 +631,25 @@ def process_llm(ast: AST, current_node: Node, call_tree_node=None, committed_fil
         Config.API_KEY = original_api_key
         
         # Get source file context for error trace
-        source_file = getattr(ast, 'source_file', None) or getattr(ast, 'filename', None) or 'unknown'
+        source_file = operation_context['source_file']
         
-        # Create error trace with token usage data (if available)
+        # Create comprehensive error trace with context preservation
         error_trace = {
             'error': str(e),
-            'operation_id': f"llm_{current_node.id}",
-            'model': actual_model,
+            'operation_id': operation_context['operation_id'],
+            'model': operation_context['model'],
+            'provider': operation_context['provider'],
             'operation_type': "llm_call",
             'source_file': source_file,
             'timestamp': time.time(),
-            'duration': time.time() - start_time
+            'duration': time.time() - operation_context['start_time'],
+            'context_preserved': True,
+            'operation_context': {
+                'prompt_length': len(operation_context['prompt_text']) if operation_context['prompt_text'] else 0,
+                'messages_count': len(operation_context['messages']) if operation_context['messages'] else 0,
+                'params_used': {k: v for k, v in operation_context['params'].items() if k not in ['api_key']},  # Exclude sensitive data
+                'messages_preview': operation_context['messages'][-2:] if operation_context['messages'] else None  # Last 2 messages for context
+            }
         }
         
         # Check for LLMCallException with partial result
@@ -660,8 +681,10 @@ def process_llm(ast: AST, current_node: Node, call_tree_node=None, committed_fil
         # Store error trace in node for trace files
         current_node.token_usage = error_trace
         
-        console.print(f"[bold red]✗ Failed: {str(e)}[/bold red]")
-        console.print(f"[bold red]  Operation content:[/bold red]\n{current_node.content}")
+        # Use console.print without Rich markup to avoid conflicts
+        console.print("✗ Failed:", str(e), style="bold red")
+        console.print("  Operation content:", style="bold red")
+        console.print(current_node.content)
         raise
     
     # Restore original API key after successful operation

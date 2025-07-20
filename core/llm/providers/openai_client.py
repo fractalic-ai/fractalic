@@ -245,7 +245,17 @@ class ToolCallStreamProcessor:
                     self.usage_info = final_message.usage
                 return final_message, self.usage_info
             except Exception as e:
-                self.ui.error(f"Error reconstructing message: {e}")
+                # Check if this is a JSON parse error that we can provide better info for
+                error_msg = str(e).lower()
+                if "json" in error_msg and ("parse" in error_msg or "decode" in error_msg):
+                    self.ui.error(f"JSON parsing error in stream reconstruction: {e}")
+                    self.ui.show("", f"[yellow]Chunks received: {len(self.chunks)}[/yellow]")
+                    # Log the problematic chunks for debugging
+                    for i, chunk in enumerate(self.chunks[-3:]):  # Show last 3 chunks
+                        self.ui.show("", f"[dim]Chunk {len(self.chunks)-3+i}: {str(chunk)[:100]}...[/dim]")
+                else:
+                    self.ui.error(f"Error reconstructing message: {e}")
+                
                 # Fallback: create basic message structure
                 tool_calls_list = []
                 for idx, tc_info in self.current_tool_calls.items():
@@ -516,9 +526,14 @@ class liteclient:
             top_p=op.get("top_p", self.top_p),
             max_tokens=op.get("max_tokens", self.max_tokens),
             stop=op.get("stop_sequences"),
-            api_key= self.api_key,
-            stream_options={"include_usage": True}  # Enable usage tracking in streams
+            api_key= self.api_key
         )
+
+        # Add stream_options only for providers that support it (OpenAI, Anthropic)
+        # Vertex AI/Gemini doesn't support stream_options and will fail with JSON parsing errors
+        model_name = op.get("model", self.model).lower()
+        if not any(provider in model_name for provider in ["vertex", "gemini", "google"]):
+            params["stream_options"] = {"include_usage": True}  # Enable usage tracking in streams
 
         # Remove or fix unsupported params for O-series models (e.g., o4-mini)
         model_name = op.get("model", self.model)
@@ -687,7 +702,7 @@ class liteclient:
                         error_partial = sp.last_chunk
                     raise self.LLMCallException(f"Streaming timeout: {e}", partial_result=error_partial) from e
                 except Exception as e:
-                    # On streaming error, propagate buffer so far
+                    # On streaming error, propagate buffer so far and exit immediately
                     self.ui.error(f"Streaming error: {e}")
                     error_partial = ""
                     if 'tcsp' in locals():

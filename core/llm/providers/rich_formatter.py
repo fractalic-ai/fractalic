@@ -21,8 +21,12 @@ class RichFormatter:
     """Handles Rich-based formatting for terminal output"""
     
     def __init__(self):
-        # Initialize console with proper width handling
-        self.console = Console(soft_wrap=True)
+        # Initialize console with proper width handling and no truncation
+        self.console = Console(
+            soft_wrap=True, 
+            width=None,      # Use full terminal width
+            tab_size=2
+        )
     
     def show(self, role: str, content: str, end: str = "\n"):
         """Display content with role-based coloring"""
@@ -115,47 +119,58 @@ class RichFormatter:
     def format_json_colored(self, json_str: str) -> str:
         """Format JSON string with Rich syntax highlighting for terminal display
         
-        Uses a wide fixed width to prevent truncation while maintaining syntax highlighting.
+        Uses no width limit to prevent any truncation while maintaining syntax highlighting.
         Frontend terminal width detection should be handled at the UI layer, not here.
         """
         try:
             # Get clean formatted JSON first
             clean_json = self.format_json_clean(json_str)
             
-            # Use a very wide fixed width to prevent truncation
-            # This ensures syntax highlighting works while avoiding truncation
-            # Frontend should handle responsive display if needed
-            width = 300  # Wide enough for most JSON content
+            # Try to bypass Rich's width detection completely by setting environment
+            import os
+            original_columns = os.environ.get('COLUMNS')
+            os.environ['COLUMNS'] = '999999'  # Force very wide terminal
             
-            # Create a console that renders with syntax highlighting
-            string_output = StringIO()
-            console = Console(
-                file=string_output,
-                width=width,
-                force_terminal=True,
-                no_color=False,
-                legacy_windows=False
-            )
-            
-            # Create syntax highlighting
-            syntax = Syntax(
-                clean_json,
-                "json",
-                theme="github-dark",
-                background_color=None,
-                line_numbers=False,
-                word_wrap=False,  # Disable to prevent Rich's problematic wrapping
-                padding=0
-            )
-            
-            # Render with syntax highlighting
-            console.print(syntax, end="")
-            result = string_output.getvalue()
-            
-            # Clean up ANSI artifacts
-            result = self._clean_ansi_artifacts(result)
-            
-            return result
+            try:
+                # Create a console that renders with syntax highlighting
+                string_output = StringIO()
+                console = Console(
+                    file=string_output,
+                    width=None,          # No width limit at all
+                    force_terminal=True,
+                    no_color=False,
+                    legacy_windows=False,
+                    soft_wrap=False,     # Disable soft wrap to prevent line breaking
+                    tab_size=2
+                )
+                
+                # Create syntax highlighting with explicit settings to prevent truncation
+                syntax = Syntax(
+                    clean_json,
+                    "json",
+                    theme="github-dark",
+                    background_color=None,
+                    line_numbers=False,
+                    word_wrap=False,     # Disable word wrapping to prevent truncation
+                    padding=0,
+                    tab_size=2
+                )
+                
+                # Render with syntax highlighting - use 'fold' overflow to wrap instead of truncate
+                console.print(syntax, end="", overflow="fold", no_wrap=True)
+                result = string_output.getvalue()
+                
+                # Clean up ANSI artifacts
+                result = self._clean_ansi_artifacts(result)
+                
+                return result
+                
+            finally:
+                # Restore original COLUMNS environment variable
+                if original_columns is not None:
+                    os.environ['COLUMNS'] = original_columns
+                else:
+                    os.environ.pop('COLUMNS', None)
             
         except Exception:
             # Fallback to clean formatting only if syntax highlighting completely fails
