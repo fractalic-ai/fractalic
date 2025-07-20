@@ -27,6 +27,14 @@ from mcp.client.sse              import sse_client
 import errno
 import tiktoken
 
+# Import litellm for optional token counting alignment with Fractalic execution
+try:
+    import litellm
+    LITELLM_AVAILABLE = True
+except ImportError:
+    LITELLM_AVAILABLE = False
+    print("Warning: litellm not available, falling back to tiktoken for token counting")
+
 TOKENIZER = tiktoken.get_encoding("cl100k_base")
 
 # -------------------------------------------------------------------- Service Classification
@@ -207,6 +215,7 @@ BACKOFF_BASE  = 2          # exponential back-off
 
 # Configuration flags
 ENABLE_SCHEMA_SANITIZATION = True  # Set to True to enable Vertex AI schema sanitization
+USE_LITELLM_TOKEN_COUNT = True     # Set to True to use LiteLLM token counting (aligned with Fractalic execution), False for tiktoken direct counting
 
 # -------------------------------------------------------------------- Vertex AI Schema Sanitization
 def sanitize_tool_schema(tool_obj: dict, max_depth: int = 6) -> dict:
@@ -1527,7 +1536,10 @@ exec {full_command} 2>> "$LOG_FILE"
         }
 
     async def get_tools_info(self):
-        """Return tool count and token count of the schema for this child/server."""
+        """
+        Return tool count and token count of the schema for this child/server.
+        Uses LiteLLM token counting when USE_LITELLM_TOKEN_COUNT=True (aligned with Fractalic execution).
+        """
         if self.state != "running":
             return {"tool_count": 0, "token_count": 0, "tools_error": f"MCP state is {self.state}"}
         try:
@@ -1540,11 +1552,38 @@ exec {full_command} 2>> "$LOG_FILE"
                     "tool_count": len(self._last_tools_list),
                     "token_count": self._last_token_count
                 }
-            schema_json = json.dumps(tools_list)
-            token_count = len(TOKENIZER.encode(schema_json))
+            
+            # Calculate token count based on configuration
+            if USE_LITELLM_TOKEN_COUNT and LITELLM_AVAILABLE:
+                try:
+                    # Convert MCP tools to OpenAI format for LiteLLM
+                    openai_tools = []
+                    for tool in tools_list:
+                        openai_tool = {
+                            "type": "function",
+                            "function": {
+                                "name": tool.get("name", "unknown"),
+                                "description": tool.get("description", ""),
+                                "parameters": tool.get("inputSchema", {})
+                            }
+                        }
+                        openai_tools.append(openai_tool)
+                    
+                    # Use LiteLLM to count tokens (uses gpt-4 as reference model)
+                    token_count = litellm.token_counter(model="gpt-4", messages=[], tools=openai_tools)
+                    
+                except Exception as e:
+                    # Fallback to tiktoken if LiteLLM fails
+                    schema_json = json.dumps(tools_list)
+                    token_count = len(TOKENIZER.encode(schema_json))
+            else:
+                # Direct tiktoken approach
+                schema_json = json.dumps(tools_list)
+                token_count = len(TOKENIZER.encode(schema_json))
+            
             self._last_tools_list = tools_list
             self._last_token_count = token_count
-            self._last_schema_json = schema_json
+            self._last_schema_json = json.dumps(tools_list)
             return {"tool_count": len(tools_list), "token_count": token_count}
         except Exception as e:
             return {"tool_count": 0, "token_count": 0, "tools_error": str(e)}

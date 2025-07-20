@@ -108,11 +108,18 @@ class StreamProcessor:
     def __init__(self, ui: ConsoleManager, stop: Optional[List[str]]):
         self.ui, self.stop = ui, stop or []
         self.last_chunk = ""
+        self.usage_info = None  # Track usage information
 
     def process(self, stream_iter):
         buf = ""
         try:
             for chunk in stream_iter:
+                # Capture usage from chunk if available
+                if hasattr(chunk, 'usage') and chunk.usage:
+                    self.usage_info = chunk.usage
+                elif isinstance(chunk, dict) and 'usage' in chunk and chunk['usage']:
+                    self.usage_info = chunk['usage']
+                
                 delta = chunk["choices"][0]["delta"]
                 txt = delta.get("content", "")
                 if txt:  # Only process non-empty text
@@ -133,7 +140,7 @@ class StreamProcessor:
             self.last_chunk = buf
             self.ui.error(f"Streaming error: {e}")
             raise
-        return buf or ""  # Ensure we always return a string, even if empty
+        return buf or "", self.usage_info  # Return tuple: (content, usage_info)
 
 
 # ====================================================================
@@ -148,6 +155,7 @@ class ToolCallStreamProcessor:
         self.last_chunk = ""
         self.current_tool_calls = {}  # Track active tool calls by index
         self.displayed_tool_names = set()  # Track which tool names we've already shown
+        self.usage_info = None  # Track usage information
         
     def process(self, stream_iter):
         import litellm
@@ -155,6 +163,12 @@ class ToolCallStreamProcessor:
         try:
             for chunk in stream_iter:
                 self.chunks.append(chunk)
+                
+                # Capture usage from chunk if available
+                if hasattr(chunk, 'usage') and chunk.usage:
+                    self.usage_info = chunk.usage
+                elif isinstance(chunk, dict) and 'usage' in chunk and chunk['usage']:
+                    self.usage_info = chunk['usage']
                 
                 # Handle finish_reason - stream is complete
                 if chunk.get("choices") and chunk["choices"][0].get("finish_reason"):
@@ -226,7 +240,10 @@ class ToolCallStreamProcessor:
         if self.chunks:
             try:
                 final_message = litellm.stream_chunk_builder(self.chunks)
-                return final_message
+                # Capture usage from reconstructed response if available
+                if hasattr(final_message, 'usage') and final_message.usage and not self.usage_info:
+                    self.usage_info = final_message.usage
+                return final_message, self.usage_info
             except Exception as e:
                 self.ui.error(f"Error reconstructing message: {e}")
                 # Fallback: create basic message structure
@@ -254,10 +271,10 @@ class ToolCallStreamProcessor:
                     def __init__(self, content, tool_calls):
                         self.choices = [MockChoice(content, tool_calls)]
                 
-                return MockResponse(self.content_buffer, tool_calls_list)
+                return MockResponse(self.content_buffer, tool_calls_list), self.usage_info
         
         # If no chunks, return empty content
-        return type('obj', (object,), {
+        empty_response = type('obj', (object,), {
             'choices': [type('obj', (object,), {
                 'message': type('obj', (object,), {
                     'content': self.content_buffer,
@@ -265,6 +282,7 @@ class ToolCallStreamProcessor:
                 })()
             })()]
         })()
+        return empty_response, self.usage_info
 
 # ====================================================================
 #  Media helpers
@@ -498,7 +516,8 @@ class liteclient:
             top_p=op.get("top_p", self.top_p),
             max_tokens=op.get("max_tokens", self.max_tokens),
             stop=op.get("stop_sequences"),
-            api_key= self.api_key
+            api_key= self.api_key,
+            stream_options={"include_usage": True}  # Enable usage tracking in streams
         )
 
         # Remove or fix unsupported params for O-series models (e.g., o4-mini)
@@ -607,6 +626,14 @@ class liteclient:
 
         # ----- conversation loop -----
         convo = []
+        # Track cumulative usage across multiple turns
+        cumulative_usage = {
+            "prompt_tokens": 0,
+            "completion_tokens": 0,
+            "total_tokens": 0,
+            "tool_calls_count": 0,
+            "turns_count": 0
+        }
         # Use operation-specific tools-turns-max if provided, otherwise use instance default
         max_turns = op.get("tools-turns-max", self.max_tool_turns)
         try:
@@ -627,10 +654,11 @@ class liteclient:
                         rsp = completion(**params)
                         
                         # Use appropriate stream processor based on whether tools are available
+                        usage_info = None
                         if has_tools:
                             # Use tool call stream processor for better tool call handling
                             tcsp = ToolCallStreamProcessor(self.ui, params["stop"])
-                            stream_response = tcsp.process(rsp)
+                            stream_response, usage_info = tcsp.process(rsp)
                             
                             # Extract content and tool calls from the reconstructed message
                             if hasattr(stream_response, 'choices') and stream_response.choices:
@@ -643,7 +671,7 @@ class liteclient:
                         else:
                             # Use simple stream processor for content-only responses
                             sp = StreamProcessor(self.ui, params["stop"])
-                            content = sp.process(rsp)
+                            content, usage_info = sp.process(rsp)
                             tool_calls = []
                             
                     finally:
@@ -674,8 +702,97 @@ class liteclient:
                              "content": content,
                              "tool_calls": tool_calls or None})
 
+                # Accumulate usage data
+                if usage_info:
+                    cumulative_usage["prompt_tokens"] += usage_info.get("prompt_tokens", 0)
+                    cumulative_usage["completion_tokens"] += usage_info.get("completion_tokens", 0)
+                    cumulative_usage["total_tokens"] += usage_info.get("total_tokens", 0)
+                    cumulative_usage["turns_count"] += 1
+                
+                if tool_calls:
+                    cumulative_usage["tool_calls_count"] += len(tool_calls)
+
                 if not tool_calls:
-                    # LLM finished conversation naturally
+                    # LLM finished conversation naturally - show token usage for final turn
+                    if usage_info:
+                        prompt_tokens = usage_info.get('prompt_tokens', 0)
+                        completion_tokens = usage_info.get('completion_tokens', 0)
+                        total_tokens = usage_info.get('total_tokens', 0)
+                        
+                        # For final turn, if prompt tokens are 0, calculate them manually including tool schemas
+                        if prompt_tokens == 0:
+                            try:
+                                import litellm
+                                # Calculate prompt tokens including ALL tool schemas for accurate count
+                                calculation_params = {"model": self.model, "messages": hist[:-1]}  # Exclude the final assistant response
+                                
+                                # Calculate base prompt tokens (conversation without tools)
+                                base_prompt_tokens = litellm.token_counter(model=self.model, messages=hist[:-1])
+                                
+                                # Calculate tool schema tokens breakdown
+                                mcp_tool_tokens = 0
+                                fractalic_tool_tokens = 0
+                                
+                                if "tools" in params and params["tools"]:
+                                    calculation_params["tools"] = params["tools"]
+                                    
+                                    # Calculate tokens for each tool to get breakdown
+                                    for tool in params["tools"]:
+                                        tool_name = tool.get("function", {}).get("name", "unknown")
+                                        tool_tokens = litellm.token_counter(model=self.model, messages=[], tools=[tool])
+                                        
+                                        # Classify tool type using registry information if available
+                                        is_fractalic = False
+                                        if hasattr(self, 'registry') and self.registry:
+                                            # Check registry manifests for tool classification
+                                            for manifest in self.registry._manifests:
+                                                if manifest.get("name") == tool_name:
+                                                    service = manifest.get("_service", "")
+                                                    # If no service specified, it's likely a fractalic tool
+                                                    if not service or service.lower() in ["fractalic", "local"]:
+                                                        is_fractalic = True
+                                                    break
+                                        
+                                        # Fallback classification based on naming patterns
+                                        if not is_fractalic and (tool_name.startswith("fractalic_") or tool_name in ["add_tools", "edit_tools"]):
+                                            is_fractalic = True
+                                        
+                                        if is_fractalic:
+                                            fractalic_tool_tokens += tool_tokens
+                                        else:
+                                            mcp_tool_tokens += tool_tokens
+                                
+                                calculated_prompt_tokens = litellm.token_counter(**calculation_params)
+                                
+                                # Update cumulative with calculated prompt tokens
+                                cumulative_usage["prompt_tokens"] += calculated_prompt_tokens - usage_info.get("prompt_tokens", 0)
+                                cumulative_usage["total_tokens"] = cumulative_usage["prompt_tokens"] + cumulative_usage["completion_tokens"]
+                                
+                                # Display detailed breakdown
+                                self.ui.show("", f"\n[TOKENS] Prompt: {calculated_prompt_tokens} (calc) "
+                                                 f"[Base: {base_prompt_tokens}, MCP: {mcp_tool_tokens}, Fractalic: {fractalic_tool_tokens}], "
+                                                 f"Completion: {completion_tokens}, "
+                                                 f"Turn: {calculated_prompt_tokens + completion_tokens}, "
+                                                 f"Cumulative: {cumulative_usage['total_tokens']}, "
+                                                 f"Tools: 0, "
+                                                 f"Turn: {turn_count + 1}")
+                            except Exception as e:
+                                # Fallback to basic display
+                                self.ui.show("", f"\n[TOKENS] Completion: {completion_tokens}, "
+                                                 f"Turn: {completion_tokens}, "
+                                                 f"Cumulative: {cumulative_usage['total_tokens']}, "
+                                                 f"Tools: 0, "
+                                                 f"Turn: {turn_count + 1}")
+                        else:
+                            # Update cumulative before display
+                            cumulative_usage["total_tokens"] = cumulative_usage["prompt_tokens"] + cumulative_usage["completion_tokens"]
+                            
+                            self.ui.show("", f"\n[TOKENS] Prompt: {prompt_tokens}, "
+                                             f"Completion: {completion_tokens}, "
+                                             f"Turn: {total_tokens}, "
+                                             f"Cumulative: {cumulative_usage['total_tokens']}, "
+                                             f"Tools: 0, "
+                                             f"Turn: {turn_count + 1}")
                     break
 
                 # ---- execute tool calls ----
@@ -778,7 +895,109 @@ class liteclient:
                                      "name": tc["function"]["name"],
                                      "content": json.dumps({"error": error_msg}, indent=2)})
                         # Break the tool call loop and return current conversation
-                        return {"text": "\n\n".join(convo), "messages": hist}
+                        return {"text": "\n\n".join(convo), "messages": hist, "usage": cumulative_usage}
+                
+                # Display token usage after tool execution completes
+                if usage_info:
+                    prompt_tokens = usage_info.get('prompt_tokens', 0)
+                    completion_tokens = usage_info.get('completion_tokens', 0)
+                    total_tokens = usage_info.get('total_tokens', 0)
+                    
+                    # For tool turns, if prompt tokens are 0, calculate them manually including tool schemas
+                    if prompt_tokens == 0:
+                        try:
+                            import litellm
+                            # Calculate prompt tokens including ALL tool schemas for accurate count
+                            # Use the actual tools that were sent to the LLM call
+                            calculation_params = {"model": self.model, "messages": hist[:-len(tool_calls)]}  # Exclude tool responses
+                            
+                            # Calculate base prompt tokens (conversation without tools)
+                            base_prompt_tokens = litellm.token_counter(model=self.model, messages=hist[:-len(tool_calls)])
+                            
+                            # Calculate tool schema tokens breakdown
+                            mcp_tool_tokens = 0
+                            fractalic_tool_tokens = 0
+                            
+                            if "tools" in params and params["tools"]:
+                                # Include the actual tool schemas sent to the LLM (both MCP and fractalic tools)
+                                calculation_params["tools"] = params["tools"]
+                                
+                                # Separate tools by type for accurate breakdown
+                                mcp_tools = []
+                                fractalic_tools = []
+                                
+                                for tool in params["tools"]:
+                                    tool_name = tool.get("function", {}).get("name", "unknown")
+                                    
+                                    # Classify tool type using registry information if available
+                                    is_fractalic = False
+                                    if hasattr(self, 'registry') and self.registry:
+                                        # Check registry manifests for tool classification
+                                        for manifest in self.registry._manifests:
+                                            if manifest.get("name") == tool_name:
+                                                service = manifest.get("_service", "")
+                                                # If no service specified, it's likely a fractalic tool
+                                                if not service or service.lower() in ["fractalic", "local"]:
+                                                    is_fractalic = True
+                                                break
+                                    
+                                    # Fallback classification based on naming patterns
+                                    if not is_fractalic and (tool_name.startswith("fractalic_") or tool_name in ["add_tools", "edit_tools"]):
+                                        is_fractalic = True
+                                    
+                                    if is_fractalic:
+                                        fractalic_tools.append(tool)
+                                    else:
+                                        mcp_tools.append(tool)
+                                
+                                # Calculate tokens for each group to avoid overhead multiplication
+                                if mcp_tools:
+                                    mcp_tool_tokens = litellm.token_counter(model=self.model, messages=[], tools=mcp_tools)
+                                if fractalic_tools:
+                                    fractalic_tool_tokens = litellm.token_counter(model=self.model, messages=[], tools=fractalic_tools)
+                            
+                            calculated_prompt_tokens = litellm.token_counter(**calculation_params)
+                            
+                            # Ensure breakdown consistency: tool tokens should not exceed total
+                            total_tool_tokens = mcp_tool_tokens + fractalic_tool_tokens
+                            tool_portion = calculated_prompt_tokens - base_prompt_tokens
+                            if total_tool_tokens > tool_portion and total_tool_tokens > 0:
+                                # If breakdown exceeds expected, proportionally adjust
+                                mcp_ratio = mcp_tool_tokens / total_tool_tokens
+                                fractalic_ratio = fractalic_tool_tokens / total_tool_tokens
+                                mcp_tool_tokens = int(tool_portion * mcp_ratio)
+                                fractalic_tool_tokens = int(tool_portion * fractalic_ratio)
+                            
+                            # Update cumulative with calculated prompt tokens
+                            cumulative_usage["prompt_tokens"] += calculated_prompt_tokens - usage_info.get("prompt_tokens", 0)
+                            cumulative_usage["total_tokens"] = cumulative_usage["prompt_tokens"] + cumulative_usage["completion_tokens"]
+                            
+                            # Display detailed breakdown
+                            self.ui.show("", f"\n[TOKENS] Prompt: {calculated_prompt_tokens} (calc) "
+                                             f"[Base: {base_prompt_tokens}, MCP: {mcp_tool_tokens}, Fractalic: {fractalic_tool_tokens}], "
+                                             f"Completion: {completion_tokens}, "
+                                             f"Turn: {calculated_prompt_tokens + completion_tokens}, "
+                                             f"Cumulative: {cumulative_usage['total_tokens']}, "
+                                             f"Tools: {len(tool_calls)}, "
+                                             f"Turn: {turn_count + 1}")
+                        except Exception as e:
+                            # Fallback to simple display without prompt tokens
+                            self.ui.show("", f"\n[TOKENS] Completion: {completion_tokens}, "
+                                             f"Turn: {completion_tokens}, "
+                                             f"Cumulative: {cumulative_usage['total_tokens']}, "
+                                             f"Tools: {len(tool_calls)}, "
+                                             f"Turn: {turn_count + 1}")
+                    else:
+                        # Update cumulative before display
+                        cumulative_usage["total_tokens"] = cumulative_usage["prompt_tokens"] + cumulative_usage["completion_tokens"]
+                        
+                        self.ui.show("", f"\n[TOKENS] Prompt: {prompt_tokens}, "
+                                         f"Completion: {completion_tokens}, "
+                                         f"Turn: {total_tokens}, "
+                                         f"Cumulative: {cumulative_usage['total_tokens']}, "
+                                         f"Tools: {len(tool_calls)}, "
+                                         f"Turn: {turn_count + 1}")
+                
                 params["messages"] = hist
             
             # Check if we exited due to max turns limit
@@ -791,7 +1010,8 @@ class liteclient:
         except Exception as e:
             # Catch-all: propagate convo so far
             raise self.LLMCallException(f"Unexpected LLM error: {e}", partial_result="\n\n".join(convo)) from e
-        return {"text": "\n\n".join(convo), "messages": hist}
+        
+        return {"text": "\n\n".join(convo), "messages": hist, "usage": cumulative_usage}
 
 # -------- legacy alias --------
 openaiclient = liteclient

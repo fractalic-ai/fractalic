@@ -10,6 +10,7 @@ from core.ast_md.ast import AST, get_ast_part_by_path, get_ast_parts_by_uri_arra
 from core.errors import BlockNotFoundError
 from core.config import Config
 from core.llm.llm_client import LLMClient  # Import the LLMClient class
+from core.token_tracker import token_tracker  # Import TokenTracker
 from rich.console import Console
 from rich.spinner import Spinner
 from rich import print
@@ -44,8 +45,26 @@ def process_tool_calls(ast: AST, tool_messages: list) -> AST:
                     for field in content_fields:
                         if field in tool_response and tool_response[field]:
                             field_content = tool_response[field]
-                            # print(f"[DEBUG] Found content field '{field}' with length: {len(str(field_content))}")
-                            if isinstance(field_content, str) and field_content.strip():
+                            # print(f"[DEBUG] Found content field '{field}' with type: {type(field_content)}")
+                            
+                            # Handle MCP response format: content is an array of objects with type/text
+                            if field == 'content' and isinstance(field_content, list):
+                                # Extract text from MCP content array
+                                text_parts = []
+                                for item in field_content:
+                                    if isinstance(item, dict):
+                                        if item.get('type') == 'text' and 'text' in item:
+                                            text_parts.append(str(item['text']))
+                                        elif 'text' in item:  # fallback for any object with 'text'
+                                            text_parts.append(str(item['text']))
+                                if text_parts:
+                                    combined_text = '\n'.join(text_parts)
+                                    all_tool_content.append(combined_text)
+                                    # print(f"[DEBUG] Extracted {len(text_parts)} text parts from MCP content array")
+                                    break
+                            
+                            # Handle regular string content
+                            elif isinstance(field_content, str) and field_content.strip():
                                 # Handle escaped newlines in JSON strings
                                 if '\\n' in field_content:
                                     field_content = field_content.replace('\\n', '\n')
@@ -54,8 +73,8 @@ def process_tool_calls(ast: AST, tool_messages: list) -> AST:
                                 if '\\t' in field_content:
                                     field_content = field_content.replace('\\t', '\t')
                                 all_tool_content.append(field_content)
-                                # print(f"[DEBUG] Added content from field '{field}' to tool content list")
-                            break
+                                # print(f"[DEBUG] Added string content from field '{field}' to tool content list")
+                                break
                     else:
                         # If no recognized content field, use the raw JSON
                         # print(f"[DEBUG] No recognized content field found, using raw JSON")
@@ -489,6 +508,35 @@ def process_llm(ast: AST, current_node: Node, call_tree_node=None, committed_fil
     start_time = time.time()
     try:
         response = llm_client.llm_call(prompt_text, messages, params)
+        
+        # Log token usage if available
+        if isinstance(response, dict) and 'usage' in response and response['usage']:
+            # Get source file context for tracking
+            source_file = getattr(ast, 'source_file', None) or getattr(ast, 'filename', None) or 'unknown'
+            
+            # Store usage data in node for trace files
+            current_node.token_usage = {
+                'usage': response['usage'],
+                'model': actual_model,
+                'operation_id': f"llm_{current_node.id}",
+                'operation_type': "llm_call",
+                'source_file': source_file,
+                'timestamp': time.time()
+            }
+            
+            # Log operation with TokenTracker
+            try:
+                token_tracker.log_operation(
+                    usage_data=response['usage'],
+                    operation_id=f"llm_{current_node.id}",
+                    model=actual_model,
+                    operation_type="llm_call",
+                    source_file=source_file
+                )
+            except Exception as e:
+                # Don't fail the operation if tracking fails
+                console.print(f"[yellow]Warning: Token tracking failed: {e}[/yellow]")
+        
         # Always extract text for use, and only save messages for trace
         if isinstance(response, dict) and 'text' in response:
             response_text = response['text']
@@ -535,8 +583,9 @@ def process_llm(ast: AST, current_node: Node, call_tree_node=None, committed_fil
                         if hasattr(llm_client.client, 'registry'):
                             llm_client.client.registry._tool_loop_ast = tool_loop_ast
                     else:
-                        # CRITICAL: Tool messages exist but no AST nodes created - this indicates silent tool failure
-                        print(f"[ERROR] Tool messages processed but no Tool Loop AST nodes created - tool execution may have failed silently")
+                        # Tool messages exist but no AST nodes created - check if this is expected
+                        # This can happen when tool responses don't contain extractable content or in error scenarios
+                        print(f"[DEBUG] Tool messages processed but no Tool Loop AST nodes created - responses may be empty or error responses")
                     
                     # Insert context integration markers
                     insert_direct_context(ast, tool_loop_ast, current_node)
@@ -544,8 +593,13 @@ def process_llm(ast: AST, current_node: Node, call_tree_node=None, committed_fil
                     # CRITICAL: Tool messages found but Tool Loop AST is None - configuration error
                     print(f"[ERROR] Tool messages found but Tool Loop AST is None - tools may not be properly configured")
                 elif not tool_messages and using_tools:
-                    # CRITICAL: Tools configured but no tool messages returned - possible silent tool failure
-                    print(f"[ERROR] Tools configured but no tool messages found in response - tool execution may have failed silently")
+                    # Check if there were any tool calls in the response - only error if tools were attempted but failed
+                    assistant_messages = [msg for msg in response['messages'] if msg.get('role') == 'assistant']
+                    has_tool_calls = any(msg.get('tool_calls') for msg in assistant_messages)
+                    if has_tool_calls:
+                        # Tools were called but no tool messages returned - this is an error
+                        print(f"[ERROR] Tools called but no tool messages found in response - tool execution may have failed silently")
+                    # If no tool calls were made, this is normal completion - no error needed
         else:
             response_text = response
             current_node.response_content = response_text
@@ -563,14 +617,49 @@ def process_llm(ast: AST, current_node: Node, call_tree_node=None, committed_fil
         # Restore original API key on error
         Config.API_KEY = original_api_key
         
+        # Get source file context for error trace
+        source_file = getattr(ast, 'source_file', None) or getattr(ast, 'filename', None) or 'unknown'
+        
+        # Create error trace with token usage data (if available)
+        error_trace = {
+            'error': str(e),
+            'operation_id': f"llm_{current_node.id}",
+            'model': actual_model,
+            'operation_type': "llm_call",
+            'source_file': source_file,
+            'timestamp': time.time(),
+            'duration': time.time() - start_time
+        }
+        
         # Check for LLMCallException with partial result
         partial = None
         if hasattr(e, 'partial_result') and getattr(e, 'partial_result'):
             partial = getattr(e, 'partial_result')
             console.print(f"[yellow]Partial LLM response before error:[/yellow]\n{partial}")
             current_node.response_content = f"PARTIAL RESPONSE BEFORE ERROR:\n{partial}\n\nERROR: {str(e)}"
+            error_trace['partial_response'] = partial
         else:
             current_node.response_content = f"ERROR: {str(e)}"
+        
+        # Try to get partial token usage data if available in exception
+        if hasattr(e, 'partial_usage') and getattr(e, 'partial_usage'):
+            error_trace['partial_usage'] = getattr(e, 'partial_usage')
+            
+            # Log partial usage with TokenTracker
+            try:
+                token_tracker.log_operation(
+                    usage_data=getattr(e, 'partial_usage'),
+                    operation_id=f"llm_{current_node.id}",
+                    model=actual_model,
+                    operation_type="llm_call_failed",
+                    source_file=source_file
+                )
+            except Exception as track_error:
+                console.print(f"[yellow]Warning: Token tracking for error failed: {track_error}[/yellow]")
+        
+        # Store error trace in node for trace files
+        current_node.token_usage = error_trace
+        
         console.print(f"[bold red]✗ Failed: {str(e)}[/bold red]")
         console.print(f"[bold red]  Operation content:[/bold red]\n{current_node.content}")
         raise

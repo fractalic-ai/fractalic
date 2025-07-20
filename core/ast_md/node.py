@@ -44,6 +44,7 @@ class Node:
     created_by_file : Optional[str] = None
     response_messages: Optional[list] = None  # Store full LLM/tool message trace
     is_system: bool = False  # Track if this is a system prompt block
+    token_usage: Optional[Dict[str, Any]] = None  # Store token usage data for trace files
 
     @property
     def hash(self) -> str:
