@@ -10,7 +10,7 @@ from core.ast_md.ast import AST, get_ast_part_by_path, get_ast_parts_by_uri_arra
 from core.errors import BlockNotFoundError
 from core.config import Config
 from core.llm.llm_client import LLMClient  # Import the LLMClient class
-from core.token_tracker import token_tracker  # Import TokenTracker
+from core.token_stats import token_stats  # Import TokenStatsQueue
 from rich.console import Console
 from rich.spinner import Spinner
 from rich import print
@@ -519,6 +519,9 @@ def process_llm(ast: AST, current_node: Node, call_tree_node=None, committed_fil
         'start_time': start_time
     }
     
+    # Add source file to params so LLM client can use it for token tracking
+    params['_source_file'] = operation_context['source_file']
+    
     try:
         response = llm_client.llm_call(prompt_text, messages, params)
         
@@ -537,18 +540,8 @@ def process_llm(ast: AST, current_node: Node, call_tree_node=None, committed_fil
                 'timestamp': time.time()
             }
             
-            # Log operation with TokenTracker
-            try:
-                token_tracker.log_operation(
-                    usage_data=response['usage'],
-                    operation_id=f"llm_{current_node.id}",
-                    model=actual_model,
-                    operation_type="llm_call",
-                    source_file=source_file
-                )
-            except Exception as e:
-                # Don't fail the operation if tracking fails
-                console.print(f"[yellow]Warning: Token tracking failed: {e}[/yellow]")
+            # Token tracking is handled by the OpenAI client in real-time
+            # No need to log again here to avoid double-counting
         
         # Always extract text for use, and only save messages for trace
         if isinstance(response, dict) and 'text' in response:
@@ -666,10 +659,11 @@ def process_llm(ast: AST, current_node: Node, call_tree_node=None, committed_fil
         if hasattr(e, 'partial_usage') and getattr(e, 'partial_usage'):
             error_trace['partial_usage'] = getattr(e, 'partial_usage')
             
-            # Log partial usage with TokenTracker
+            # Log partial usage with TokenStats
             try:
-                token_tracker.log_operation(
-                    usage_data=getattr(e, 'partial_usage'),
+                token_stats.send_usage(
+                    prompt_tokens=getattr(e, 'partial_usage', {}).get('prompt_tokens', 0),
+                    completion_tokens=getattr(e, 'partial_usage', {}).get('completion_tokens', 0),
                     operation_id=f"llm_{current_node.id}",
                     model=actual_model,
                     operation_type="llm_call_failed",

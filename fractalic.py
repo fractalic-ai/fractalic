@@ -27,7 +27,7 @@ from core.operations.runner import run
 from core.operations.call_tree import CallTreeNode
 from core.errors import BlockNotFoundError, UnknownOperationError
 from core.render.render_ast import render_ast_to_markdown
-from core.token_tracker import token_tracker  # Import token tracker
+from core.token_stats import token_stats  # Import token stats
 
 from rich.console import Console
 from rich.panel import Panel
@@ -328,14 +328,6 @@ def run_fractalic(input_file, task_file=None, param_input_user_request=None, cap
         execution_successful = (result_nodes is not None and call_tree_root is not None)
         
         if execution_successful:
-            # Print session token usage summary for programmatic runs
-            try:
-                if not capture_output:  # Only print if not capturing output
-                    token_tracker.print_session_summary()
-            except Exception as e:
-                # Don't fail execution if summary fails
-                print(f"[WARNING] Could not print token usage summary: {e}")
-            
             # Build success output
             output = f"Execution completed. Branch: {branch_name}, Context: {ctx_hash}"
             
@@ -471,7 +463,7 @@ def main():
 
         # Print session token usage summary
         try:
-            token_tracker.print_session_summary()
+            token_stats.print_session_summary()
         except Exception as e:
             # Don't fail execution if summary fails
             console.print(f"[yellow]Warning: Could not print token usage summary: {e}[/yellow]")
