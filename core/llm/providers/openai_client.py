@@ -510,6 +510,107 @@ class liteclient:
         return "openai"
 
     # -----------------------------------------------------------------
+    def _record_llm_operation_unified(self, messages, tools, completion_tokens, prompt_tokens=0, operation_params=None, tool_calls=None):
+        """
+        UNIFIED method to handle ALL LLM token tracking.
+        Replaces the 4+ different calculation paths with single consistent approach.
+        
+        Args:
+            messages: List of conversation messages
+            tools: List of available tool schemas
+            completion_tokens: LLM response tokens
+            prompt_tokens: Input tokens from LLM API (fallback)
+            operation_params: Additional operation parameters
+            tool_calls: Current tool calls (if any)
+        
+        Returns:
+            str: Formatted display string for token usage
+        """
+        op = operation_params or {}
+        
+        # Step 1: Calculate tokens using ONE method (always enhanced calculation)
+        # For token calculation, we need to exclude tool responses from messages to get accurate prompt tokens
+        messages_for_calculation = []
+        for msg in messages:
+            # Skip tool response messages for prompt token calculation
+            if msg.get("role") != "tool":
+                # Create a clean copy of the message without tool_calls objects that might not be JSON serializable
+                clean_msg = {
+                    "role": msg.get("role"),
+                    "content": msg.get("content")
+                }
+                # Only add tool_calls if they exist and are serializable
+                if msg.get("tool_calls") and msg.get("role") == "assistant":
+                    # Convert tool calls to a simple count for token calculation purposes
+                    clean_msg["tool_calls"] = [{"function": {"name": "placeholder"}}] * len(msg.get("tool_calls", []))
+                messages_for_calculation.append(clean_msg)
+        
+        context_tokens, mcp_tokens, fractalic_tokens, total_input = calculate_detailed_tokens_enhanced(
+            messages=messages_for_calculation,
+            tools=tools,
+            calculated_prompt_tokens=prompt_tokens
+        )
+        
+        # Step 2: Generate unique operation ID
+        import time
+        unique_id = f"llm_{int(time.time()*1000)}_unified_{op.get('model', self.model)}"
+        
+        # Step 3: Calculate total tokens
+        total_tokens = total_input + completion_tokens
+        
+        # Step 4: Count tool calls from parameter (safer than parsing messages)
+        tool_calls_count = 0
+        if tool_calls:
+            tool_calls_count = len(tool_calls) if isinstance(tool_calls, list) else 1
+        
+        # Step 5: Send to queue using ONE format (always same structure)
+        token_stats.send_usage(
+            operation_id=unique_id,
+            model=op.get("model", self.model),
+            input_tokens=total_input,
+            input_context_tokens=context_tokens,
+            input_schema_tokens=mcp_tokens + fractalic_tokens,
+            input_mcp_schema_tokens=mcp_tokens,
+            input_fractalic_schema_tokens=fractalic_tokens,
+            output_tokens=completion_tokens,
+            total_tokens=total_tokens,
+            tool_calls_count=tool_calls_count,
+            tools_available_count=len(tools),
+            operation_type="llm_turn",
+            source_file="openai_client.py"
+        )
+        
+        # Step 6: Generate display using SAME values sent to queue
+        session_turn = len(token_stats.messages)
+        cumulative_total = token_stats.get_cumulative_total()
+        
+        display_text = (
+            f"[TOKENS] Input: {total_input} "
+            f"(Context: {context_tokens}, "
+            f"MCP: {mcp_tokens}, "
+            f"Fractalic: {fractalic_tokens}), "
+            f"Output: {completion_tokens}, "
+            f"Turn: {total_tokens}, "
+            f"Cumulative: {cumulative_total}, "
+            f"Tools: {len(tools)}, "
+            f"Turn: {session_turn}"
+        )
+        
+        # DEBUG: Show what we sent vs what we display (should always match)
+        # print(f"[DEBUG UNIFIED] Operation: {unique_id}")
+        # print(f"[DEBUG UNIFIED] Sent to queue: input={total_input}, output={completion_tokens}, total={total_tokens}")
+        # print(f"[DEBUG UNIFIED] Display: {display_text}")
+        # print(f"[DEBUG UNIFIED] Cumulative after: {token_stats.get_cumulative_total()}")
+        
+        return display_text
+    
+    # -----------------------------------------------------------------
+    def _generate_operation_id(self, operation_type="llm"):
+        """Generate unique operation ID for token tracking"""
+        import time
+        return f"{operation_type}_{int(time.time()*1000)}_{self.model.replace('/', '_')}"
+
+    # -----------------------------------------------------------------
     class LLMCallException(Exception):
         def __init__(self, message, partial_result=None):
             super().__init__(message)
@@ -784,192 +885,19 @@ class liteclient:
                     if usage_info:
                         prompt_tokens = usage_info.get('prompt_tokens', 0)
                         completion_tokens = usage_info.get('completion_tokens', 0)
-                        total_tokens = usage_info.get('total_tokens', 0)
                         
-                        # For final turn, if prompt tokens are 0, calculate them manually including tool schemas
-                        if prompt_tokens == 0:
-                            try:
-                                import litellm
-                                # Calculate prompt tokens including ALL tool schemas for accurate count
-                                calculation_params = {"model": self.model, "messages": hist[:-1]}  # Exclude the final assistant response
-                                
-                                # Calculate base prompt tokens (conversation without tools)
-                                base_prompt_tokens = litellm.token_counter(model=self.model, messages=hist[:-1])
-                                
-                                # Calculate tool schema tokens breakdown
-                                mcp_tool_tokens = 0
-                                fractalic_tool_tokens = 0
-                                
-                                if "tools" in params and params["tools"]:
-                                    calculation_params["tools"] = params["tools"]
-                                    
-                                    # Calculate total tokens with all tools
-                                    total_with_tools = litellm.token_counter(**calculation_params)
-                                    # Calculate total tool tokens as difference
-                                    total_tool_tokens = total_with_tools - base_prompt_tokens
-                                    
-                                    # Now proportion tool tokens based on individual tool sizes
-                                    tool_sizes = {}
-                                    total_tool_chars = 0
-                                    
-                                    for tool in params["tools"]:
-                                        tool_name = tool.get("function", {}).get("name", "unknown")
-                                        tool_json = json.dumps(tool, separators=(',', ':'))
-                                        tool_size = len(tool_json)
-                                        tool_sizes[tool_name] = tool_size
-                                        total_tool_chars += tool_size
-                                    
-                                    # Classify and proportion tokens based on relative sizes
-                                    for tool in params["tools"]:
-                                        tool_name = tool.get("function", {}).get("name", "unknown")
-                                        tool_proportion = tool_sizes[tool_name] / total_tool_chars if total_tool_chars > 0 else 0
-                                        tool_tokens = int(total_tool_tokens * tool_proportion)
-                                        
-                                        # Classify tool type using registry information if available
-                                        is_fractalic = False
-                                        if hasattr(self, 'registry') and self.registry:
-                                            # Check registry manifests for tool classification
-                                            for manifest in self.registry._manifests:
-                                                if manifest.get("name") == tool_name:
-                                                    service = manifest.get("_service", "")
-                                                    # If no service specified, it's likely a fractalic tool
-                                                    if not service or service.lower() in ["fractalic", "local"]:
-                                                        is_fractalic = True
-                                                    break
-                                        
-                                        # Fallback classification based on naming patterns
-                                        if not is_fractalic and (tool_name.startswith("fractalic_") or tool_name in ["add_tools", "edit_tools", "fractalic_opgen"]):
-                                            is_fractalic = True
-                                        
-                                        if is_fractalic:
-                                            fractalic_tool_tokens += tool_tokens
-                                        else:
-                                            mcp_tool_tokens += tool_tokens
-                                
-                                calculated_prompt_tokens = litellm.token_counter(**calculation_params)
-                                
-                                # Update cumulative with calculated prompt tokens
-                                cumulative_usage["prompt_tokens"] += calculated_prompt_tokens - usage_info.get("prompt_tokens", 0)
-                                cumulative_usage["total_tokens"] = cumulative_usage["prompt_tokens"] + cumulative_usage["completion_tokens"]
-                                
-                                # Send detailed token usage to queue (with schema breakdown)
-                                try:
-                                    import time
-                                    unique_id = f"llm_{int(time.time()*1000)}_turn_{turn_count}_{op.get('model', self.model)}"
-                                    calculated_total = calculated_prompt_tokens + completion_tokens
-                                    
-                                    # Use the already calculated tool token breakdowns from above
-                                    # Don't recalculate to avoid inconsistencies
-                                    
-                                    # Calculate detailed token breakdown
-                                    context_tokens, mcp_schema_tokens, fractalic_schema_tokens, total_input = calculate_detailed_tokens_enhanced(
-                                        messages=params.get("messages", []),
-                                        tools=params.get("tools", []),
-                                        calculated_prompt_tokens=calculated_prompt_tokens,
-                                        mcp_tool_tokens=mcp_tool_tokens,
-                                        fractalic_tool_tokens=fractalic_tool_tokens
-                                    )
-                                    
-                                    tool_calls_made = 0  # This is tracked elsewhere in tool execution
-                                    tools_count = len(params.get("tools", []))
-                                    
-                                    token_stats.send_usage(
-                                        operation_id=unique_id,
-                                        model=op.get("model", self.model),
-                                        input_tokens=total_input,
-                                        input_context_tokens=context_tokens,
-                                        input_schema_tokens=mcp_schema_tokens + fractalic_schema_tokens,
-                                        input_mcp_schema_tokens=mcp_schema_tokens,
-                                        input_fractalic_schema_tokens=fractalic_schema_tokens,
-                                        output_tokens=completion_tokens,
-                                        total_tokens=calculated_total,
-                                        tool_calls_count=tool_calls_made,
-                                        tools_available_count=tools_count,
-                                        operation_type="llm_turn",
-                                        source_file=op.get('_source_file', 'unknown')
-                                    )
-                                except Exception as e:
-                                    # Don't fail the operation if tracking fails
-                                    pass
-                                
-                                # Get session-wide cumulative from token stats queue
-                                session_cumulative = token_stats.get_cumulative_total()
-                                
-                                # Display detailed breakdown
-                                tool_count = len(params.get("tools", []))
-                                self.ui.show("", f"\n[TOKENS] Input: {calculated_prompt_tokens} "
-                                                 f"(Context: {calculated_prompt_tokens - (mcp_tool_tokens + fractalic_tool_tokens)}, "
-                                                 f"MCP: {mcp_tool_tokens}, Fractalic: {fractalic_tool_tokens}), "
-                                                 f"Output: {completion_tokens}, "
-                                                 f"Turn: {calculated_prompt_tokens + completion_tokens}, "
-                                                 f"Cumulative: {session_cumulative}, "
-                                                 f"Tools: {tool_count}, "
-                                                 f"Turn: {turn_count + 1}")
-                            except Exception as e:
-                                # Send fallback token usage to queue 
-                                try:
-                                    import time
-                                    unique_id = f"llm_{int(time.time()*1000)}_turn_{turn_count}_{op.get('model', self.model)}"
-                                    token_stats.send_usage_legacy(
-                                        operation_id=unique_id,
-                                        model=op.get("model", self.model),
-                                        prompt_tokens=0,  # Fallback case - prompt calculation failed
-                                        completion_tokens=completion_tokens,
-                                        total_tokens=completion_tokens,  # Only completion tokens available
-                                        operation_type="llm_turn",
-                                        source_file=op.get('_source_file', 'unknown')
-                                    )
-                                except Exception:
-                                    # Don't fail the operation if tracking fails
-                                    pass
-                                    
-                                # Get session-wide cumulative from token stats queue
-                                session_cumulative = token_stats.get_cumulative_total()
-                                
-                                # Fallback to basic display
-                                self.ui.show("", f"\n[TOKENS] Completion: {completion_tokens}, "
-                                                 f"Turn: {completion_tokens}, "
-                                                 f"Cumulative: {session_cumulative}, "
-                                                 f"Tools: 0, "
-                                                 f"Turn: {turn_count + 1}")
-                        else:
-                            # Send basic detailed token usage to queue (no tool breakdown available)
-                            try:
-                                import time
-                                unique_id = f"llm_{int(time.time()*1000)}_turn_{turn_count}_{op.get('model', self.model)}"
-                                
-                                # Use legacy method since detailed tool breakdown not available here
-                                token_stats.send_usage_legacy(
-                                    operation_id=unique_id,
-                                    model=op.get("model", self.model),
-                                    prompt_tokens=prompt_tokens,
-                                    completion_tokens=completion_tokens,
-                                    total_tokens=total_tokens,
-                                    operation_type="llm_turn",
-                                    source_file=op.get('_source_file', 'unknown'),
-                                    metadata={
-                                        "turn_count": turn_count,
-                                        "streaming": False
-                                    }
-                                )
-                            except Exception:
-                                # Don't fail the operation if tracking fails
-                                pass
-                                
-                            # Update cumulative before display
-                            cumulative_usage["total_tokens"] = cumulative_usage["prompt_tokens"] + cumulative_usage["completion_tokens"]
-                            
-                            # Get session-wide cumulative from token stats queue
-                            current_cumulative = token_stats.get_cumulative_total()
-                            # Calculate what cumulative will be after adding this turn
-                            session_cumulative = current_cumulative + total_tokens
-                            
-                            self.ui.show("", f"\n[TOKENS] Input: {prompt_tokens} (Context: {prompt_tokens}, MCP: 0, Fractalic: 0), "
-                                             f"Output: {completion_tokens}, "
-                                             f"Turn: {total_tokens}, "
-                                             f"Cumulative: {session_cumulative}, "
-                                             f"Tools: 0, "
-                                             f"Turn: {turn_count + 1}")
+                        # UNIFIED APPROACH: Replace complex enhanced calculation with single method
+                        display_text = self._record_llm_operation_unified(
+                            messages=hist,  # Use actual conversation history
+                            tools=params.get("tools", []),
+                            completion_tokens=completion_tokens,
+                            prompt_tokens=prompt_tokens,
+                            operation_params=op,
+                            tool_calls=None  # No tool calls when conversation finishes naturally
+                        )
+                        
+                        # Display unified result
+                        self.ui.show("", f"\n{display_text}")
                     break
 
                 # ---- execute tool calls ----
@@ -1080,188 +1008,18 @@ class liteclient:
                     completion_tokens = usage_info.get('completion_tokens', 0)
                     total_tokens = usage_info.get('total_tokens', 0)
                     
-                    # For tool turns, if prompt tokens are 0, calculate them manually including tool schemas
-                    if prompt_tokens == 0:
-                        try:
-                            import litellm
-                            # Calculate prompt tokens including ALL tool schemas for accurate count
-                            # Use the actual tools that were sent to the LLM call
-                            calculation_params = {"model": self.model, "messages": hist[:-len(tool_calls)]}  # Exclude tool responses
-                            
-                            # Calculate base prompt tokens (conversation without tools)
-                            base_prompt_tokens = litellm.token_counter(model=self.model, messages=hist[:-len(tool_calls)])
-                            
-                            # Calculate tool schema tokens breakdown
-                            mcp_tool_tokens = 0
-                            fractalic_tool_tokens = 0
-                            
-                            if "tools" in params and params["tools"]:
-                                # Include the actual tool schemas sent to the LLM (both MCP and fractalic tools)
-                                calculation_params["tools"] = params["tools"]
-                                
-                                # Separate tools by type for accurate breakdown
-                                mcp_tools = []
-                                fractalic_tools = []
-                                
-                                for tool in params["tools"]:
-                                    tool_name = tool.get("function", {}).get("name", "unknown")
-                                    
-                                    # Classify tool type using registry information if available
-                                    is_fractalic = False
-                                    if hasattr(self, 'registry') and self.registry:
-                                        # Check registry manifests for tool classification
-                                        for manifest in self.registry._manifests:
-                                            if manifest.get("name") == tool_name:
-                                                service = manifest.get("_service", "")
-                                                # If no service specified, it's likely a fractalic tool
-                                                if not service or service.lower() in ["fractalic", "local"]:
-                                                    is_fractalic = True
-                                                break
-                                    
-                                    # Fallback classification based on naming patterns
-                                    if not is_fractalic and (tool_name.startswith("fractalic_") or tool_name in ["add_tools", "edit_tools"]):
-                                        is_fractalic = True
-                                    
-                                    if is_fractalic:
-                                        fractalic_tools.append(tool)
-                                    else:
-                                        mcp_tools.append(tool)
-                                
-                                # Calculate tokens for each group to avoid overhead multiplication
-                                if mcp_tools:
-                                    mcp_tool_tokens = litellm.token_counter(model=self.model, messages=[], tools=mcp_tools)
-                                if fractalic_tools:
-                                    fractalic_tool_tokens = litellm.token_counter(model=self.model, messages=[], tools=fractalic_tools)
-                            
-                            calculated_prompt_tokens = litellm.token_counter(**calculation_params)
-                            
-                            # Ensure breakdown consistency: tool tokens should not exceed total
-                            total_tool_tokens = mcp_tool_tokens + fractalic_tool_tokens
-                            tool_portion = calculated_prompt_tokens - base_prompt_tokens
-                            if total_tool_tokens > tool_portion and total_tool_tokens > 0:
-                                # If breakdown exceeds expected, proportionally adjust
-                                mcp_ratio = mcp_tool_tokens / total_tool_tokens
-                                fractalic_ratio = fractalic_tool_tokens / total_tool_tokens
-                                mcp_tool_tokens = int(tool_portion * mcp_ratio)
-                                fractalic_tool_tokens = int(tool_portion * fractalic_ratio)
-                            
-                            # Update cumulative with calculated prompt tokens
-                            cumulative_usage["prompt_tokens"] += calculated_prompt_tokens - usage_info.get("prompt_tokens", 0)
-                            cumulative_usage["total_tokens"] = cumulative_usage["prompt_tokens"] + cumulative_usage["completion_tokens"]
-                            
-                            # Send detailed token usage to queue (with tool breakdown)
-                            try:
-                                import time
-                                unique_id = f"llm_{int(time.time()*1000)}_turn_{turn_count}_{op.get('model', self.model)}"
-                                calculated_total = calculated_prompt_tokens + completion_tokens
-                                
-                                # Calculate detailed token breakdown with tool schemas
-                                context_tokens, schema_tokens, total_input = calculate_detailed_tokens_enhanced(
-                                    messages=params.get("messages", []),
-                                    tools=params.get("tools", []),
-                                    calculated_prompt_tokens=calculated_prompt_tokens
-                                )
-                                
-                                token_stats.send_usage(
-                                    operation_id=unique_id,
-                                    model=op.get("model", self.model),
-                                    input_tokens=total_input,
-                                    input_context_tokens=context_tokens,
-                                    input_schema_tokens=schema_tokens,
-                                    output_tokens=completion_tokens,
-                                    total_tokens=calculated_total,
-                                    operation_type="llm_turn",
-                                    source_file=op.get('_source_file', 'unknown')
-                                )
-                            except Exception as e:
-                                # Don't fail the operation if tracking fails
-                                pass
-                            
-                            # Get session-wide cumulative from token stats queue
-                            current_cumulative = token_stats.get_cumulative_total()
-                            # Calculate what cumulative will be after adding this turn
-                            session_cumulative = current_cumulative + calculated_prompt_tokens + completion_tokens
-                            
-                            # Calculate context tokens for display
-                            context_tokens_display = calculated_prompt_tokens - (mcp_tool_tokens + fractalic_tool_tokens)
-                            
-                            # Display detailed breakdown
-                            self.ui.show("", f"\n[TOKENS] Input: {calculated_prompt_tokens} (calc) "
-                                             f"[Base: {base_prompt_tokens}, MCP: {mcp_tool_tokens}, Fractalic: {fractalic_tool_tokens}], "
-                                             f"Output: {completion_tokens}, "
-                                             f"Turn: {calculated_prompt_tokens + completion_tokens}, "
-                                             f"Cumulative: {session_cumulative}, "
-                                             f"Tools: {len(tool_calls)}, "
-                                             f"Turn: {turn_count + 1}")
-                        except Exception as e:
-                            # Send fallback token usage to queue (with tools)
-                            try:
-                                import time
-                                unique_id = f"llm_{int(time.time()*1000)}_turn_{turn_count}_{op.get('model', self.model)}"
-                                token_stats.send_usage_legacy(
-                                    operation_id=unique_id,
-                                    model=op.get("model", self.model),
-                                    prompt_tokens=0,  # Fallback case - prompt calculation failed
-                                    completion_tokens=completion_tokens,
-                                    total_tokens=completion_tokens,  # Only completion tokens available
-                                    operation_type="llm_turn",
-                                    source_file=op.get('_source_file', 'unknown')
-                                )
-                            except Exception:
-                                # Don't fail the operation if tracking fails
-                                pass
-                                
-                            # Get session-wide cumulative from token stats queue
-                            session_cumulative = token_stats.get_cumulative_total()
-                            
-                            # Fallback to simple display without prompt tokens
-                            self.ui.show("", f"\n[TOKENS] Completion: {completion_tokens}, "
-                                             f"Turn: {completion_tokens}, "
-                                             f"Cumulative: {session_cumulative}, "
-                                             f"Tools: {len(tool_calls)}, "
-                                             f"Turn: {turn_count + 1}")
-                    else:
-                        # Send detailed final token usage to queue
-                        try:
-                            import time
-                            unique_id = f"llm_{int(time.time()*1000)}_turn_{turn_count}_{op.get('model', self.model)}"
-                            
-                            # Calculate detailed token breakdown
-                            context_tokens, schema_tokens, total_input = calculate_detailed_tokens_enhanced(
-                                messages=params.get("messages", []),
-                                tools=params.get("tools", []),
-                                calculated_prompt_tokens=prompt_tokens
-                            )
-                            
-                            token_stats.send_usage(
-                                operation_id=unique_id,
-                                model=op.get("model", self.model),
-                                input_tokens=total_input,
-                                input_context_tokens=context_tokens,
-                                input_schema_tokens=schema_tokens,
-                                output_tokens=completion_tokens,
-                                total_tokens=total_tokens,
-                                operation_type="llm_turn",
-                                source_file=op.get('_source_file', 'unknown')
-                            )
-                        except Exception:
-                            # Don't fail the operation if tracking fails
-                            pass
-                            
-                        # Update cumulative before display
-                        cumulative_usage["total_tokens"] = cumulative_usage["prompt_tokens"] + cumulative_usage["completion_tokens"]
-                        
-                        # Get session-wide cumulative from token stats queue
-                        current_cumulative = token_stats.get_cumulative_total()
-                        # Calculate what cumulative will be after adding this turn
-                        session_cumulative = current_cumulative + total_tokens
-                        
-                        self.ui.show("", f"\n[TOKENS] Input: {prompt_tokens} (Context: {prompt_tokens}, MCP: 0, Fractalic: 0), "
-                                         f"Output: {completion_tokens}, "
-                                         f"Turn: {total_tokens}, "
-                                         f"Cumulative: {session_cumulative}, "
-                                         f"Tools: {len(tool_calls)}, "
-                                         f"Turn: {turn_count + 1}")
+                    # UNIFIED APPROACH: Replace streaming paths with single method
+                    display_text = self._record_llm_operation_unified(
+                        messages=hist,  # Use actual conversation history
+                        tools=params.get("tools", []),
+                        completion_tokens=completion_tokens,
+                        prompt_tokens=prompt_tokens,
+                        operation_params=op,
+                        tool_calls=tool_calls  # Pass current tool calls
+                    )
+                    
+                    # Display unified result
+                    self.ui.show("", f"\n{display_text}")
                 
                 params["messages"] = hist
             

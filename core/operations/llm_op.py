@@ -591,7 +591,8 @@ def process_llm(ast: AST, current_node: Node, call_tree_node=None, committed_fil
                     else:
                         # Tool messages exist but no AST nodes created - check if this is expected
                         # This can happen when tool responses don't contain extractable content or in error scenarios
-                        print(f"[DEBUG] Tool messages processed but no Tool Loop AST nodes created - responses may be empty or error responses")
+                        # print(f"[DEBUG] Tool messages processed but no Tool Loop AST nodes created - responses may be empty or error responses")
+                        pass
                     
                     # Insert context integration markers
                     insert_direct_context(ast, tool_loop_ast, current_node)

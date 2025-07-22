@@ -194,9 +194,16 @@ class ToolRegistry(dict):
                 self._register(manifest, runner_override=runner)
 
     def _load_mcp(self):
+        # Track connection attempts for consolidated error reporting
+        failed_connections = {}
+        
         # print(f"[ToolRegistry] MCP servers to load: {self.mcp_servers}")
         for srv in self.mcp_servers:
             try:
+                # Initialize attempt counter if not exists
+                if srv not in failed_connections:
+                    failed_connections[srv] = 0
+                
                 # print(f"[ToolRegistry] Attempting to load tools from {srv}")
                 response = mcp_list(srv)
                 # print(f"[ToolRegistry] MCP {srv} raw response: {response}")
@@ -266,7 +273,25 @@ class ToolRegistry(dict):
                     # print(f"[ToolRegistry] Invalid response format from {srv}: {type(response)}")
                     pass
             except Exception as e:
-                print(f"[ToolRegistry] Error loading MCP server {srv}: {e}", file=sys.stderr)
+                # Increment attempt counter
+                failed_connections[srv] = failed_connections.get(srv, 0) + 1
+                
+                # Extract connection details for cleaner error message
+                if "Connection refused" in str(e) and "127.0.0.1" in str(e):
+                    # Don't print individual errors, just track them
+                    pass
+                else:
+                    # For non-connection errors, still show them
+                    print(f"[ToolRegistry] Error loading MCP server {srv}: {e}", file=sys.stderr)
+        
+        # Print consolidated connection error summary
+        connection_failed = [(srv, count) for srv, count in failed_connections.items() if count > 0]
+        if connection_failed:
+            for srv, attempts in connection_failed:
+                if "127.0.0.1" in srv:
+                    print(f"[ToolRegistry] MCP Manager: No connection after {attempts} attempts on REST {srv}/list_tools", file=sys.stderr)
+                else:
+                    print(f"[ToolRegistry] MCP Manager: No connection after {attempts} attempts to {srv}", file=sys.stderr)
 
     def _register(self, meta: Dict[str, Any],
                   explicit=False, runner_override: Callable | None = None,
