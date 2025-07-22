@@ -623,7 +623,7 @@ def process_llm(ast: AST, current_node: Node, call_tree_node=None, committed_fil
         console.print(
             f"[light_green]✓[/light_green][green] @llm [turquoise2]({llm_provider}/{actual_model}"
             f"{('/' + llm_client.base_url) if hasattr(llm_client, 'base_url') and llm_client.base_url else ''})[/turquoise2]"
-            f" completed ({duration_str})[/green][bright_black]{usage_text}[/bright_black]"
+            f" completed ({duration_str})[/green]{usage_text}"
         )
         
     except Exception as e:
@@ -668,9 +668,10 @@ def process_llm(ast: AST, current_node: Node, call_tree_node=None, committed_fil
             
             # Log partial usage with TokenStats
             try:
-                token_stats.send_usage(
+                token_stats.send_usage_legacy(
                     prompt_tokens=getattr(e, 'partial_usage', {}).get('prompt_tokens', 0),
                     completion_tokens=getattr(e, 'partial_usage', {}).get('completion_tokens', 0),
+                    total_tokens=getattr(e, 'partial_usage', {}).get('total_tokens', 0),
                     operation_id=f"llm_{current_node.id}",
                     model=actual_model,
                     operation_type="llm_call_failed",

@@ -156,6 +156,9 @@ def run_fractalic(input_file, task_file=None, param_input_user_request=None, cap
         os.chdir(input_file_dir)
         print(f"Changed working directory to: {input_file_dir}")
         
+        # Reset token stats for this new session
+        token_stats.reset()
+        
         # Validate input file exists
         input_file_basename = os.path.basename(input_file)
         if not os.path.exists(input_file_basename):

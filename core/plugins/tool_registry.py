@@ -791,9 +791,10 @@ class ToolRegistry(dict):
                 usage_info = token_data.get('usage', {})
                 if usage_info:
                     # Log to session TokenStats with source file attribution
-                    token_stats.send_usage(
+                    token_stats.send_usage_legacy(
                         prompt_tokens=usage_info.get('prompt_tokens', 0),
                         completion_tokens=usage_info.get('completion_tokens', 0),
+                        total_tokens=usage_info.get('total_tokens', 0),
                         operation_id=token_data.get('operation_id', f"sub_workflow_{node.key}"),
                         model=token_data.get('model', 'unknown'),
                         operation_type=token_data.get('operation_type', 'sub_workflow'),

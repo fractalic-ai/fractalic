@@ -246,6 +246,59 @@ class TokenStatsQueue:
         
         return stats
     
+    def print_debug_usage(self, prefix: str, context_tokens: int, mcp_tokens: int = 0, fractalic_tokens: int = 0, output_tokens: int = 0, message_count: int = 0, tool_calls: int = 0, turn_number: int = 1):
+        """Print debug token usage in the same format as completion output.
+        
+        Format: Usage Input: 1104 (Context: 896, MCP: 0, Fractalic: 208), Output: 131, Turn: 1235, Cumulative: 1235, Tools: 1, Turn: 1
+        """
+        input_total = context_tokens + mcp_tokens + fractalic_tokens
+        turn_total = input_total + output_tokens
+        cumulative_total = self.get_cumulative_total() if hasattr(self, 'get_cumulative_total') else turn_total
+        
+        usage_parts = []
+        usage_parts.append(f"Input: {input_total}")
+        usage_parts.append(f"(Context: {context_tokens}, MCP: {mcp_tokens}, Fractalic: {fractalic_tokens})")
+        
+        if output_tokens > 0:
+            usage_parts.append(f"Output: {output_tokens}")
+            usage_parts.append(f"Turn: {turn_total}")
+            usage_parts.append(f"Cumulative: {cumulative_total}")
+        
+        if message_count > 0:
+            usage_parts.append(f"Messages: {message_count}")
+            
+        if tool_calls > 0:
+            usage_parts.append(f"Tools: {tool_calls}")
+            
+        if turn_number > 1:
+            usage_parts.append(f"Turn: {turn_number}")
+        
+        print(f"[{prefix}] Usage {', '.join(usage_parts)}")
+    
+    def get_last_usage_display(self) -> str:
+        """Generate display text for the last operation - single source of truth for formatting."""
+        if not self.messages:
+            return ""
+            
+        last_msg = self.messages[-1]
+        cumulative_total = self.get_cumulative_total()
+        messages_count = last_msg.metadata.get("messages_count", 0) if last_msg.metadata else 0
+        
+        # INPUT = what we actually pay for (context + schemas)
+        # OUTPUT = what model generates
+        return (
+            f"[green]Input:[/green] [white]{last_msg.input_tokens}[/white] "
+            f"([green]Context:[/green] [white]{last_msg.input_context_tokens}[/white], "
+            f"[green]MCP:[/green] [white]{last_msg.input_mcp_schema_tokens}[/white], "
+            f"[green]Fractalic:[/green] [white]{last_msg.input_fractalic_schema_tokens}[/white]), "
+            f"[green]Output:[/green] [white]{last_msg.output_tokens}[/white], "
+            f"[green]Turn:[/green] [white]{last_msg.total_tokens}[/white], "
+            f"[green]Cumulative:[/green] [white]{cumulative_total}[/white], "
+            f"[green]Messages:[/green] [white]{messages_count}[/white], "
+            f"[green]Tools:[/green] [white]{last_msg.tools_available_count}[/white], "
+            f"[green]Turn:[/green] [white]{len(self.messages)}[/white]"
+        )
+    
     def print_session_summary(self):
         """Print comprehensive session usage summary with detailed token breakdown."""
         summary = self.get_session_summary()
