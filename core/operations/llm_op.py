@@ -614,10 +614,16 @@ def process_llm(ast: AST, current_node: Node, call_tree_node=None, committed_fil
         duration = time.time() - start_time
         mins, secs = divmod(int(duration), 60)
         duration_str = f"{mins}m {secs}s" if mins > 0 else f"{secs}s"
+        
+        # Get the usage text from the token tracker if available
+        usage_text = ""
+        if hasattr(token_stats, '_last_usage_text'):
+            usage_text = f" -> Usage {token_stats._last_usage_text}"
+        
         console.print(
-            f"[light_green]✓[/light_green][cyan] @llm [turquoise2]({llm_provider}/{actual_model}"
+            f"[light_green]✓[/light_green][green] @llm [turquoise2]({llm_provider}/{actual_model}"
             f"{('/' + llm_client.base_url) if hasattr(llm_client, 'base_url') and llm_client.base_url else ''})[/turquoise2]"
-            f"[/cyan] completed ({duration_str})"
+            f" completed ({duration_str})[/green][bright_black]{usage_text}[/bright_black]"
         )
         
     except Exception as e:

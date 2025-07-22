@@ -596,6 +596,25 @@ class liteclient:
             f"Turn: {session_turn}"
         )
         
+        # Generate styled usage string for completion message with white numbers
+        usage_text = (
+            f"Input: [white]{total_input}[/white] "
+            f"(Context: [white]{context_tokens}[/white], "
+            f"MCP: [white]{mcp_tokens}[/white], "
+            f"Fractalic: [white]{fractalic_tokens}[/white]), "
+            f"Output: [white]{completion_tokens}[/white], "
+            f"Turn: [white]{total_tokens}[/white], "
+            f"Cumulative: [white]{cumulative_total}[/white], "
+            f"Tools: [white]{len(tools)}[/white], "
+            f"Turn: [white]{session_turn}[/white]"
+        )
+        
+        # Store the usage text for later retrieval
+        if not hasattr(token_stats, '_last_usage_text'):
+            token_stats._last_usage_text = usage_text
+        else:
+            token_stats._last_usage_text = usage_text
+        
         # DEBUG: Show what we sent vs what we display (should always match)
         # print(f"[DEBUG UNIFIED] Operation: {unique_id}")
         # print(f"[DEBUG UNIFIED] Sent to queue: input={total_input}, output={completion_tokens}, total={total_tokens}")
@@ -896,8 +915,8 @@ class liteclient:
                             tool_calls=None  # No tool calls when conversation finishes naturally
                         )
                         
-                        # Display unified result
-                        self.ui.show("", f"\n{display_text}")
+                        # Display unified result - commented out because now integrated into completion message
+                        # self.ui.show("", f"\n{display_text}")
                     break
 
                 # ---- execute tool calls ----
@@ -1018,8 +1037,8 @@ class liteclient:
                         tool_calls=tool_calls  # Pass current tool calls
                     )
                     
-                    # Display unified result
-                    self.ui.show("", f"\n{display_text}")
+                    # Display unified result - commented out because now integrated into completion message  
+                    # self.ui.show("", f"\n{display_text}")
                 
                 params["messages"] = hist
             
