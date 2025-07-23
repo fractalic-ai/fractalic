@@ -25,9 +25,46 @@ from core.plugins.tool_registry import ToolRegistry    # NEW import
 from .rich_formatter import RichFormatter              # Rich functionality moved here
 from core.simple_token_tracker import token_tracker   # Simple token tracking
 
-# Configure Helicone API key and callbacks
-os.environ["HELICONE_API_KEY"] = "sk-helicone-ckd45ty-2snemny-t5cf74q-ieshpwa"
-litellm.success_callback = ["helicone"]
+# Custom callback for token and cost tracking
+def fractalic_cost_callback(kwargs, completion_response, start_time, end_time):
+    """Custom LiteLLM callback to capture actual token usage and costs"""
+    try:
+        # Get actual cost from LiteLLM (may be None or missing)
+        response_cost = kwargs.get("response_cost") or 0.0
+        
+        # Get usage data from response
+        usage = completion_response.usage if hasattr(completion_response, 'usage') else None
+        if usage:
+            input_tokens = usage.prompt_tokens
+            output_tokens = usage.completion_tokens
+            # Get filename from operation context - try multiple sources
+            filename = "unknown"
+            turn_info = ""
+            
+            # Try metadata first
+            metadata = kwargs.get("metadata", {})
+            if metadata:
+                filename = metadata.get("filename", filename)
+                turn_info = metadata.get("turn_info", turn_info)
+            
+            # Try litellm_params as backup
+            if filename == "unknown":
+                litellm_params = kwargs.get("litellm_params", {})
+                if "metadata" in litellm_params:
+                    metadata = litellm_params["metadata"]
+                    filename = metadata.get("filename", filename)
+                    turn_info = metadata.get("turn_info", turn_info)
+            
+            
+            # Record in token tracker with actual cost but WITHOUT display (we'll show it at the right time)
+            token_tracker.record_llm_call_with_cost_silent(filename, input_tokens, output_tokens, turn_info, response_cost)
+            
+    except Exception as e:
+        # Don't break execution if callback fails
+        pass
+
+# Set our custom callback
+litellm.success_callback = [fractalic_cost_callback]
 
 
 warnings.filterwarnings(
@@ -539,7 +576,11 @@ class liteclient:
             top_p=op.get("top_p", self.top_p),
             max_tokens=op.get("max_tokens", self.max_tokens),
             stop=op.get("stop_sequences"),
-            api_key= self.api_key
+            api_key= self.api_key,
+            metadata={
+                "filename": op.get('_source_file', 'unknown'),
+                "turn_info": ""
+            }
         )
 
         # Add stream_options only for providers that support it (OpenAI, Anthropic)
@@ -681,6 +722,10 @@ class liteclient:
                     signal.alarm(300)
                     
                     try:
+                        # Update metadata with current turn info for callback
+                        turn_info = f"(turn {turn_count + 1}/{max_turns})" if max_turns > 1 else ""
+                        params["metadata"]["turn_info"] = turn_info
+                        
                         rsp = completion(**params)
                         
                         # Use appropriate stream processor based on whether tools are available
@@ -733,13 +778,8 @@ class liteclient:
                              "tool_calls": tool_calls or None})
 
                 if not tool_calls:
-                    # LLM finished conversation naturally - record tokens for regular completion
-                    if usage_info:
-                        current_file = op.get('_source_file', 'unknown')
-                        input_tokens = usage_info.get('prompt_tokens', 0)
-                        output_tokens = usage_info.get('completion_tokens', 0)
-                        turn_info = f"(turn {turn_count + 1}/{max_turns})" if max_turns > 1 else ""
-                        token_tracker.record_llm_call(current_file, input_tokens, output_tokens, turn_info)
+                    # LLM finished conversation naturally - display tokens now
+                    token_tracker.print_last_call_status()
                     break
 
                 # ---- execute tool calls ----
@@ -771,15 +811,12 @@ class liteclient:
                                           f"args:\n{clean_args}")
                         convo.append(call_log_context)
 
-                        # Record token usage AFTER showing tool call details but BEFORE execution
-                        if tool_idx == 0 and usage_info:  # Only show once per turn, not per tool
-                            current_file = op.get('_source_file', 'unknown')
-                            input_tokens = usage_info.get('prompt_tokens', 0)
-                            output_tokens = usage_info.get('completion_tokens', 0)
-                            turn_info = f"(turn {turn_count + 1}/{max_turns})" if max_turns > 1 else ""
-                            token_tracker.record_llm_call(current_file, input_tokens, output_tokens, turn_info)
+                        # Token tracking is now handled by LiteLLM callback
 
                         res = self.exec.execute(tc["function"]["name"], args)
+                        
+                        # Display token usage after tool execution completes but before showing response
+                        token_tracker.print_last_call_status()
                         
                         # Format response for display and context
                         if res and (res.strip().startswith(('{', '['))):
@@ -859,24 +896,7 @@ class liteclient:
                         # Break the tool call loop and return current conversation
                         return {"text": "\n\n".join(convo), "messages": hist, "usage": cumulative_usage}
                 
-                # Display token usage after tool execution completes
-                if usage_info:
-                    prompt_tokens = usage_info.get('prompt_tokens', 0)
-                    completion_tokens = usage_info.get('completion_tokens', 0)
-                    total_tokens = usage_info.get('total_tokens', 0)
-                    
-                    # Check if this operation explicitly disabled tools
-                    operation_tools = params.get("tools", [])
-                    if op.get("tools") == "none":
-                        operation_tools = []  # Force empty tools for operations with tools: none
-                    
-                    # Token usage already tracked in the natural completion path above
-                    # This intermediate step doesn't need additional tracking
-                    
-                    # Display unified result - commented out because now integrated into completion message  
-                    # self.ui.show("", f"\n{display_text}")
-                
-                # Turn summary is now included in post-tool message - no separate print needed
+                # Token usage displayed after each individual tool execution
                 
                 params["messages"] = hist
             
