@@ -5,7 +5,9 @@ This module implements a straightforward token tracking mechanism that accumulat
 actual API usage data from LiteLLM responses without complex calculations or estimations.
 """
 
-from typing import Dict, Any
+from typing import Dict, Any, Optional
+import litellm
+from core.config import Config
 
 
 class SimpleTokenTracker:
@@ -26,6 +28,7 @@ class SimpleTokenTracker:
         self.filestats: Dict[str, Dict[str, Any]] = {}
         self.last_call_data = None  # Store last call data for manual display
         self.processed_calls = set()  # Track processed call IDs to avoid duplicates
+        self.current_model = None  # Track the current model being used
         
     def start_file(self, filename: str) -> None:
         """
@@ -143,6 +146,43 @@ class SimpleTokenTracker:
         self.global_input_cost += estimated_input_cost
         self.global_output_cost += estimated_output_cost
     
+    def get_model_context_size(self, model: str) -> Optional[int]:
+        """
+        Get the context size for a given model using LiteLLM.
+        
+        Args:
+            model: The model name (e.g., "openai/gpt-4o-mini", "anthropic/claude-3-sonnet")
+            
+        Returns:
+            The maximum context size in tokens, or None if not available
+        """
+        try:
+            model_info = litellm.get_model_info(model)
+            
+            # Handle both dict and object responses
+            if isinstance(model_info, dict):
+                # Use max_input_tokens for context monitoring, fallback to max_tokens
+                max_tokens = model_info.get('max_input_tokens') or model_info.get('max_tokens')
+            else:
+                # Use max_input_tokens for context monitoring, fallback to max_tokens
+                max_tokens = getattr(model_info, 'max_input_tokens', None) or getattr(model_info, 'max_tokens', None)
+            
+            return max_tokens
+        except Exception:
+            # If model info is not available, return None
+            return None
+    
+    def get_default_model(self) -> str:
+        """
+        Get the default model from settings.
+        
+        Returns:
+            The default model name from TOML_SETTINGS
+        """
+        if Config.TOML_SETTINGS:
+            return Config.TOML_SETTINGS.get("defaultProvider", "unknown")
+        return "unknown"
+    
     def print_status(self, filename: str, llm_input: int, llm_output: int, turn_info: str = "") -> None:
         """
         Print compact token usage after each LLM call.
@@ -156,8 +196,21 @@ class SimpleTokenTracker:
         file_input = self.filestats[filename]["file_input_tokens"]
         file_output = self.filestats[filename]["file_output_tokens"]
         
-        # Compact gray display
-        print(f"\033[90mTokens result in/out: +{llm_input}/+{llm_output} (total in/out: {file_input}/{file_output} (file); {self.global_input_tokens}/{self.global_output_tokens} (session))\033[0m")
+        # Get context fill information - current conversation size (input + output for this call)
+        context_fill_count = llm_input + llm_output
+        
+        # Use current model if available, otherwise fall back to default
+        model_to_use = self.current_model or self.get_default_model()
+        context_size = self.get_model_context_size(model_to_use)
+        
+        if context_size:
+            context_fill_percent = int((context_fill_count / context_size) * 100)
+            context_info = f" | context: {context_fill_count} / {context_size} ({context_fill_percent}% fill)"
+        else:
+            context_info = f" | context: {context_fill_count} / unknown (unknown% fill)"
+        
+        # Compact gray display with context information
+        print(f"\033[90mTokens result in/out: +{llm_input}/+{llm_output} (total in/out: {file_input}/{file_output} (file); {self.global_input_tokens}/{self.global_output_tokens} (session)){context_info}\033[0m")
     
     def record_llm_call_direct(self, filename: str, input_tokens: int, output_tokens: int, turn_info: str = "") -> None:
         """
