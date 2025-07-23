@@ -1,3 +1,4 @@
+from core.config import Config                         # For context render mode configuration
 """
 lite_client.py  —  Unified multimodal client (LiteLLM)
 
@@ -22,8 +23,7 @@ import openai                                           # raw SDK for file uploa
 import warnings
 from core.plugins.tool_registry import ToolRegistry    # NEW import
 from .rich_formatter import RichFormatter              # Rich functionality moved here
-from core.config import Config                         # For context render mode configuration
-from core.token_stats import token_stats               # Clean message queue-based token tracking
+
 
 warnings.filterwarnings(
     "ignore",
@@ -358,120 +358,6 @@ def _embed_media(item: str | dict, provider: str, api_key: str) -> Dict[str, Any
             "image_url": {"url": f"data:{mime};base64,{base64.b64encode(data).decode()}"}}
 
 # ====================================================================
-#  Token calculation helpers for detailed breakdown
-# ====================================================================
-def estimate_schema_tokens(tools: Optional[List[Dict[str, Any]]]) -> int:
-    """Estimate tokens used by tool schemas in the request."""
-    if not tools:
-        return 0
-    
-    # Rough estimation: ~4 characters per token for JSON schema
-    schema_text = json.dumps(tools, separators=(',', ':'))
-    return len(schema_text) // 4
-
-def calculate_detailed_tokens_enhanced(model, messages, operation_tools, session_tools, response, force_no_schema_tokens=False):
-    """Enhanced token calculation with detailed breakdown using litellm.token_counter()"""
-    try:
-        # Build the request payload that would be sent to OpenAI
-        request_payload = {
-            "model": model,
-            "messages": messages
-        }
-        
-        # Add tools if available and not forced to none
-        if operation_tools and not force_no_schema_tokens:
-            request_payload["tools"] = operation_tools
-        
-        # Calculate context tokens (pure message tokens without tools)
-        context_tokens = litellm.token_counter(
-            model=model,
-            messages=messages
-        )
-        
-        # Calculate total input tokens with tools (if any)
-        if operation_tools and not force_no_schema_tokens:
-            input_tokens = litellm.token_counter(
-                model=model,
-                messages=messages,
-                tools=operation_tools
-            )
-            # Schema tokens = input_tokens - context_tokens
-            schema_tokens = input_tokens - context_tokens
-        else:
-            # No tools or forced to none
-            input_tokens = context_tokens
-            schema_tokens = 0
-        
-        # Classify tools as MCP vs Fractalic
-        mcp_schema_tokens = 0
-        fractalic_schema_tokens = 0
-        
-        if operation_tools and schema_tokens > 0 and not force_no_schema_tokens:
-            mcp_tools = [tool for tool in operation_tools if tool.get("metadata", {}).get("_mcp")]
-            fractalic_tools = [tool for tool in operation_tools if not tool.get("metadata", {}).get("_mcp")]
-            
-            if mcp_tools and fractalic_tools:
-                # Both types - estimate proportionally
-                total_tools = len(operation_tools)
-                mcp_ratio = len(mcp_tools) / total_tools
-                mcp_schema_tokens = int(schema_tokens * mcp_ratio)
-                fractalic_schema_tokens = schema_tokens - mcp_schema_tokens
-            elif mcp_tools:
-                # Only MCP tools
-                mcp_schema_tokens = schema_tokens
-            else:
-                # Only Fractalic tools
-                fractalic_schema_tokens = schema_tokens
-        
-        # Calculate output tokens
-        output_tokens = 0
-        if response:
-            # Extract completion tokens from response usage
-            if hasattr(response, 'usage') and response.usage:
-                output_tokens = getattr(response.usage, 'completion_tokens', 0)
-            elif isinstance(response, dict) and 'usage' in response:
-                output_tokens = response['usage'].get('completion_tokens', 0)
-        
-        # Create return object
-        from dataclasses import dataclass
-        
-        @dataclass
-        class TokenBreakdown:
-            input_tokens: int
-            input_context_tokens: int
-            input_schema_tokens: int
-            mcp_schema_tokens: int
-            fractalic_schema_tokens: int
-            output_tokens: int
-            total_tokens: int
-        
-        total_tokens = input_tokens + output_tokens
-        
-        return TokenBreakdown(
-            input_tokens=input_tokens,
-            input_context_tokens=context_tokens,
-            input_schema_tokens=schema_tokens,
-            mcp_schema_tokens=mcp_schema_tokens,
-            fractalic_schema_tokens=fractalic_schema_tokens,
-            output_tokens=output_tokens,
-            total_tokens=total_tokens
-        )
-    
-    except Exception as e:
-        # Fallback to basic estimation
-        print(f"[DEBUG] Token calculation failed: {e}, using fallback")
-        context_estimate = len(json.dumps(messages)) // 4
-        return TokenBreakdown(
-            input_tokens=context_estimate,
-            input_context_tokens=context_estimate,
-            input_schema_tokens=0,
-            mcp_schema_tokens=0,
-            fractalic_schema_tokens=0,
-            output_tokens=0,
-            total_tokens=context_estimate
-        )
-
-# ====================================================================
 #  Main LiteLLM client
 # ====================================================================
 @dataclass
@@ -575,160 +461,6 @@ class liteclient:
         return "openai"
 
     # -----------------------------------------------------------------
-    def _record_llm_operation_unified(self, messages, tools, completion_tokens, prompt_tokens=0, operation_params=None, tool_calls=None):
-        """
-        UNIFIED method to handle ALL LLM token tracking.
-        Replaces the 4+ different calculation paths with single consistent approach.
-        
-        Args:
-            messages: List of conversation messages
-            tools: List of available tool schemas
-            completion_tokens: LLM response tokens
-            prompt_tokens: Input tokens from LLM API (fallback)
-            operation_params: Additional operation parameters
-            tool_calls: Current tool calls (if any)
-        
-        Returns:
-            str: Formatted display string for token usage
-        """
-        op = operation_params or {}
-        
-        # Step 1: Properly classify tokens for pricing accuracy
-        try:
-            # Total context (all messages)
-            total_context_tokens = litellm.token_counter(
-                model=op.get("model", self.model),
-                messages=messages
-            )
-            
-            # New input context (only latest user message)
-            if messages:
-                # Find the last user message (the actual new input)
-                last_user_message = None
-                for msg in reversed(messages):
-                    if msg.get("role") == "user":
-                        last_user_message = msg
-                        break
-                
-                if last_user_message:
-                    # Calculate tokens for just the new input (system + new user message)
-                    system_msg = next((msg for msg in messages if msg.get("role") == "system"), None)
-                    new_input_messages = []
-                    if system_msg:
-                        new_input_messages.append(system_msg)
-                    new_input_messages.append(last_user_message)
-                    
-                    new_input_tokens = litellm.token_counter(
-                        model=op.get("model", self.model),
-                        messages=new_input_messages
-                    )
-                    previous_context_tokens = total_context_tokens - new_input_tokens
-                else:
-                    new_input_tokens = total_context_tokens
-                    previous_context_tokens = 0
-            else:
-                new_input_tokens = total_context_tokens
-                previous_context_tokens = 0
-                
-        except Exception as e:
-            print(f"[DEBUG UNIFIED] Failed to calculate context tokens: {e}")
-            # Fallback: estimate based on message length
-            total_chars = sum(len(str(msg.get("content", ""))) for msg in messages)
-            total_context_tokens = total_chars // 4
-            new_input_tokens = total_context_tokens
-            previous_context_tokens = 0
-        
-        # Step 2: Calculate schema tokens if tools are provided
-        schema_tokens = 0
-        mcp_tokens = 0
-        fractalic_tokens = 0
-        
-        if tools and op.get("tools") != "none":
-            # Estimate schema tokens using LiteLLM for accuracy
-            try:
-                # Calculate tokens with and without tools to get schema tokens
-                total_with_tools = litellm.token_counter(
-                    model=op.get("model", self.model),
-                    messages=messages,
-                    tools=tools
-                )
-                schema_tokens = total_with_tools - total_context_tokens
-            except Exception:
-                # Fallback: estimate schema tokens
-                schema_text = json.dumps(tools, separators=(',', ':'))
-                schema_tokens = len(schema_text) // 4
-            
-            # Classify tools as MCP vs Fractalic
-            mcp_tools = [tool for tool in tools if tool.get("metadata", {}).get("_mcp")]
-            fractalic_tools = [tool for tool in tools if not tool.get("metadata", {}).get("_mcp")]
-            
-            if mcp_tools and fractalic_tools:
-                # Both types - estimate proportionally
-                total_tools = len(tools)
-                mcp_ratio = len(mcp_tools) / total_tools
-                mcp_tokens = int(schema_tokens * mcp_ratio)
-                fractalic_tokens = schema_tokens - mcp_tokens
-            elif mcp_tools:
-                mcp_tokens = schema_tokens
-            else:
-                fractalic_tokens = schema_tokens
-        
-        # Step 3: Total input tokens = new input + schema (not previous context)
-        total_input = new_input_tokens + schema_tokens
-        
-        # Step 2: Generate unique operation ID
-        import time
-        unique_id = f"llm_{int(time.time()*1000)}_unified_{op.get('model', self.model)}"
-        
-        # Step 3: Calculate total tokens
-        total_tokens = total_input + completion_tokens
-        
-        # Step 4: Count tool calls from parameter (safer than parsing messages)
-        tool_calls_count = 0
-        if tool_calls:
-            tool_calls_count = len(tool_calls) if isinstance(tool_calls, list) else 1
-        
-        # Step 6: Calculate cumulative before sending (will be updated after send)
-        cumulative_total = token_stats.get_cumulative_total()
-        
-        # Step 7: Send token data to token_stats - it handles ALL display
-        # INPUT = what we pay for = new_input_tokens + schema_tokens
-        # Context = new user messages only (not tool outputs/previous LLM responses)
-        token_stats.send_usage(
-            operation_id=unique_id,
-            model=op.get("model", self.model),
-            input_tokens=new_input_tokens + schema_tokens,
-            input_context_tokens=new_input_tokens,
-            input_schema_tokens=schema_tokens,
-            input_mcp_schema_tokens=mcp_tokens,
-            input_fractalic_schema_tokens=fractalic_tokens,
-            output_tokens=completion_tokens,
-            total_tokens=new_input_tokens + schema_tokens + completion_tokens,
-            tool_calls_count=tool_calls_count,
-            tools_available_count=len(tools),
-            operation_type="llm_turn",
-            source_file="openai_client.py",
-            metadata={
-                "messages_count": len(messages),
-                "previous_context_tokens": previous_context_tokens,
-                "total_context_tokens": total_context_tokens
-            }
-        )
-        
-        # Let token_stats generate the display text - single source of truth
-        usage_text = token_stats.get_last_usage_display()
-        
-        # Store for completion message
-        token_stats._last_usage_text = usage_text
-        
-        return usage_text  # Return formatted display from token_stats
-    
-    # -----------------------------------------------------------------
-    def _generate_operation_id(self, operation_type="llm"):
-        """Generate unique operation ID for token tracking"""
-        import time
-        return f"{operation_type}_{int(time.time()*1000)}_{self.model.replace('/', '_')}"
-
     # -----------------------------------------------------------------
     class LLMCallException(Exception):
         def __init__(self, message, partial_result=None):
@@ -742,10 +474,6 @@ class liteclient:
         operation_params: Optional[Dict[str, Any]] = None
     ) -> Dict[str, Any]:
 
-        # Initialize tool call statistics collection for trace files
-        import time
-        tool_call_statistics = []
-        
         op = operation_params or {}
         provider = self._provider(op)
         
@@ -991,61 +719,13 @@ class liteclient:
                              "content": content,
                              "tool_calls": tool_calls or None})
 
-                # Accumulate usage data
-                if usage_info:
-                    cumulative_usage["prompt_tokens"] += usage_info.get("prompt_tokens", 0)
-                    cumulative_usage["completion_tokens"] += usage_info.get("completion_tokens", 0)
-                    cumulative_usage["total_tokens"] += usage_info.get("total_tokens", 0)
-                    cumulative_usage["turns_count"] += 1
-                    
-                    # Token usage will be sent to queue later with calculated values
+                # Token calculation and stats printing removed
                 
-                if tool_calls:
-                    cumulative_usage["tool_calls_count"] += len(tool_calls)
-
                 if not tool_calls:
-                    # LLM finished conversation naturally - show token usage for final turn
-                    if usage_info:
-                        prompt_tokens = usage_info.get('prompt_tokens', 0)
-                        completion_tokens = usage_info.get('completion_tokens', 0)
-                        
-                        # Check if this operation explicitly disabled tools
-                        operation_tools = params.get("tools", [])
-                        if op.get("tools") == "none":
-                            operation_tools = []  # Force empty tools for operations with tools: none
-                        
-                        # UNIFIED APPROACH: Replace complex enhanced calculation with single method
-                        display_text = self._record_llm_operation_unified(
-                            messages=hist,  # Use actual conversation history
-                            tools=operation_tools,
-                            completion_tokens=completion_tokens,
-                            prompt_tokens=prompt_tokens,
-                            operation_params=op,
-                            tool_calls=None  # No tool calls when conversation finishes naturally
-                        )
-                        
-                        # Display unified result - commented out because now integrated into completion message
-                        # self.ui.show("", f"\n{display_text}")
+                    # LLM finished conversation naturally
                     break
 
                 # ---- execute tool calls ----
-                # Track context growth before tool execution and store for trace files
-                pre_tool_context = 0  # Initialize for scope
-                if tool_calls:
-                    try:
-                        pre_tool_context = litellm.token_counter(model=params.get("model", self.model), messages=hist)
-                        
-                        # Store pre-tool statistics for trace file
-                        tool_call_statistics.append({
-                            "stage": "pre-tool",
-                            "context_tokens": pre_tool_context,
-                            "message_count": len(hist),
-                            "tool_calls_pending": len(tool_calls),
-                            "timestamp": time.time()
-                        })
-                    except Exception as e:
-                        # Don't print debug here - will be shown on tool call line
-                        pass
                 
                 for tool_idx, tc in enumerate(tool_calls):
                     
@@ -1060,51 +740,10 @@ class liteclient:
                         else:
                             colored_args = clean_args = "{}"
                         
-                        # Add token information to tool call display (first tool call only)
-                        token_info = ""
-                        if tool_idx == 0 and pre_tool_context > 0:  # Only show on first tool call
-                            # Calculate schema tokens for the tools being used
-                            try:
-                                schema_tokens = 0
-                                mcp_tokens = 0 
-                                fractalic_tokens = 0
-                                
-                                if params.get("tools"):
-                                    # Calculate schema tokens using LiteLLM
-                                    try:
-                                        total_with_tools = litellm.token_counter(
-                                            model=params.get("model", self.model),
-                                            messages=hist,
-                                            tools=params["tools"]
-                                        )
-                                        schema_tokens = total_with_tools - pre_tool_context
-                                    except Exception:
-                                        # Fallback: estimate schema tokens
-                                        schema_text = json.dumps(params["tools"], separators=(',', ':'))
-                                        schema_tokens = len(schema_text) // 4
-                                    
-                                    # Classify tools as MCP vs Fractalic
-                                    tools_list = params["tools"]
-                                    mcp_tools = [tool for tool in tools_list if tool.get("metadata", {}).get("_mcp")]
-                                    fractalic_tools = [tool for tool in tools_list if not tool.get("metadata", {}).get("_mcp")]
-                                    
-                                    if mcp_tools and fractalic_tools:
-                                        # Both types - estimate proportionally
-                                        total_tools = len(tools_list)
-                                        mcp_ratio = len(mcp_tools) / total_tools
-                                        mcp_tokens = int(schema_tokens * mcp_ratio)
-                                        fractalic_tokens = schema_tokens - mcp_tokens
-                                    elif mcp_tools:
-                                        mcp_tokens = schema_tokens
-                                    else:
-                                        fractalic_tokens = schema_tokens
-                                
-                                token_info = f", Tokens: {pre_tool_context + schema_tokens} (Context: {pre_tool_context}, MCP: {mcp_tokens}, Fractalic: {fractalic_tokens}), Messages: {len(hist)}, Tools: {len(tool_calls)}"
-                            except Exception as e:
-                                token_info = f", Tokens: {pre_tool_context}, Messages: {len(hist)}, Tools: {len(tool_calls)}"
+                        # Token info display removed
                         
                         # Display with colors
-                        call_log_display = (f"> TOOL CALL, id: {tc['id']}{token_info}\n"
+                        call_log_display = (f"> TOOL CALL, id: {tc['id']}\n"
                                           f"tool: {tc['function']['name']}\n"
                                           f"args:\n{colored_args}")
                         self.ui.show("", call_log_display)
@@ -1181,29 +820,7 @@ class liteclient:
                                      "name": tc["function"]["name"],
                                      "content": res})
                         
-                        # Track context growth after each tool response and store for trace files
-                        try:
-                            post_tool_total = litellm.token_counter(model=params.get("model", self.model), messages=hist)
-                            # Calculate the tokens added by this tool response (difference from pre-tool)
-                            tool_output_tokens = post_tool_total - pre_tool_context
-                            
-                            # Display compact context growth in gray after tool response (for last tool only)
-                            if tool_idx == len(tool_calls) - 1:  # Only show on last tool call
-                                self.ui.show("", f"[dim]Context: {pre_tool_context} → {post_tool_total} (+{tool_output_tokens} tool output), Messages: {len(hist)}[/dim]")
-                            
-                            # Store post-tool statistics for trace file
-                            tool_call_statistics.append({
-                                "stage": f"post-tool-{tool_idx + 1}",
-                                "tool_name": tc['function']['name'],
-                                "tool_id": tc['id'],
-                                "context_tokens_total": post_tool_total,
-                                "context_tokens_before": pre_tool_context,
-                                "tool_output_tokens": tool_output_tokens,
-                                "message_count": len(hist),
-                                "timestamp": time.time()
-                            })
-                        except Exception as e:
-                            print(f"[POST-TOOL-{tool_idx + 1}] Failed to calculate context tokens: {e}")
+                        # Token tracking removed
                         
                     except json.JSONDecodeError:
                         error_msg = f"Invalid JSON arguments for tool {tc['function']['name']}: {args}"
@@ -1214,9 +831,6 @@ class liteclient:
                                      "tool_call_id": tc["id"],
                                      "name": tc["function"]["name"],
                                      "content": json.dumps({"error": error_msg}, indent=2)})
-                        # Add tool call statistics to usage data for trace files (error case)
-                        if tool_call_statistics and cumulative_usage:
-                            cumulative_usage['tool_call_statistics'] = tool_call_statistics
                         # Break the tool call loop and return current conversation
                         return {"text": "\n\n".join(convo), "messages": hist, "usage": cumulative_usage}
                 
@@ -1251,10 +865,6 @@ class liteclient:
         except Exception as e:
             # Catch-all: propagate convo so far
             raise self.LLMCallException(f"Unexpected LLM error: {e}", partial_result="\n\n".join(convo)) from e
-        
-        # Add tool call statistics to usage data for trace files
-        if tool_call_statistics and cumulative_usage:
-            cumulative_usage['tool_call_statistics'] = tool_call_statistics
         
         return {"text": "\n\n".join(convo), "messages": hist, "usage": cumulative_usage}
 

@@ -10,7 +10,6 @@ from core.ast_md.ast import AST, get_ast_part_by_path, get_ast_parts_by_uri_arra
 from core.errors import BlockNotFoundError
 from core.config import Config
 from core.llm.llm_client import LLMClient  # Import the LLMClient class
-from core.token_stats import token_stats  # Import TokenStatsQueue
 from rich.console import Console
 from rich.spinner import Spinner
 from rich import print
@@ -617,9 +616,7 @@ def process_llm(ast: AST, current_node: Node, call_tree_node=None, committed_fil
         
         # Get the usage text from the token tracker if available
         usage_text = ""
-        if hasattr(token_stats, '_last_usage_text'):
-            usage_text = f" -> Usage {token_stats._last_usage_text}"
-        
+        # Token stats usage text removed        
         console.print(
             f"[light_green]✓[/light_green][green] @llm [turquoise2]({llm_provider}/{actual_model}"
             f"{('/' + llm_client.base_url) if hasattr(llm_client, 'base_url') and llm_client.base_url else ''})[/turquoise2]"
@@ -666,19 +663,8 @@ def process_llm(ast: AST, current_node: Node, call_tree_node=None, committed_fil
         if hasattr(e, 'partial_usage') and getattr(e, 'partial_usage'):
             error_trace['partial_usage'] = getattr(e, 'partial_usage')
             
-            # Log partial usage with TokenStats
-            try:
-                token_stats.send_usage_legacy(
-                    prompt_tokens=getattr(e, 'partial_usage', {}).get('prompt_tokens', 0),
-                    completion_tokens=getattr(e, 'partial_usage', {}).get('completion_tokens', 0),
-                    total_tokens=getattr(e, 'partial_usage', {}).get('total_tokens', 0),
-                    operation_id=f"llm_{current_node.id}",
-                    model=actual_model,
-                    operation_type="llm_call_failed",
-                    source_file=source_file
-                )
-            except Exception as track_error:
-                console.print(f"[yellow]Warning: Token tracking for error failed: {track_error}[/yellow]")
+            # TokenStats logging removed
+            pass
         
         # Store error trace in node for trace files
         current_node.token_usage = error_trace

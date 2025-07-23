@@ -18,7 +18,6 @@ from core.operations.shell_op import process_shell
 from core.operations.return_op import process_return
 from core.operations.call_tree import CallTreeNode
 from core.git import ensure_git_repo, create_session_branch, commit_changes
-from core.token_stats import token_stats  # Import TokenStats for session-wide tracking
 from rich import print
 from rich.console import Console
 
@@ -490,14 +489,6 @@ def process_run(ast: AST, current_node: Node, local_file_name, parent_operation,
             base_dir=base_dir
         )
 
-    # Aggregate token usage from sub-workflow AST nodes
-    try:
-        if run_result:
-            _aggregate_token_usage_from_ast(run_result, source_path)
-    except Exception as e:
-        # Don't fail the operation if token aggregation fails
-        print(f"[DEBUG] Token aggregation from sub-workflow failed: {e}")
-
     # Handle results insertion
     if target_block_id:
         perform_ast_operation(
@@ -524,34 +515,3 @@ def process_run(ast: AST, current_node: Node, local_file_name, parent_operation,
 
     # Return the explicit_return flag as well
     return current_node.next, child_call_tree_node, ctx_file, ctx_file_hash, trc_file, trc_file_hash, branch_name, explicit_return
-
-
-def _aggregate_token_usage_from_ast(ast, source_file):
-    """
-    Extract token usage data from AST nodes and aggregate to session TokenTracker.
-    
-    Args:
-        ast: The AST object from the sub-workflow execution
-        source_file: The source file path for attribution
-    """
-    if not ast or not hasattr(ast, 'parser') or not ast.parser.nodes:
-        return
-        
-    for node in ast.parser.nodes.values():
-        # Check if node has token usage data
-        if hasattr(node, 'token_usage') and node.token_usage:
-            token_data = node.token_usage
-            
-            # Extract usage information
-            usage_info = token_data.get('usage', {})
-            if usage_info:
-                # Log to session TokenStats with source file attribution
-                token_stats.send_usage_legacy(
-                    prompt_tokens=usage_info.get('prompt_tokens', 0),
-                    completion_tokens=usage_info.get('completion_tokens', 0),
-                    total_tokens=usage_info.get('total_tokens', 0),
-                    operation_id=token_data.get('operation_id', f"@run_{node.key}"),
-                    model=token_data.get('model', 'unknown'),
-                    operation_type=token_data.get('operation_type', '@run_sub_workflow'),
-                    source_file=source_file  # Use the sub-workflow file as source
-                )

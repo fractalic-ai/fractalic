@@ -27,7 +27,6 @@ from core.operations.runner import run
 from core.operations.call_tree import CallTreeNode
 from core.errors import BlockNotFoundError, UnknownOperationError
 from core.render.render_ast import render_ast_to_markdown
-from core.token_stats import token_stats  # Import token stats
 
 from rich.console import Console
 from rich.panel import Panel
@@ -157,7 +156,6 @@ def run_fractalic(input_file, task_file=None, param_input_user_request=None, cap
         print(f"Changed working directory to: {input_file_dir}")
         
         # Reset token stats for this new session
-        token_stats.reset()
         
         # Validate input file exists
         input_file_basename = os.path.basename(input_file)
@@ -464,12 +462,6 @@ def main():
         else:
             print(f"[EventMessage: Execution-Mode] Natural workflow completion")
 
-        # Print session token usage summary
-        try:
-            token_stats.print_session_summary()
-        except Exception as e:
-            # Don't fail execution if summary fails
-            console.print(f"[yellow]Warning: Could not print token usage summary: {e}[/yellow]")
 
     except (BlockNotFoundError, UnknownOperationError, FileNotFoundError, ValueError) as e:
         print(f"[ERROR fractalic.py] {str(e)}")

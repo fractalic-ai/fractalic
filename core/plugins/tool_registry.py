@@ -27,7 +27,6 @@ import uuid
 from .cli_introspect import sniff as sniff_cli
 from .mcp_client import list_tools as mcp_list, call_tool as mcp_call
 from core.config import Config
-from core.token_stats import token_stats  # Import TokenStats for session-wide tracking
 
 # ─────────────────────────── Tool Execution Configuration ──────────────────────────
 TOOL_EXECUTION_TIMEOUT = None  # Default: No timeout. Set to number of seconds for timeout.
@@ -641,14 +640,6 @@ class ToolRegistry(dict):
                 base_dir=self._base_dir
             )
             
-            # Aggregate token usage from sub-workflow AST nodes
-            try:
-                if run_result:
-                    self._aggregate_token_usage_from_ast(run_result, file_path)
-            except Exception as e:
-                # Don't fail the operation if token aggregation fails
-                print(f"[DEBUG] Token aggregation from AST failed: {e}")
-            
             # Format response for tool calling interface
             response = {
                 "status": "success",
@@ -770,33 +761,3 @@ class ToolRegistry(dict):
                 "message": "Script executed successfully",
                 "explicit_return": False
             }
-
-    def _aggregate_token_usage_from_ast(self, ast, source_file):
-        """
-        Extract token usage data from AST nodes and aggregate to session TokenTracker.
-        
-        Args:
-            ast: The AST object from the sub-workflow execution
-            source_file: The source file path for attribution
-        """
-        if not ast or not hasattr(ast, 'parser') or not ast.parser.nodes:
-            return
-            
-        for node in ast.parser.nodes.values():
-            # Check if node has token usage data
-            if hasattr(node, 'token_usage') and node.token_usage:
-                token_data = node.token_usage
-                
-                # Extract usage information
-                usage_info = token_data.get('usage', {})
-                if usage_info:
-                    # Log to session TokenStats with source file attribution
-                    token_stats.send_usage_legacy(
-                        prompt_tokens=usage_info.get('prompt_tokens', 0),
-                        completion_tokens=usage_info.get('completion_tokens', 0),
-                        total_tokens=usage_info.get('total_tokens', 0),
-                        operation_id=token_data.get('operation_id', f"sub_workflow_{node.key}"),
-                        model=token_data.get('model', 'unknown'),
-                        operation_type=token_data.get('operation_type', 'sub_workflow'),
-                        source_file=source_file  # Use the sub-workflow file as source
-                    )
