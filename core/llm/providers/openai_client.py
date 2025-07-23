@@ -23,6 +23,11 @@ import openai                                           # raw SDK for file uploa
 import warnings
 from core.plugins.tool_registry import ToolRegistry    # NEW import
 from .rich_formatter import RichFormatter              # Rich functionality moved here
+from core.simple_token_tracker import token_tracker   # Simple token tracking
+
+# Configure Helicone API key and callbacks
+os.environ["HELICONE_API_KEY"] = "sk-helicone-ckd45ty-2snemny-t5cf74q-ieshpwa"
+litellm.success_callback = ["helicone"]
 
 
 warnings.filterwarnings(
@@ -171,9 +176,11 @@ class ToolCallStreamProcessor:
                 elif isinstance(chunk, dict) and 'usage' in chunk and chunk['usage']:
                     self.usage_info = chunk['usage']
                 
-                # Handle finish_reason - stream is complete
+                # Handle finish_reason - but continue processing to get usage data
+                finish_reason = None
                 if chunk.get("choices") and chunk["choices"][0].get("finish_reason"):
-                    break
+                    finish_reason = chunk["choices"][0].get("finish_reason")
+                    # Don't break yet - continue to capture usage data in final chunk
                     
                 delta = chunk.get("choices", [{}])[0].get("delta", {})
                 
@@ -227,6 +234,10 @@ class ToolCallStreamProcessor:
                             # Optionally stream the arguments as they come in
                             # (You might want to disable this if the JSON becomes messy)
                             # self.ui.show("", args_chunk, end="")
+                
+                # Break if we've seen finish_reason and have usage data (or no more meaningful chunks)
+                if finish_reason and (self.usage_info or not (chunk.get("choices") and chunk["choices"][0].get("delta"))):
+                    break
                             
             # Add final newline if we were streaming content
             if self.content_buffer:
@@ -655,6 +666,8 @@ class liteclient:
         max_turns = op.get("tools-turns-max", self.max_tool_turns)
         try:
             for turn_count in range(max_turns):
+                # Pre-call display removed - keeping existing Fractalic output clean
+                
                 # Always use streaming now, but with different processors
                 try:
                     # Add timeout for streaming calls to prevent hanging
@@ -719,10 +732,14 @@ class liteclient:
                              "content": content,
                              "tool_calls": tool_calls or None})
 
-                # Token calculation and stats printing removed
-                
                 if not tool_calls:
-                    # LLM finished conversation naturally
+                    # LLM finished conversation naturally - record tokens for regular completion
+                    if usage_info:
+                        current_file = op.get('_source_file', 'unknown')
+                        input_tokens = usage_info.get('prompt_tokens', 0)
+                        output_tokens = usage_info.get('completion_tokens', 0)
+                        turn_info = f"(turn {turn_count + 1}/{max_turns})" if max_turns > 1 else ""
+                        token_tracker.record_llm_call(current_file, input_tokens, output_tokens, turn_info)
                     break
 
                 # ---- execute tool calls ----
@@ -753,6 +770,14 @@ class liteclient:
                                           f"tool: {tc['function']['name']}\n"
                                           f"args:\n{clean_args}")
                         convo.append(call_log_context)
+
+                        # Record token usage AFTER showing tool call details but BEFORE execution
+                        if tool_idx == 0 and usage_info:  # Only show once per turn, not per tool
+                            current_file = op.get('_source_file', 'unknown')
+                            input_tokens = usage_info.get('prompt_tokens', 0)
+                            output_tokens = usage_info.get('completion_tokens', 0)
+                            turn_info = f"(turn {turn_count + 1}/{max_turns})" if max_turns > 1 else ""
+                            token_tracker.record_llm_call(current_file, input_tokens, output_tokens, turn_info)
 
                         res = self.exec.execute(tc["function"]["name"], args)
                         

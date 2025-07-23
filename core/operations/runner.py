@@ -18,6 +18,7 @@ from core.operations.shell_op import process_shell
 from core.operations.return_op import process_return
 from core.operations.call_tree import CallTreeNode
 from core.git import ensure_git_repo, create_session_branch, commit_changes
+from core.simple_token_tracker import token_tracker
 from rich import print
 from rich.console import Console
 
@@ -102,6 +103,9 @@ def run(filename: str, param_node: Optional[Union[Node, AST]] = None, create_new
             
             # Set source file attribute on AST for token tracking
             ast.source_file = local_file_name
+            
+            # Initialize token tracking for this file
+            token_tracker.start_file(local_file_name)
             
             # Runner py run logic created_by_file setup
             """

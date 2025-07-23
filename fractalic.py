@@ -459,8 +459,16 @@ def main():
             if result['return_content']:
                 print(result['return_content'])
             print("[EventMessage: Return-Content-End]\n")
+            
+            # Print token usage summary at end of session
+            from core.simple_token_tracker import token_tracker
+            token_tracker.print_session_summary()
         else:
             print(f"[EventMessage: Execution-Mode] Natural workflow completion")
+        
+        # Print token usage summary at end of session
+        from core.simple_token_tracker import token_tracker
+        token_tracker.print_session_summary()
 
 
     except (BlockNotFoundError, UnknownOperationError, FileNotFoundError, ValueError) as e:
