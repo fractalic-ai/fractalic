@@ -73,7 +73,7 @@ class SimpleTokenTracker:
         file_output = self.filestats[filename]["file_output_tokens"]
         
         # Compact gray display
-        print(f"\033[90mTokens result in/out: +{llm_input}/+{llm_output} (total file in/out: {file_input}/{file_output}; session in/out: {self.global_input_tokens}/{self.global_output_tokens})\033[0m")
+        print(f"\033[90mTokens result in/out: +{llm_input}/+{llm_output} (total in/out: {file_input}/{file_output} (file); {self.global_input_tokens}/{self.global_output_tokens} (session))\033[0m")
     
     def print_pre_call_info(self, filename: str, has_tools: bool, tool_count: int = 0, turn_number: int = 1, max_turns: int = 1, 
                            messages=None, model=None, tools=None) -> None:
