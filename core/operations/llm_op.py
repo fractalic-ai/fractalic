@@ -16,6 +16,7 @@ from rich import print
 from rich.status import Status
 from rich.panel import Panel
 from rich.box import SQUARE
+from rich.markup import escape
 import json
 import re
 
@@ -653,7 +654,7 @@ def process_llm(ast: AST, current_node: Node, call_tree_node=None, committed_fil
         partial = None
         if hasattr(e, 'partial_result') and getattr(e, 'partial_result'):
             partial = getattr(e, 'partial_result')
-            console.print(f"[yellow]Partial LLM response before error:[/yellow]\n{partial}")
+            console.print(f"[yellow]Partial LLM response before error:[/yellow]\n{escape(partial)}")
             current_node.response_content = f"PARTIAL RESPONSE BEFORE ERROR:\n{partial}\n\nERROR: {str(e)}"
             error_trace['partial_response'] = partial
         else:
@@ -670,9 +671,9 @@ def process_llm(ast: AST, current_node: Node, call_tree_node=None, committed_fil
         current_node.token_usage = error_trace
         
         # Use console.print without Rich markup to avoid conflicts
-        console.print("✗ Failed:", str(e), style="bold red")
+        console.print("✗ Failed:", escape(str(e)), style="bold red")
         console.print("  Operation content:", style="bold red")
-        console.print(current_node.content)
+        console.print(escape(current_node.content))
         raise
     
     # Restore original API key after successful operation

@@ -2,7 +2,11 @@
 settings.toml
 
 # Tutorials and examples (user-generated content)
-tutorials/
+# tutorials/
+*.ctx
+*.trc
+.gitignore
+call_tree.json
 
 # Build artifacts and temporary directories
 # These should never be in the main repo - they belong in temp build directories
