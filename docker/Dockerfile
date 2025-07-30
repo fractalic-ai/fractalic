@@ -11,7 +11,8 @@ RUN apt-get update && \
     git \
     apt-transport-https \
     ca-certificates \
-    lsb-release && \
+    lsb-release \
+    tzdata && \
     # Install Docker CLI using architecture-specific static binary
     ARCH=$(dpkg --print-architecture) && \
     if [ "$ARCH" = "amd64" ]; then \
@@ -77,6 +78,9 @@ WORKDIR /fractalic
 # Create necessary directories with full permissions (development environment)
 RUN mkdir -p /fractalic/logs /tmp && \
     chmod -R 777 /fractalic /fractalic-ui /tmp
+
+# Set timezone environment variable support (can be overridden at runtime)
+ENV TZ=UTC
 
 # Create initial mcp_servers.json if it doesn't exist (from sample)
 RUN if [ ! -f /fractalic/mcp_servers.json ] && [ -f /fractalic/mcp_servers.json.sample ]; then \

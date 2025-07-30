@@ -10,7 +10,8 @@ RUN apt-get update && \
     build-essential \
     curl \
     git \
-    supervisor && \
+    supervisor \
+    tzdata && \
     rm -rf /var/lib/apt/lists/*
 
 # Create a non-root user
@@ -33,6 +34,9 @@ COPY fractalic/docker/supervisord-production.conf /etc/supervisor/conf.d/supervi
 
 # Set PYTHONPATH environment variable
 ENV PYTHONPATH=/fractalic
+
+# Set timezone environment variable support (can be overridden at runtime)
+ENV TZ=UTC
 
 # Switch to the non-root user
 USER appuser

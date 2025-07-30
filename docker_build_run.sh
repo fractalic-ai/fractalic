@@ -119,6 +119,8 @@ if [[ "$BUILD_MODE" == "production" ]]; then
     
     docker run -d \
       -p $AI_PORT:8001 \
+      -e TZ=$(cat /etc/timezone 2>/dev/null || date +%Z || echo "UTC") \
+      -v /etc/localtime:/etc/localtime:ro \
       --name $CONTAINER_NAME \
       $CONTAINER_NAME
       
@@ -135,6 +137,8 @@ else
       -p 8003:8003 \
       -p 8004:8004 \
       -p 5859:5859 \
+      -e TZ=$(cat /etc/timezone 2>/dev/null || date +%Z || echo "UTC") \
+      -v /etc/localtime:/etc/localtime:ro \
       --name $CONTAINER_NAME \
       $CONTAINER_NAME
       

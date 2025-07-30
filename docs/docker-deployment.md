@@ -119,6 +119,27 @@ ghcr.io/fractalic-ai/fractalic:latest             # Latest full build
 ghcr.io/fractalic-ai/fractalic:full               # Full tag
 ```
 
+### Timezone Configuration
+
+By default, Fractalic Docker containers use UTC timezone. For local development, the deployment script automatically passes through your system timezone. For production deployments, you can configure timezone using environment variables:
+
+```bash
+# Run with custom timezone
+docker run -e TZ=America/New_York -p 8001:8001 ghcr.io/fractalic-ai/fractalic:latest-production
+
+# For docker-compose deployments
+version: '3.8'
+services:
+  fractalic:
+    image: ghcr.io/fractalic-ai/fractalic:latest-production
+    environment:
+      - TZ=Europe/London
+    ports:
+      - "8001:8001"
+```
+
+**Note**: Git branch timestamps in session names will reflect the configured timezone. Local development automatically uses your system timezone, while production deployments default to UTC unless explicitly configured.
+
 ---
 
 ## 📁 Expected Directory Structure
