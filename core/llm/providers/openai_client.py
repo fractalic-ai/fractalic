@@ -725,38 +725,75 @@ class liteclient:
                     old_handler = signal.signal(signal.SIGALRM, timeout_handler)
                     signal.alarm(300)
                     
-                    try:
-                        # Update metadata with current turn info for callback
-                        turn_info = f"(turn {turn_count + 1}/{max_turns})" if max_turns > 1 else ""
-                        params["metadata"]["turn_info"] = turn_info
-                        
-                        rsp = completion(**params)
-                        
-                        # Use appropriate stream processor based on whether tools are available
-                        usage_info = None
-                        if has_tools:
-                            # Use tool call stream processor for better tool call handling
-                            tcsp = ToolCallStreamProcessor(self.ui, params["stop"])
-                            stream_response, usage_info = tcsp.process(rsp)
+                    # Retry loop for streaming errors (max 2 retries)
+                    max_retries = 2
+                    attempt = 0
+                    last_exception = None
+                    
+                    while attempt <= max_retries:
+                        try:
+                            # Update metadata with current turn info for callback
+                            turn_info = f"(turn {turn_count + 1}/{max_turns})" if max_turns > 1 else ""
+                            params["metadata"]["turn_info"] = turn_info
                             
-                            # Extract content and tool calls from the reconstructed message
-                            if hasattr(stream_response, 'choices') and stream_response.choices:
-                                msg = stream_response.choices[0].message
-                                content = msg.content or ""
-                                tool_calls = msg.tool_calls or []
+                            rsp = completion(**params)
+                            
+                            # Use appropriate stream processor based on whether tools are available
+                            usage_info = None
+                            if has_tools:
+                                # Use tool call stream processor for better tool call handling
+                                tcsp = ToolCallStreamProcessor(self.ui, params["stop"])
+                                stream_response, usage_info = tcsp.process(rsp)
+                                
+                                # Extract content and tool calls from the reconstructed message
+                                if hasattr(stream_response, 'choices') and stream_response.choices:
+                                    msg = stream_response.choices[0].message
+                                    content = msg.content or ""
+                                    tool_calls = msg.tool_calls or []
+                                else:
+                                    content = ""
+                                    tool_calls = []
                             else:
-                                content = ""
+                                # Use simple stream processor for content-only responses
+                                sp = StreamProcessor(self.ui, params["stop"])
+                                content, usage_info = sp.process(rsp)
                                 tool_calls = []
-                        else:
-                            # Use simple stream processor for content-only responses
-                            sp = StreamProcessor(self.ui, params["stop"])
-                            content, usage_info = sp.process(rsp)
-                            tool_calls = []
                             
-                    finally:
-                        signal.alarm(0)  # Cancel the alarm
-                        signal.signal(signal.SIGALRM, old_handler)  # Restore old handler
-                        
+                            # If we get here successfully, break out of retry loop
+                            break
+                            
+                        except Exception as e:
+                            last_exception = e
+                            attempt += 1
+                            
+                            # Check if this is a retryable streaming error
+                            error_str = str(e).lower()
+                            is_streaming_error = (
+                                "streaming error" in error_str or
+                                "error parsing chunk" in error_str or
+                                "apiconnectionerror" in error_str or
+                                "json.decoder.jsondecodeerror" in error_str
+                            )
+                            
+                            if is_streaming_error and attempt <= max_retries:
+                                self.ui.error(f"Streaming error (attempt {attempt}/{max_retries + 1}): {e}")
+                                import time
+                                time.sleep(1)  # Brief delay before retry
+                                continue
+                            else:
+                                # Non-retryable error or max retries exceeded
+                                break
+                    
+                    # If we exhausted retries, handle the final error
+                    if attempt > max_retries and last_exception:
+                        self.ui.error(f"Streaming error after {max_retries + 1} attempts: {last_exception}")
+                        error_partial = ""
+                        if 'tcsp' in locals():
+                            error_partial = tcsp.last_chunk
+                        elif 'sp' in locals():
+                            error_partial = sp.last_chunk
+                        raise self.LLMCallException(f"Streaming error after {max_retries + 1} attempts: {last_exception}", partial_result=error_partial) from last_exception
+                            
                 except TimeoutError as e:
                     self.ui.error("Streaming call timed out after 5 minutes")
                     error_partial = ""
@@ -765,15 +802,9 @@ class liteclient:
                     elif 'sp' in locals():
                         error_partial = sp.last_chunk
                     raise self.LLMCallException(f"Streaming timeout: {e}", partial_result=error_partial) from e
-                except Exception as e:
-                    # On streaming error, propagate buffer so far and exit immediately
-                    self.ui.error(f"Streaming error: {e}")
-                    error_partial = ""
-                    if 'tcsp' in locals():
-                        error_partial = tcsp.last_chunk
-                    elif 'sp' in locals():
-                        error_partial = sp.last_chunk
-                    raise self.LLMCallException(f"Streaming error: {e}", partial_result=error_partial) from e
+                finally:
+                    signal.alarm(0)  # Cancel the alarm
+                    signal.signal(signal.SIGALRM, old_handler)  # Restore old handler
 
                 # Don't print assistant content since it's already streamed
                 convo.append(content or "")
