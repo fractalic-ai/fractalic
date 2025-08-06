@@ -26,6 +26,7 @@ class SimpleTokenTracker:
         self.global_input_cost = 0.0
         self.global_output_cost = 0.0
         self.filestats: Dict[str, Dict[str, Any]] = {}
+        self.file_run_counters: Dict[str, int] = {}  # Track run count per file
         self.last_call_data = None  # Store last call data for manual display
         self.processed_calls = set()  # Track processed call IDs to avoid duplicates
         self.current_model = None  # Track the current model being used
@@ -37,12 +38,22 @@ class SimpleTokenTracker:
         Args:
             filename: The name/path of the .md file being executed
         """
-        self.filestats[filename] = {
+        # Increment run counter for this file
+        if filename not in self.file_run_counters:
+            self.file_run_counters[filename] = 0
+        self.file_run_counters[filename] += 1
+        
+        # Create a unique key with filename and run number
+        file_key = f"{filename} (run: {self.file_run_counters[filename]})"
+        
+        self.filestats[file_key] = {
             "file_input_tokens": 0,
             "file_output_tokens": 0,
             "file_cost": 0.0,
             "file_input_cost": 0.0,
-            "file_output_cost": 0.0
+            "file_output_cost": 0.0,
+            "original_filename": filename,  # Keep track of original filename
+            "run_number": self.file_run_counters[filename]
         }
     
     def record_llm_call(self, filename: str, input_tokens: int, output_tokens: int, turn_info: str = "") -> None:
@@ -106,9 +117,18 @@ class SimpleTokenTracker:
         
     def _record_call_data(self, filename: str, input_tokens: int, output_tokens: int, turn_info: str, actual_cost: float) -> None:
         """Internal method to record call data without display."""
-        # Ensure file is initialized
-        if filename not in self.filestats:
+        # Find the current active run key for this filename
+        current_file_key = None
+        if filename in self.file_run_counters:
+            run_number = self.file_run_counters[filename]
+            current_file_key = f"{filename} (run: {run_number})"
+        
+        # Ensure file is initialized - if not, initialize it
+        if current_file_key is None or current_file_key not in self.filestats:
             self.start_file(filename)
+            # Re-get the file key after initialization
+            run_number = self.file_run_counters[filename]
+            current_file_key = f"{filename} (run: {run_number})"
             
         # Calculate separate input/output costs using typical pricing ratios
         # If we have total cost, estimate input vs output cost (input usually 2x cheaper than output)
@@ -132,12 +152,12 @@ class SimpleTokenTracker:
             estimated_input_cost = 0.0
             estimated_output_cost = 0.0
             
-        # Update file stats
-        self.filestats[filename]["file_input_tokens"] += input_tokens
-        self.filestats[filename]["file_output_tokens"] += output_tokens
-        self.filestats[filename]["file_cost"] += actual_cost
-        self.filestats[filename]["file_input_cost"] += estimated_input_cost
-        self.filestats[filename]["file_output_cost"] += estimated_output_cost
+        # Update file stats using the current run's key
+        self.filestats[current_file_key]["file_input_tokens"] += input_tokens
+        self.filestats[current_file_key]["file_output_tokens"] += output_tokens
+        self.filestats[current_file_key]["file_cost"] += actual_cost
+        self.filestats[current_file_key]["file_input_cost"] += estimated_input_cost
+        self.filestats[current_file_key]["file_output_cost"] += estimated_output_cost
         
         # Update global stats
         self.global_input_tokens += input_tokens
@@ -193,8 +213,20 @@ class SimpleTokenTracker:
             llm_output: Output tokens from this specific call
             turn_info: Optional information about tool turns
         """
-        file_input = self.filestats[filename]["file_input_tokens"]
-        file_output = self.filestats[filename]["file_output_tokens"]
+        # Find the current active run key for this filename
+        current_file_key = None
+        if filename in self.file_run_counters:
+            run_number = self.file_run_counters[filename]
+            current_file_key = f"{filename} (run: {run_number})"
+        
+        # If we can't find the file key, initialize and try again
+        if current_file_key is None or current_file_key not in self.filestats:
+            self.start_file(filename)
+            run_number = self.file_run_counters[filename]
+            current_file_key = f"{filename} (run: {run_number})"
+        
+        file_input = self.filestats[current_file_key]["file_input_tokens"]
+        file_output = self.filestats[current_file_key]["file_output_tokens"]
         
         # Get context fill information - current conversation size (input + output for this call)
         context_fill_count = llm_input + llm_output
@@ -253,17 +285,26 @@ class SimpleTokenTracker:
     
     def get_file_stats(self, filename: str) -> Dict[str, int]:
         """
-        Get token statistics for a specific file.
+        Get token statistics for a specific file (current run).
         
         Args:
             filename: The name/path of the .md file
             
         Returns:
-            Dictionary with file_input_tokens and file_output_tokens
+            Dictionary with file_input_tokens and file_output_tokens for current run
         """
-        if filename not in self.filestats:
-            return {"file_input_tokens": 0, "file_output_tokens": 0}
-        return self.filestats[filename].copy()
+        # Find the current active run key for this filename
+        if filename in self.file_run_counters:
+            run_number = self.file_run_counters[filename]
+            current_file_key = f"{filename} (run: {run_number})"
+            if current_file_key in self.filestats:
+                stats = self.filestats[current_file_key].copy()
+                # Return simplified format for backwards compatibility
+                return {
+                    "file_input_tokens": stats["file_input_tokens"],
+                    "file_output_tokens": stats["file_output_tokens"]
+                }
+        return {"file_input_tokens": 0, "file_output_tokens": 0}
     
     def get_global_stats(self) -> Dict[str, int]:
         """
