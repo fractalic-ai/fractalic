@@ -291,8 +291,19 @@ def run(filename: str, param_node: Optional[Union[Node, AST]] = None, create_new
         trc_filename = Path(local_file_name).with_suffix('.trc')
         trc_output_file = os.path.join(file_dir, trc_filename)
 
-        render_ast_to_markdown(ast, output_file)
-        render_ast_to_trace(ast, trc_output_file)
+        # Only render AST if it was successfully created (linting passed)
+        if 'ast' in locals():
+            render_ast_to_markdown(ast, output_file)
+            render_ast_to_trace(ast, trc_output_file)
+        else:
+            # Create minimal context file for linting errors
+            with open(output_file, 'w', encoding='utf-8') as f:
+                f.write(f"# Linting Error in {local_file_name}\n\n")
+                f.write(f"File failed linting validation before parsing.\n\n")
+            
+            # Create empty trace file
+            with open(trc_output_file, 'w', encoding='utf-8') as f:
+                f.write("[]")  # Empty JSON array
 
         # Append traceback and exception text to the .ctx file
         with open(output_file, 'a', encoding='utf-8') as f:
@@ -317,14 +328,18 @@ def run(filename: str, param_node: Optional[Union[Node, AST]] = None, create_new
         console.print(f"[bright_red]✓[/bright_red] git. context commited with exception info: [bright_red]{ctx_filename}[/bright_red]")
         console.print(f"[bright_red]✓[/bright_red] git. trace file commited with exception info: [bright_red]{trc_filename}[/bright_red]")
 
-        # Make sure new_node references updated ctx_file and trc_file data
-        new_node.ctx_file = relative_ctx_path
-        new_node.ctx_commit_hash = ctx_commit_hash
-        new_node.trc_file = relative_trc_path
-        new_node.trc_commit_hash = ctx_commit_hash  # Same commit hash as ctx
+        # Make sure new_node references updated ctx_file and trc_file data (only if it exists)
+        if 'new_node' in locals():
+            new_node.ctx_file = relative_ctx_path
+            new_node.ctx_commit_hash = ctx_commit_hash
+            new_node.trc_file = relative_trc_path
+            new_node.trc_commit_hash = ctx_commit_hash  # Same commit hash as ctx
 
-        # Return results back to fractalic with trace information
-        return ast, new_node, new_node.ctx_file, ctx_commit_hash, new_node.trc_file, new_node.trc_commit_hash, branch_name, explicit_return
+            # Return results back to fractalic with trace information
+            return ast, new_node, new_node.ctx_file, ctx_commit_hash, new_node.trc_file, new_node.trc_commit_hash, branch_name, explicit_return
+        else:
+            # For linting errors, return minimal valid response
+            return None, None, relative_ctx_path, ctx_commit_hash, relative_trc_path, ctx_commit_hash, branch_name, False
 
     finally:
         os.chdir(original_cwd)
