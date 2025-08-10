@@ -8,6 +8,13 @@ settings.toml
 .gitignore
 call_tree.json
 
+# Test artifacts and generated files
+tests/**/*.ctx
+tests/**/*.trc
+tests/**/call_tree.json
+tests/**/.git/
+tests/**/.gitignore
+
 # Test git repositories created by Fractalic execution
 tutorials/**/.git/
 tutorials/**/.git
@@ -28,7 +35,6 @@ tutorials/context-test/
 tutorials/context-test-v002/
 tutorials/lyricstest/
 tutorials/token-tracking-test/
-tutorials/linter-tests/
 
 # Build artifacts and temporary directories
 # These should never be in the main repo - they belong in temp build directories
