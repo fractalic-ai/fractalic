@@ -17,6 +17,19 @@ from core.ast_md.ast import AST
 
 def parse_file(filename: str) -> AST:
     content = read_file(filename)
+    
+    # Run linter before parsing to catch issues early
+    try:
+        from core.linter import lint_fractalic_file
+        from core.ast_md.parser import schema_text
+        lint_fractalic_file(filename, schema_text, print_results=True)
+    except ImportError:
+        # Fallback if linter is not available
+        pass
+    except Exception as e:
+        # Re-raise linting errors to prevent execution with invalid files
+        raise e
+    
     return AST(content)
 
 @contextmanager

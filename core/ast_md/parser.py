@@ -533,6 +533,20 @@ class SchemaProcessor:
 
 
 def parse_document(text: str, schema_text: str) -> List[Any]:
+    # Run linter first to catch structural and YAML issues
+    try:
+        from core.linter import FractalicLinter, FractalicLintError
+        linter = FractalicLinter(schema_text)
+        errors = linter.lint_content(text)
+        
+        if linter.has_errors():
+            linter.print_errors()
+            error_count = len([e for e in errors if e.severity == "error"])
+            raise FractalicLintError(f"Found {error_count} linting errors - aborting parsing")
+    except ImportError:
+        # Fallback if linter is not available
+        pass
+    
     schema = yaml.safe_load(schema_text)
     operations_schema = schema.get('operations', {})
     processors = schema.get('processors', {})

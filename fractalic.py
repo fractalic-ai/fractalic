@@ -475,6 +475,11 @@ def main():
         print(f"[ERROR fractalic.py] {str(e)}")
         sys.exit(1)
     except Exception as e:
+        # Check if this is a linting error
+        if e.__class__.__name__ == 'FractalicLintError':
+            print(f"[ERROR fractalic.py] Linting failed: {str(e)}")
+            sys.exit(1)
+        
         exc_type, exc_value, exc_traceback = sys.exc_info()
         tb = traceback.extract_tb(exc_traceback)
         filename, line_no, func_name, text = tb[-1]  # Get the last frame (where error originated)
