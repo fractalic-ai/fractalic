@@ -52,20 +52,51 @@ def run_unit_tests():
             print("✅ Unit tests passed")
 
 def run_linter_tests():
-    """Run linter tests"""
+    """Run linter tests using Fractalic documents"""
     print("\n🔍 Running linter tests...")
     linter_dir = Path(__file__).parent / "linter"
     
-    # Run the Python linter test if it exists
-    linter_test_py = linter_dir / "test_linter.py"
-    if linter_test_py.exists():
+    # Test files and their expected outcomes
+    test_cases = [
+        ("test_linter_issues.md", True),      # Should have errors
+        ("test_valid_syntax.md", False),     # Should pass
+        ("test_yaml_edge_cases.md", False),  # Should pass
+    ]
+    
+    all_passed = True
+    
+    for test_file, should_fail in test_cases:
+        test_path = linter_dir / test_file
+        if not test_path.exists():
+            print(f"⚠️  Test file not found: {test_file}")
+            continue
+            
+        print(f"  Testing: {test_file}")
+        
+        # Run fractalic on the test file
         result = subprocess.run([
-            sys.executable, str(linter_test_py)
-        ])
-        if result.returncode != 0:
-            print("❌ Linter tests failed")
+            sys.executable, "fractalic.py", str(test_path)
+        ], capture_output=True, text=True)
+        
+        # Check if the result matches expectations
+        if should_fail:
+            if result.returncode != 0 and "linting errors" in result.stderr:
+                print(f"    ✅ PASS: Found expected linting errors")
+            else:
+                print(f"    ❌ FAIL: Expected linting errors but test passed")
+                all_passed = False
         else:
-            print("✅ Linter tests passed")
+            if result.returncode == 0 or "No linting errors found" in result.stderr:
+                print(f"    ✅ PASS: Valid syntax passed as expected")
+            else:
+                print(f"    ❌ FAIL: Valid syntax failed unexpectedly")
+                print(f"    Error: {result.stderr[:200]}...")
+                all_passed = False
+    
+    if all_passed:
+        print("✅ All linter tests passed")
+    else:
+        print("❌ Some linter tests failed")
 
 def run_integration_tests():
     """Run integration tests"""

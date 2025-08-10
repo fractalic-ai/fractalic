@@ -25,12 +25,13 @@ Tests for component interactions and end-to-end functionality:
 - (Future integration tests will be added here)
 
 ### Linter Tests (`linter/`)
-Validation tests for the Fractalic linter system:
-- `test_linter.py` - Main linter test runner
+Validation tests for the Fractalic linter system using pure Fractalic documents:
 - `test_linter_issues.md` - Document with intentional syntax errors
-- `test_valid_syntax.md` - Document with valid Fractalic syntax
+- `test_valid_syntax.md` - Document with valid Fractalic syntax  
 - `test_yaml_edge_cases.md` - YAML edge case testing
 - `README.md` - Detailed linter test documentation
+
+**Philosophy**: Linter tests are Fractalic documents themselves, not Python scripts. This ensures tests validate real-world usage patterns.
 
 ## Running Tests
 
