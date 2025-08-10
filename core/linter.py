@@ -388,19 +388,39 @@ class FractalicLinter:
     def has_errors(self) -> bool:
         """Check if any errors were found."""
         return len([e for e in self.errors if e.severity == "error"]) > 0
+
+    def get_errors_as_text(self, file_path: str = "") -> str:
+        """Get linting errors formatted as plain text for inclusion in context files."""
+        if not self.errors:
+            return f"✓ No linting errors found{' in ' + file_path if file_path else ''}"
+        
+        output = []
+        output.append(f"Found {len(self.errors)} linting issues{' in ' + file_path if file_path else ''}:")
+        output.append("=" * 60)
+        
+        for error in self.errors:
+            output.append(f"\n{error.severity.upper()} Line {error.line_number}: {error.message}")
+            
+            if error.content:
+                # Add the content with line numbers
+                lines = error.content.strip().split('\n')
+                for i, line in enumerate(lines, 1):
+                    output.append(f"  {i:2d} {line}")
+        
+        return "\n".join(output)
     
     def has_warnings(self) -> bool:
         """Check if any warnings were found.""" 
         return len([e for e in self.errors if e.severity == "warning"]) > 0
 
 
-def lint_fractalic_file(file_path: str, schema_text: str, print_results: bool = True) -> List[LintError]:
+def lint_fractalic_file(file_path: str, schema_text: str, print_results: bool = False) -> List[LintError]:
     """
-    Convenience function to lint a Fractalic file.
+    Lint a Fractalic file and optionally print results.
     
     Args:
-        file_path: Path to the markdown file to lint
-        schema_text: YAML schema text for operations
+        file_path: Path to the file to lint
+        schema_text: Schema text for operation validation
         print_results: Whether to print results to console
         
     Returns:
@@ -417,9 +437,20 @@ def lint_fractalic_file(file_path: str, schema_text: str, print_results: bool = 
     
     if linter.has_errors():
         error_count = len([e for e in errors if e.severity == "error"])
-        raise FractalicLintError(f"Found {error_count} linting errors in {file_path}")
+        # Create enhanced error with formatted text as an attribute
+        formatted_errors = linter.get_errors_as_text(file_path)
+        error = FractalicLintError(f"Found {error_count} linting errors in {file_path}")
+        error.formatted_errors = formatted_errors
+        raise error
     
     return errors
+
+
+class FractalicLintError(Exception):
+    """Exception raised when linting errors are found."""
+    def __init__(self, message: str):
+        super().__init__(message)
+        self.formatted_errors = ""
 
 
 class FractalicLintError(Exception):

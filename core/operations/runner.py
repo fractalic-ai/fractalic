@@ -296,10 +296,17 @@ def run(filename: str, param_node: Optional[Union[Node, AST]] = None, create_new
             render_ast_to_markdown(ast, output_file)
             render_ast_to_trace(ast, trc_output_file)
         else:
-            # Create minimal context file for linting errors
+            # Create context file for linting errors with actual error details
             with open(output_file, 'w', encoding='utf-8') as f:
-                f.write(f"# Linting Error in {local_file_name}\n\n")
+                f.write(f"# Linting Errors in {os.path.basename(local_file_name)}\n\n")
                 f.write(f"File failed linting validation before parsing.\n\n")
+                
+                # Include formatted linting errors if available
+                if hasattr(e, 'formatted_errors') and e.formatted_errors:
+                    f.write("## Linting Error Details\n\n")
+                    f.write("```\n")
+                    f.write(e.formatted_errors)
+                    f.write("\n```\n\n")
             
             # Create empty trace file
             with open(trc_output_file, 'w', encoding='utf-8') as f:
@@ -308,7 +315,13 @@ def run(filename: str, param_node: Optional[Union[Node, AST]] = None, create_new
         # Append traceback and exception text to the .ctx file
         with open(output_file, 'a', encoding='utf-8') as f:
             f.write("\n# Exception Trace\n")
-            f.write(str(e))
+            
+            # For linting errors, show the basic message
+            if hasattr(e, 'formatted_errors') and e.formatted_errors:
+                f.write("Linting validation failed\n")
+            else:
+                f.write(str(e))
+            
             f.write("\n```\n")
             f.write(tb)
             f.write("```\n")

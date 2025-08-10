@@ -475,9 +475,41 @@ def main():
         print(f"[ERROR fractalic.py] {str(e)}")
         sys.exit(1)
     except Exception as e:
-        # Check if this is a linting error
+        # Check if this is a linting error and try to get context information
         if e.__class__.__name__ == 'FractalicLintError':
             print(f"[ERROR fractalic.py] Linting failed: {str(e)}")
+            
+            # Try to extract any context information that might have been generated
+            # Look for recently created branch and context files
+            try:
+                from core.git import get_current_git_branch, get_latest_commit_hash
+                import glob
+                import os
+                
+                # Get current branch name (should be the test branch created for this run)
+                current_branch = get_current_git_branch()
+                
+                # Look for context files that were just created
+                ctx_files = glob.glob("*.ctx")
+                if ctx_files:
+                    # Get the most recent context file
+                    latest_ctx = max(ctx_files, key=os.path.getctime)
+                    ctx_hash = get_latest_commit_hash()
+                    
+                    print(f"[EventMessage: Root-Context-Saved] ID: {current_branch}, {ctx_hash}")
+                    print(f"[EventMessage: Execution-Mode] Linting validation failed")
+                    
+                    # Check if context file contains linting details
+                    if os.path.exists(latest_ctx):
+                        with open(latest_ctx, 'r', encoding='utf-8') as f:
+                            ctx_content = f.read()
+                            if "Linting Error Details" in ctx_content:
+                                print(f"[EventMessage: Linting-Errors] Details saved to {latest_ctx}")
+                
+            except Exception as ctx_e:
+                # If we can't get context info, just continue with basic error reporting
+                print(f"[DEBUG] Could not extract context information: {ctx_e}")
+            
             sys.exit(1)
         
         exc_type, exc_value, exc_traceback = sys.exc_info()
