@@ -8,16 +8,14 @@ This is a properly structured Fractalic document for testing.
 
 ## Data Processing
 
-@import
-file: ../shared/data.md
-mode: append
+This section demonstrates valid operation syntax without dependencies.
 
 ## LLM Analysis
 
 @llm
 prompt: |
-  Analyze the imported data and provide insights.
-  Focus on key trends and patterns.
+  Analyze the current document structure and provide insights.
+  Focus on the document organization and flow.
 use-header: "# Analysis Results"
 mode: replace
 to: analysis-results

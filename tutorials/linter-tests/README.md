@@ -10,7 +10,13 @@ This folder contains test files for the Fractalic linter functionality.
 - Includes: unknown operations, YAML syntax errors, orphaned content, missing blank lines
 
 ### `test_valid_syntax.md`
-- Contains valid Fractalic syntax that should pass linting
+2. **test_valid_syntax.md**: Contains valid Fractalic syntax that should pass all linting checks
+   - Proper YAML formatting
+   - Valid operation types (@llm, @shell, @goto, @return)
+   - Correct document structure
+   - Appropriate blank line spacing
+   - Valid block references and flow control
+   - Self-contained operations without external dependencies
 - Useful for regression testing to ensure linter doesn't reject valid content
 
 ### `test_yaml_edge_cases.md`
