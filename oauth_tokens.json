@@ -5,5 +5,12 @@
     "expires_in": 3600,
     "refresh_token": "replicate-dimusdim:xPPlnuSUqSp9NI04:gUp60l8LvekqyzYA3MwqZiiAMCJXUVw3",
     "scope": "read write"
+  },
+  "replicate": {
+    "access_token": "replicate-dimusdim:hSe338qk8UauzJGx:a2tRFD47YBqk0sjYABPLqfKEKNFu3nWi",
+    "token_type": "Bearer",
+    "expires_in": 3600,
+    "refresh_token": "replicate-dimusdim:hSe338qk8UauzJGx:j65pD8RUx0ChGB1DSg8jA1K87FoXpB3T",
+    "scope": "read write"
   }
 }

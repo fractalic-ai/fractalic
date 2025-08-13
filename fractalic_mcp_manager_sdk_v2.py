@@ -8,6 +8,7 @@ import asyncio
 import json
 import logging
 import threading
+import traceback
 import webbrowser
 from dataclasses import dataclass
 from pathlib import Path
@@ -73,23 +74,31 @@ class ServiceConfig:
         )
 
 class FileTokenStorage(TokenStorage):
-    """File-based token storage for OAuth"""
+    """File-based token storage for OAuth - service-specific"""
     
-    def __init__(self, file_path: str):
+    def __init__(self, file_path: str, service_name: str = "default"):
         self.file_path = Path(file_path)
+        self.service_name = service_name
     
     async def get_tokens(self) -> Optional[OAuthToken]:
-        """Load tokens from file"""
+        """Load tokens from file for specific service"""
+        logger.info(f"Loading tokens for service: {self.service_name} from {self.file_path}")
+        
         if not self.file_path.exists():
+            logger.warning(f"Token file {self.file_path} not found")
             return None
         
         try:
             with open(self.file_path, 'r') as f:
                 data = json.load(f)
             
-            # Load default token (simple implementation)
-            if 'default' in data:
-                token_data = data['default']
+            logger.info(f"Token file loaded, available services: {list(data.keys())}")
+            
+            # Load service-specific token or fall back to default
+            token_key = self.service_name if self.service_name in data else "default"
+            if token_key in data:
+                token_data = data[token_key]
+                logger.info(f"Found tokens for {token_key}, access_token starts with: {token_data['access_token'][:20]}...")
                 return OAuthToken(
                     access_token=token_data['access_token'],
                     token_type=token_data.get('token_type', 'Bearer'),
@@ -97,21 +106,23 @@ class FileTokenStorage(TokenStorage):
                     refresh_token=token_data.get('refresh_token'),
                     scope=token_data.get('scope')
                 )
+            else:
+                logger.warning(f"No tokens found for service {self.service_name} or default")
         except Exception as e:
-            logger.error(f"Failed to load tokens: {e}")
+            logger.error(f"Failed to load tokens for {self.service_name}: {e}")
         
         return None
     
     async def set_tokens(self, tokens: OAuthToken) -> None:
-        """Save tokens to file"""
+        """Save tokens to file for specific service"""
         try:
             data = {}
             if self.file_path.exists():
                 with open(self.file_path, 'r') as f:
                     data = json.load(f)
             
-            # Save as default token (simple implementation)
-            data['default'] = {
+            # Save as service-specific token
+            data[self.service_name] = {
                 'access_token': tokens.access_token,
                 'token_type': tokens.token_type,
                 'expires_in': tokens.expires_in,
@@ -122,9 +133,9 @@ class FileTokenStorage(TokenStorage):
             with open(self.file_path, 'w') as f:
                 json.dump(data, f, indent=2)
                 
-            logger.info("OAuth tokens saved successfully")
+            logger.info(f"OAuth tokens saved successfully for {self.service_name}")
         except Exception as e:
-            logger.error(f"Failed to save tokens: {e}")
+            logger.error(f"Failed to save tokens for {self.service_name}: {e}")
     
     async def get_client_info(self) -> Optional[OAuthClientInformationFull]:
         return None
@@ -141,7 +152,7 @@ class MCPSupervisorV2:
     def __init__(self):
         self.config = self.load_config()
         self.oauth_providers: Dict[str, OAuthClientProvider] = {}
-        self.token_storage = FileTokenStorage("oauth_tokens.json")
+        self.token_storages: Dict[str, FileTokenStorage] = {}  # Service-specific token storage
         self.service_states: Dict[str, str] = {}
         
         # Initialize OAuth providers for services that need them
@@ -217,6 +228,10 @@ class MCPSupervisorV2:
         try:
             server_url = service.spec.get('oauth_server_url', service.spec.get('url', ''))
             if server_url:
+                # Create service-specific token storage
+                token_storage = FileTokenStorage("oauth_tokens.json", name)
+                self.token_storages[name] = token_storage
+                
                 provider = OAuthClientProvider(
                     server_url=server_url,
                     client_metadata=OAuthClientMetadata(
@@ -226,7 +241,7 @@ class MCPSupervisorV2:
                         response_types=["code"],
                         scope=service.spec.get('oauth_scope', 'read write'),
                     ),
-                    storage=self.token_storage,
+                    storage=token_storage,
                     redirect_handler=self._handle_oauth_redirect,
                     callback_handler=self._create_callback_handler_for_service(name),
                 )
@@ -238,6 +253,10 @@ class MCPSupervisorV2:
     def _create_dynamic_oauth_provider(self, name: str, server_url: str) -> OAuthClientProvider:
         """Create OAuth provider dynamically for automatic OAuth discovery"""
         try:
+            # Create service-specific token storage
+            token_storage = FileTokenStorage("oauth_tokens.json", name)
+            self.token_storages[name] = token_storage
+            
             provider = OAuthClientProvider(
                 server_url=server_url,
                 client_metadata=OAuthClientMetadata(
@@ -247,7 +266,7 @@ class MCPSupervisorV2:
                     response_types=["code"],
                     scope="read write",
                 ),
-                storage=self.token_storage,
+                storage=token_storage,
                 redirect_handler=self._handle_oauth_redirect,
                 callback_handler=self._create_callback_handler_for_service(name),
             )
@@ -329,13 +348,42 @@ class MCPSupervisorV2:
         await asyncio.sleep(0.1)
     
     async def get_tools_for_service(self, service_name: str) -> List[Dict[str, Any]]:
-        """Get tools for a service using per-request session with proper context management"""
+        """
+        Get tools for a service using per-request session with proper context management.
+        
+        For dynamic OAuth services (like Replicate):
+        - Tools are only exposed after successful OAuth authentication
+        - The SDK handles RFC 9728 OAuth Protected Resource Metadata discovery automatically
+        - Extended timeouts are configured to handle OAuth flow + tool discovery
+        - "Dynamic" authentication means tools can change based on user permissions/context
+        """
         if service_name not in self.config:
             return []
         
         service = self.config[service_name]
         connection = None
         
+        try:
+            # Apply httpx low-and-slow attack protection using asyncio.wait_for
+            # See: https://github.com/encode/httpx/issues/1450
+            # This prevents indefinite hangs when SSE servers send data too slowly
+            return await asyncio.wait_for(
+                self._get_tools_for_service_impl(service_name, service), 
+                timeout=60.0  # 60 second timeout - balances OAuth flows with hang protection
+            )
+        except asyncio.TimeoutError:
+            logger.warning(f"Timeout (60s) getting tools for {service_name} - SSE server experiencing slow response (httpx low-and-slow issue). Service may be temporarily unavailable.")
+            return []
+        except Exception as e:
+            logger.error(f"Failed to get tools for {service_name}: {e}")
+            # Log more details for debugging OAuth/dynamic tools issues
+            import traceback
+            full_traceback = traceback.format_exc()
+            logger.error(f"Full traceback for {service_name}: {full_traceback}")
+            return []
+    
+    async def _get_tools_for_service_impl(self, service_name: str, service: ServiceConfig) -> List[Dict[str, Any]]:
+        """Internal implementation of get_tools_for_service with proper error handling"""
         try:
             if service.transport == "stdio":
                 # STDIO transport
@@ -387,33 +435,66 @@ class MCPSupervisorV2:
                     # Create OAuth provider for potential OAuth discovery
                     oauth_provider = self._create_dynamic_oauth_provider(service.name, url)
                 
-                async with sse_client(url, auth=oauth_provider, headers=headers) as (read_stream, write_stream):
-                    async with ClientSession(read_stream, write_stream) as session:
-                        # Initialize the connection
-                        await session.initialize()
-                        
-                        # List tools
-                        tools_result = await session.list_tools()
-                        tools = []
-                        
-                        for tool in tools_result.tools:
-                            tool_dict = {
-                                "name": tool.name,
-                                "description": tool.description,
-                                "inputSchema": tool.inputSchema
-                            }
+                # Configure timeouts for OAuth services (especially dynamic ones like Replicate)
+                # SSE client expects float timeouts (seconds) - per SDK issue #936
+                connection_timeout = 30.0  # Connection establishment timeout
+                # Let SDK use default sse_read_timeout
+                
+                logger.info(f"Connecting to {service_name} SSE service with {connection_timeout}s connection timeout, default read timeout")
+                
+                # Store tools_result outside context manager to handle cleanup timeouts
+                tools_result = None
+                
+                try:
+                    # Note: Issue #936 documents timeout type inconsistencies in MCP SDK
+                    # sse_client expects float, streamablehttp_client expects timedelta
+                    async with sse_client(
+                        url, 
+                        auth=oauth_provider, 
+                        headers=headers,
+                        timeout=connection_timeout
+                    ) as (read_stream, write_stream):
+                        logger.info(f"SSE connection established for {service_name}, starting MCP session...")
+                        async with ClientSession(read_stream, write_stream) as session:
+                            # Initialize the connection
+                            logger.info(f"Initializing MCP session for {service_name}...")
+                            await session.initialize()
+                            logger.info(f"MCP session initialized for {service_name}, listing tools...")
                             
-                            # Include title if available (2025-06-18 feature)
-                            if hasattr(tool, 'title') and tool.title:
-                                tool_dict["title"] = tool.title
-                            
-                            # Include annotations if available (2025-06-18 feature)  
-                            if hasattr(tool, 'annotations') and tool.annotations:
-                                tool_dict["annotations"] = tool.annotations
-                            
-                            tools.append(tool_dict)
+                            # List tools
+                            tools_result = await session.list_tools()
+                            logger.info(f"Received {len(tools_result.tools)} tools from {service_name}")
+                except Exception as cleanup_error:
+                    # If we got tools but cleanup failed, still process the tools
+                    if tools_result is not None:
+                        logger.warning(f"Got tools successfully but cleanup failed for {service_name}: {cleanup_error}")
+                    else:
+                        # Re-raise if we didn't get tools
+                        raise
+                
+                # Process tools outside context manager (works even if cleanup failed)
+                if tools_result is not None:
+                    tools = []
+                    for tool in tools_result.tools:
+                        tool_dict = {
+                            "name": tool.name,
+                            "description": tool.description,
+                            "inputSchema": tool.inputSchema
+                        }
                         
-                        return tools
+                        # Include title if available (2025-06-18 feature)
+                        if hasattr(tool, 'title') and tool.title:
+                            tool_dict["title"] = tool.title
+                        
+                        # Include annotations if available (2025-06-18 feature)  
+                        if hasattr(tool, 'annotations') and tool.annotations:
+                            tool_dict["annotations"] = tool.annotations
+                        
+                        tools.append(tool_dict)
+                    
+                    return tools
+                else:
+                    return []
                         
             elif service.transport == "http":
                 # HTTP transport (streamable) with automatic OAuth discovery
@@ -428,7 +509,21 @@ class MCPSupervisorV2:
                     # Create OAuth provider for potential OAuth discovery
                     oauth_provider = self._create_dynamic_oauth_provider(service.name, url)
                 
-                async with streamablehttp_client(url, auth=oauth_provider, headers=headers) as (read_stream, write_stream, _):
+                # Configure timeouts for OAuth services
+                # Streamable HTTP client expects timedelta timeouts (per SDK issue #936)
+                from datetime import timedelta
+                connection_timeout = timedelta(seconds=30)    # Connection establishment timeout
+                sse_read_timeout = timedelta(seconds=45)      # Reduced read timeout for faster failure detection
+                
+                logger.info(f"Connecting to {service_name} HTTP service with {connection_timeout.total_seconds()}s connection timeout, {sse_read_timeout.total_seconds()}s read timeout")
+                
+                async with streamablehttp_client(
+                    url, 
+                    auth=oauth_provider, 
+                    headers=headers,
+                    timeout=connection_timeout,
+                    sse_read_timeout=sse_read_timeout
+                ) as (read_stream, write_stream, _):
                     async with ClientSession(read_stream, write_stream) as session:
                         # Initialize the connection
                         await session.initialize()
@@ -458,10 +553,16 @@ class MCPSupervisorV2:
                         
             else:
                 raise ValueError(f"Unsupported transport: {service.transport}")
-            
+        
         except Exception as e:
-            logger.error(f"Failed to get tools for {service_name}: {e}")
-            return []
+            logger.error(f"Error in _get_tools_for_service_impl for {service_name}: {e}")
+            # Check if this is a timeout error for OAuth services
+            if "timeout" in str(e).lower() or "ReadTimeout" in str(e):
+                if service.has_oauth or service_name in self.oauth_providers:
+                    logger.warning(f"Timeout detected for OAuth service {service_name}. This may be normal for dynamic services that perform OAuth discovery + tool listing.")
+                else:
+                    logger.warning(f"Timeout detected for {service_name}. Service may be slow or unresponsive.")
+            raise  # Re-raise to be caught by the outer timeout handler
     
     async def get_tools_info_for_service(self, service_name: str) -> Dict[str, Any]:
         """
@@ -599,7 +700,17 @@ class MCPSupervisorV2:
                 if not oauth_provider and not self._has_embedded_auth(url):
                     oauth_provider = self._create_dynamic_oauth_provider(service.name, url)
                 
-                async with sse_client(url, auth=oauth_provider, headers=headers) as (read_stream, write_stream):
+                # Configure timeouts for OAuth services (SSE client expects float)
+                connection_timeout = 30.0   # Connection establishment timeout
+                sse_read_timeout = 300.0     # Extended SSE read timeout for OAuth + tool calls (5 min)
+                
+                async with sse_client(
+                    url, 
+                    auth=oauth_provider, 
+                    headers=headers,
+                    timeout=connection_timeout,
+                    sse_read_timeout=sse_read_timeout
+                ) as (read_stream, write_stream):
                     async with ClientSession(read_stream, write_stream) as session:
                         await session.initialize()
                         
@@ -652,7 +763,18 @@ class MCPSupervisorV2:
                 if not oauth_provider and not self._has_embedded_auth(url):
                     oauth_provider = self._create_dynamic_oauth_provider(service.name, url)
                 
-                async with streamablehttp_client(url, auth=oauth_provider, headers=headers) as (read_stream, write_stream, _):
+                # Configure timeouts for OAuth services (Streamable HTTP client expects timedelta)
+                from datetime import timedelta
+                connection_timeout = timedelta(seconds=30)    # Connection establishment timeout
+                sse_read_timeout = timedelta(seconds=600)     # Extended read timeout for OAuth + tool calls
+                
+                async with streamablehttp_client(
+                    url, 
+                    auth=oauth_provider, 
+                    headers=headers,
+                    timeout=connection_timeout,
+                    sse_read_timeout=sse_read_timeout
+                ) as (read_stream, write_stream, _):
                     async with ClientSession(read_stream, write_stream) as session:
                         await session.initialize()
                         
@@ -708,6 +830,16 @@ class MCPSupervisorV2:
         
         service = self.config[service_name]
         
+        
+        try:
+            return await self._test_service_connection_impl(service_name, service)
+        except Exception as e:
+            logger.error(f"Failed to test connection to {service_name}: {e}")
+            self.service_states[service_name] = "error"
+            return False
+    
+    async def _test_service_connection_impl(self, service_name: str, service: ServiceConfig) -> bool:
+        """Internal implementation of test_service_connection with proper error handling"""
         try:
             if service.transport == "stdio":
                 # STDIO transport
@@ -739,7 +871,19 @@ class MCPSupervisorV2:
                 if not oauth_provider and not self._has_embedded_auth(url):
                     oauth_provider = self._create_dynamic_oauth_provider(service_name, url)
                 
-                async with sse_client(url, auth=oauth_provider, headers=headers) as (read_stream, write_stream):
+                # Configure timeouts for OAuth services (SSE client expects float)
+                connection_timeout = 15.0   # Shorter connection timeout for tests
+                sse_read_timeout = 20.0     # Shorter SSE read timeout for tests
+                
+                logger.info(f"Testing {service_name} SSE connection with {connection_timeout}s connection timeout, {sse_read_timeout}s read timeout")
+                
+                async with sse_client(
+                    url, 
+                    auth=oauth_provider, 
+                    headers=headers,
+                    timeout=connection_timeout,
+                    sse_read_timeout=sse_read_timeout
+                ) as (read_stream, write_stream):
                     async with ClientSession(read_stream, write_stream) as session:
                         await session.initialize()
                         await session.list_tools()
@@ -759,7 +903,20 @@ class MCPSupervisorV2:
                 if not oauth_provider and not self._has_embedded_auth(url):
                     oauth_provider = self._create_dynamic_oauth_provider(service_name, url)
                 
-                async with streamablehttp_client(url, auth=oauth_provider, headers=headers) as (read_stream, write_stream, _):
+                # Configure timeouts for OAuth services (Streamable HTTP client expects timedelta)
+                from datetime import timedelta
+                connection_timeout = timedelta(seconds=15)    # Shorter connection timeout for tests
+                sse_read_timeout = timedelta(seconds=20)      # Shorter read timeout for tests
+                
+                logger.info(f"Testing {service_name} HTTP connection with {connection_timeout.total_seconds()}s connection timeout, {sse_read_timeout.total_seconds()}s read timeout")
+                
+                async with streamablehttp_client(
+                    url, 
+                    auth=oauth_provider, 
+                    headers=headers,
+                    timeout=connection_timeout,
+                    sse_read_timeout=sse_read_timeout
+                ) as (read_stream, write_stream, _):
                     async with ClientSession(read_stream, write_stream) as session:
                         await session.initialize()
                         await session.list_tools()
@@ -770,15 +927,12 @@ class MCPSupervisorV2:
                         
             else:
                 raise ValueError(f"Unsupported transport: {service.transport}")
-            
-        except asyncio.TimeoutError:
-            self.service_states[service_name] = "timeout"
-            logger.error(f"Connection timeout for {service_name}")
-            return False
+        
         except Exception as e:
-            self.service_states[service_name] = "error"
-            logger.error(f"Failed to connect to {service_name}: {e}")
-            return False
+            logger.error(f"Error in _test_service_connection_impl for {service_name}: {e}")
+            if "timeout" in str(e).lower() or "ReadTimeout" in str(e):
+                logger.warning(f"Timeout detected during connection test for {service_name}")
+            raise  # Re-raise to be caught by the outer timeout handler
     
     async def status(self, include_tools_info: bool = False) -> Dict[str, Any]:
         """
