@@ -219,3 +219,4 @@ DBG_TOOLS.json
 *.pyc
 .idea/
 .vscode/
+tutorials/mcp-integration-tests/
