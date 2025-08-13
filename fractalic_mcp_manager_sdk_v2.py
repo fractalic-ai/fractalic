@@ -371,12 +371,27 @@ class MCPSupervisorV2:
             # Apply httpx low-and-slow attack protection using asyncio.wait_for
             # See: https://github.com/encode/httpx/issues/1450
             # This prevents indefinite hangs when SSE servers send data too slowly
+            
+            # For OAuth services, use longer timeout to allow browser authentication
+            timeout = 3.0  # Default fast timeout
+            if service.has_oauth or service_name in self.oauth_providers:
+                # Check if we have valid tokens first
+                token_storage = FileTokenStorage("oauth_tokens.json", service_name)
+                tokens = await token_storage.get_tokens()
+                if not tokens:
+                    # No tokens available, this will trigger OAuth flow - need longer timeout
+                    timeout = 60.0  # 60 seconds for OAuth authentication
+                    logger.info(f"Using extended timeout ({timeout}s) for OAuth flow for {service_name}")
+                
             return await asyncio.wait_for(
                 self._get_tools_for_service_impl(service_name, service), 
-                timeout=3.0  # 3 second timeout - fast fail, non-blocking
+                timeout=timeout
             )
         except asyncio.TimeoutError:
-            logger.warning(f"Timeout (3s) getting tools for {service_name} - fast fail, non-blocking.")
+            if service.has_oauth or service_name in self.oauth_providers:
+                logger.warning(f"OAuth timeout for {service_name} - user may need to complete browser authentication")
+            else:
+                logger.warning(f"Timeout (3s) getting tools for {service_name} - fast fail, non-blocking.")
             return []
         except Exception as e:
             logger.error(f"Failed to get tools for {service_name}: {e}")
@@ -440,9 +455,10 @@ class MCPSupervisorV2:
                     token_storage = FileTokenStorage("oauth_tokens.json", service_name)
                     tokens = await token_storage.get_tokens()
                     if tokens:
-                        # Use simple Bearer token authentication
+                        # Use simple Bearer token authentication - NO OAuth provider needed
                         headers['Authorization'] = f'Bearer {tokens.access_token}'
-                        logger.info(f"Using saved Bearer token for {service_name}")
+                        logger.info(f"Using saved Bearer token for {service_name} - skipping OAuth provider")
+                        oauth_provider = None  # Explicitly set to None to avoid OAuth interference
                     else:
                         # Fall back to OAuth provider for new authentication
                         oauth_provider = self.oauth_providers.get(service_name)
@@ -2101,6 +2117,19 @@ async def get_tools_handler(request):
         logger.error(f"Get tools error: {e}")
         return web.json_response({"error": str(e)}, status=500)
 
+async def get_capabilities_handler(request):
+    """GET /capabilities/{name} - Get capabilities for a service"""
+    service_name = request.match_info['name']
+    try:
+        capabilities = await supervisor.get_service_capabilities(service_name)
+        return web.json_response({
+            "service": service_name,
+            "capabilities": capabilities
+        })
+    except Exception as e:
+        logger.error(f"Get capabilities error for {service_name}: {e}")
+        return web.json_response({"error": str(e)}, status=500)
+
 async def call_tool_handler(request):
     """POST /call/{service}/{tool} - Call a tool"""
     service_name = request.match_info['service']
@@ -2219,6 +2248,7 @@ def create_app():
     app.router.add_get('/list_tools', list_tools_handler)  # Fractalic compatibility endpoint
     app.router.add_post('/toggle/{name}', toggle_service_handler)
     app.router.add_get('/tools/{name}', get_tools_handler)
+    app.router.add_get('/capabilities/{name}', get_capabilities_handler)
     app.router.add_post('/call/{service}/{tool}', call_tool_handler)
     
     # MCP Full Feature Set routes

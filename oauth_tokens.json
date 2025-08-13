@@ -1,16 +1,9 @@
 {
-  "default": {
-    "access_token": "replicate-dimusdim:xPPlnuSUqSp9NI04:q5ueA3VGXVgXQi3wZnLcraPb22S14ewN",
-    "token_type": "Bearer",
-    "expires_in": 3600,
-    "refresh_token": "replicate-dimusdim:xPPlnuSUqSp9NI04:gUp60l8LvekqyzYA3MwqZiiAMCJXUVw3",
-    "scope": "read write"
-  },
   "replicate": {
-    "access_token": "replicate-dimusdim:OcRXSv52ajmKwaTl:r3tck2XAzQNWaEie8XQl0HF9bhMEP4Ox",
+    "access_token": "replicate-dimusdim:FopnD41lFivC6KAF:LE7oqmhsElR3yfWwMpqziCHVbx0hczT6",
     "token_type": "Bearer",
     "expires_in": 3600,
-    "refresh_token": "replicate-dimusdim:OcRXSv52ajmKwaTl:bAqyPMLpobhiKR7OkFCQGZCeMAqMyG5A",
+    "refresh_token": "replicate-dimusdim:FopnD41lFivC6KAF:B1Fb9Kn0ffQQGIKSQOzGIUKS3Zc7y8hi",
     "scope": "read write"
   }
 }
