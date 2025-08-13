@@ -7,10 +7,10 @@
     "scope": "read write"
   },
   "replicate": {
-    "access_token": "replicate-dimusdim:hSe338qk8UauzJGx:a2tRFD47YBqk0sjYABPLqfKEKNFu3nWi",
+    "access_token": "replicate-dimusdim:OcRXSv52ajmKwaTl:r3tck2XAzQNWaEie8XQl0HF9bhMEP4Ox",
     "token_type": "Bearer",
     "expires_in": 3600,
-    "refresh_token": "replicate-dimusdim:hSe338qk8UauzJGx:j65pD8RUx0ChGB1DSg8jA1K87FoXpB3T",
+    "refresh_token": "replicate-dimusdim:OcRXSv52ajmKwaTl:bAqyPMLpobhiKR7OkFCQGZCeMAqMyG5A",
     "scope": "read write"
   }
 }

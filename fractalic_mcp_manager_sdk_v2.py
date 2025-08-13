@@ -158,9 +158,9 @@ class MCPSupervisorV2:
         # Initialize OAuth providers for services that need them
         self._init_oauth_providers()
         
-        # Set initial states
+        # Set initial states (per-request pattern - services are enabled/disabled, not running/stopped)
         for service_name in self.config:
-            self.service_states[service_name] = "stopped"
+            self.service_states[service_name] = "enabled"
     
     def load_config(self) -> Dict[str, ServiceConfig]:
         """Load MCP servers configuration"""
@@ -358,6 +358,11 @@ class MCPSupervisorV2:
         - "Dynamic" authentication means tools can change based on user permissions/context
         """
         if service_name not in self.config:
+            return []
+        
+        # Check if service is enabled before attempting connection
+        if self.service_states.get(service_name, "enabled") == "disabled":
+            logger.info(f"Service {service_name} is disabled, skipping tool retrieval")
             return []
         
         service = self.config[service_name]
@@ -835,7 +840,7 @@ class MCPSupervisorV2:
             return await self._test_service_connection_impl(service_name, service)
         except Exception as e:
             logger.error(f"Failed to test connection to {service_name}: {e}")
-            self.service_states[service_name] = "error"
+            self.service_states[service_name] = "disabled"
             return False
     
     async def _test_service_connection_impl(self, service_name: str, service: ServiceConfig) -> bool:
@@ -856,7 +861,7 @@ class MCPSupervisorV2:
                         await session.initialize()
                         await session.list_tools()
                         
-                        self.service_states[service_name] = "running"
+                        self.service_states[service_name] = "enabled"
                         logger.info(f"Service {service_name} connection tested successfully")
                         return True
                         
@@ -888,7 +893,7 @@ class MCPSupervisorV2:
                         await session.initialize()
                         await session.list_tools()
                         
-                        self.service_states[service_name] = "running"
+                        self.service_states[service_name] = "enabled"
                         logger.info(f"Service {service_name} connection tested successfully")
                         return True
                         
@@ -921,7 +926,7 @@ class MCPSupervisorV2:
                         await session.initialize()
                         await session.list_tools()
                         
-                        self.service_states[service_name] = "running"
+                        self.service_states[service_name] = "enabled"
                         logger.info(f"Service {service_name} connection tested successfully")
                         return True
                         
@@ -945,9 +950,11 @@ class MCPSupervisorV2:
         total_tokens = 0
         
         for name, service in self.config.items():
-            # Base configuration info
+            # Base configuration info - per-request pattern with enabled/disabled states
+            service_status = self.service_states.get(name, "enabled")
             service_info = {
-                "status": self.service_states.get(name, "not_tested"),
+                "status": service_status,
+                "enabled": service_status == "enabled",  # Flag for LLM response schema building
                 "connected": False,  # Per-request pattern - no persistent connections
                 "has_oauth": service.has_oauth or name in self.oauth_providers,
                 "transport": service.transport,
@@ -984,7 +991,7 @@ class MCPSupervisorV2:
         return {
             "services": services,
             "total_services": len(self.config),
-            "running_services": 0,  # Per-request pattern - no persistent connections
+            "enabled_services": len([s for s in services.values() if s.get("enabled", True)]),
             "oauth_enabled": len(self.oauth_providers) > 0,
             "total_tools": total_tools if include_tools_info else 0,
             "total_tokens": total_tokens if include_tools_info else 0,
@@ -1110,14 +1117,57 @@ async def status_handler(request):
         logger.error(f"Status error: {e}")
         return web.json_response({"error": str(e)}, status=500)
 
-async def test_service_handler(request):
-    """POST /test/{name} - Test service connection"""
+async def toggle_service_handler(request):
+    """POST /toggle/{name} - Toggle service enabled/disabled state"""
     service_name = request.match_info['name']
+    
+    if service_name not in supervisor.config:
+        return web.json_response({"error": f"Service {service_name} not found"}, status=404)
+    
     try:
-        success = await supervisor.test_service_connection(service_name)
-        return web.json_response({"success": success, "service": service_name})
+        data = await request.json()
+        enabled = data.get('enabled', None)
+        
+        if enabled is None:
+            # Toggle current state
+            current_state = supervisor.service_states.get(service_name, "enabled")
+            new_state = "disabled" if current_state == "enabled" else "enabled"
+        else:
+            # Set explicit state
+            new_state = "enabled" if enabled else "disabled"
+        
+        supervisor.service_states[service_name] = new_state
+        
+        # If enabling, test connection to validate it works
+        connection_test_success = True
+        if new_state == "enabled":
+            try:
+                connection_test_success = await supervisor.test_service_connection(service_name)
+                if not connection_test_success:
+                    supervisor.service_states[service_name] = "disabled"
+                    return web.json_response({
+                        "success": False,
+                        "service": service_name,
+                        "enabled": False,
+                        "message": "Service connection test failed, keeping disabled"
+                    })
+            except Exception as e:
+                supervisor.service_states[service_name] = "disabled"
+                return web.json_response({
+                    "success": False,
+                    "service": service_name, 
+                    "enabled": False,
+                    "error": f"Connection test failed: {str(e)}"
+                })
+        
+        return web.json_response({
+            "success": True,
+            "service": service_name,
+            "enabled": new_state == "enabled",
+            "previous_state": current_state if enabled is None else None
+        })
     except Exception as e:
-        logger.error(f"Test service error: {e}")
+        logger.error(f"Toggle service error: {e}")
         return web.json_response({"error": str(e)}, status=500)
 
 async def get_tools_handler(request):
@@ -1181,7 +1231,7 @@ def create_app():
     
     # API routes
     app.router.add_get('/status', status_handler)
-    app.router.add_post('/test/{name}', test_service_handler)
+    app.router.add_post('/toggle/{name}', toggle_service_handler)
     app.router.add_get('/tools/{name}', get_tools_handler)
     app.router.add_post('/call/{service}/{tool}', call_tool_handler)
     app.router.add_post('/oauth/start/{service}', oauth_start_handler)
