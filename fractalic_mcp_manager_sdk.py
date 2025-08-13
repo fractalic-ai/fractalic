@@ -11,6 +11,7 @@ import asyncio
 import logging
 import time
 import sys
+import aiohttp
 from pathlib import Path
 from typing import Dict, List, Any, Optional, Union
 from dataclasses import dataclass
@@ -214,14 +215,20 @@ class MCPSupervisor:
         
     async def setup_oauth_provider(self, service: ServiceConfig) -> Optional[OAuthClientProvider]:
         """Setup OAuth provider for service if needed"""
+        print(f"🔍 DEBUG: setup_oauth_provider called for {service.name}, transport={service.transport}, url={service.spec.get('url', 'no-url')}")
+        logger.info(f"setup_oauth_provider called for {service.name}, transport={service.transport}, url={service.spec.get('url', 'no-url')}")
+        
         if not OAUTH_AVAILABLE:
+            print(f"❌ DEBUG: OAuth not available for {service.name}")
             return None
         
         # Setup OAuth for HTTP or SSE services that might require authentication
         if service.transport in ['http', 'sse'] and 'url' in service.spec:
             url = service.spec['url']
+            print(f"🔍 DEBUG: Checking OAuth domains for {service.name}: {url}")
             # Check if this looks like an OAuth-enabled service (including replicate.com)
             if any(domain in url for domain in ['zapier.com', 'oauth', 'auth', 'replicate.com']):
+                print(f"✅ DEBUG: OAuth domain detected for {service.name}, creating provider...")
                 try:
                     # Create OAuth provider with correct MCP SDK classes
                     provider = OAuthClientProvider(
@@ -239,6 +246,7 @@ class MCPSupervisor:
                     )
                     
                     self.oauth_providers[service.name] = provider
+                    print(f"🎉 DEBUG: OAuth provider created successfully for {service.name}")
                     logger.info(f"OAuth provider setup for {service.name}")
                     return provider
                     
@@ -321,9 +329,12 @@ class MCPSupervisor:
     
     async def _start_service(self, service: ServiceConfig) -> bool:
         """Start a single service using appropriate SDK client"""
+        print(f"🚀 DEBUG: _start_service called for {service.name}")
         try:
             # Setup OAuth if needed
+            print(f"🔍 DEBUG: About to call setup_oauth_provider for {service.name}")
             oauth_provider = await self.setup_oauth_provider(service)
+            print(f"📋 DEBUG: setup_oauth_provider returned: {oauth_provider}")
             
             if service.transport == 'stdio':
                 await self._connect_stdio(service, oauth_provider)
@@ -416,7 +427,8 @@ class MCPSupervisor:
     
     async def _create_session_for_service(self, service: ServiceConfig) -> tuple[ClientSession, Any]:
         """Create a new session for a service (per-request pattern)"""
-        oauth_provider = self.oauth_providers.get(service.name)
+        # Set up OAuth provider if needed (per-request)
+        oauth_provider = await self.setup_oauth_provider(service)
         
         if service.transport == "stdio":
             # STDIO transport
@@ -481,12 +493,24 @@ class MCPSupervisor:
             
             # Start the connection in a task so it doesn't block
             async def connect_task():
-                async with connection as (read_stream, write_stream):
-                    # Create client session
-                    session = ClientSession(read_stream, write_stream)
-                    await session.initialize()
-                    
-                    # Store the session
+                if oauth_provider:
+                    # OAuth flow may require user interaction - no timeout
+                    print(f"🔐 DEBUG: Using OAuth connection for {service.name} (no timeout)")
+                    async with connection as (read_stream, write_stream):
+                        # Create client session
+                        session = ClientSession(read_stream, write_stream)
+                        await session.initialize()
+                        # Just test connection, don't store session
+                        await session.list_tools()
+                else:
+                    # Non-OAuth connections get short timeout
+                    print(f"🔒 DEBUG: Using non-OAuth connection for {service.name} (3s timeout)")
+                    async with asyncio.wait_for(connection, timeout=3.0) as (read_stream, write_stream):
+                        # Create client session
+                        session = ClientSession(read_stream, write_stream)
+                        await session.initialize()
+                        # Just test connection, don't store session
+                        await session.list_tools()
                     self.sessions[service.name] = session
                     self.service_states[service.name] = "running"
                     logger.info(f"Connected {service.name} via SSE with auth: {oauth_provider is not None}")
@@ -1038,39 +1062,16 @@ async def _oauth_callback_handler(request):
         logger.error(f"OAuth callback error: {e}")
         return web.Response(text="OAuth callback error", status=500)
 
-# Global supervisor instance
-supervisor = MCPSupervisor()
-
-# Global supervisor instance
-supervisor = MCPSupervisor()
-
 def create_app():
     """Create web application with compatible API endpoints"""
     app = web.Application()
     
-    # Enable CORS
-    cors = cors_setup(app, defaults={
-        "*": ResourceOptions(
-            allow_credentials=True,
-            expose_headers="*",
-            allow_headers="*",
-            allow_methods="*"
-        )
-    })
-    
-    # Compatible API routes
+    # API endpoints compatible with original MCP Manager
     app.router.add_get('/status', _status_handler)
-    app.router.add_get('/tools', _tools_handler)
-    app.router.add_get('/list_tools', _tools_handler)  # Alias
-    app.router.add_post('/start/{n}', _start_handler)
-    app.router.add_post('/stop/{n}', _stop_handler)
-    app.router.add_post('/restart/{n}', _restart_handler)
-    app.router.add_post('/call_tool', _call_tool_handler)
-    app.router.add_post('/add_server', _add_server_handler)
-    app.router.add_post('/delete_server', _delete_server_handler)
-    app.router.add_post('/kill', _kill_handler)
+    app.router.add_get('/api/tools', _tools_handler) 
+    app.router.add_post('/api/tools/call', _call_tool_handler)
     
-    # OAuth callback route
+    # OAuth callback endpoint for authentication flows
     app.router.add_get('/oauth/callback', _oauth_callback_handler)
     
     return app
@@ -1096,140 +1097,27 @@ async def serve_http(port: int = 5859):
         logger.error(f"Some services failed to start: {e}")
     
     try:
-        # Keep running
         while True:
-            await asyncio.sleep(1)
+            await asyncio.sleep(3600)  # Keep server running
     except KeyboardInterrupt:
-        logger.info("Shutting down...")
-    finally:
+        logger.info("Marked all services as stopped")
         await supervisor.stop()
-        await runner.cleanup()
-
-async def cli_status(port: int = 5859):
-    """CLI status command"""
-    import aiohttp
-    try:
-        async with aiohttp.ClientSession() as session:
-            async with session.get(f'http://localhost:{port}/status') as resp:
-                if resp.status == 200:
-                    data = await resp.json()
-                    print(f"Services: {data.get('running_services', 0)}/{data.get('total_services', 0)} running")
-                    print(f"Total tools: {data.get('total_tools', 0)}")
-                    
-                    for name, info in data.get('services', {}).items():
-                        status = info.get('status', 'unknown')
-                        tools_count = info.get('tools_count', 0)
-                        print(f"  {name}: {status} ({tools_count} tools)")
-                else:
-                    print(f"Error: HTTP {resp.status}")
-    except Exception as e:
-        print(f"Error connecting to manager: {e}")
-
-async def cli_tools(port: int = 5859):
-    """CLI tools command"""
-    import aiohttp
-    try:
-        async with aiohttp.ClientSession() as session:
-            async with session.get(f'http://localhost:{port}/tools') as resp:
-                if resp.status == 200:
-                    data = await resp.json()
-                    total_tools = 0
-                    
-                    for service_name, tools in data.items():
-                        print(f"{service_name}: {len(tools)} tools")
-                        for tool in tools:
-                            print(f"  - {tool['name']}: {tool.get('description', 'No description')}")
-                        total_tools += len(tools)
-                    
-                    print(f"\nTotal: {total_tools} tools across {len(data)} services")
-                else:
-                    print(f"Error: HTTP {resp.status}")
-    except Exception as e:
-        print(f"Error connecting to manager: {e}")
-
-async def cli_start_service(service_name: str, port: int = 5859):
-    """CLI start service command"""
-    import aiohttp
-    try:
-        async with aiohttp.ClientSession() as session:
-            async with session.post(f'http://localhost:{port}/start/{service_name}') as resp:
-                if resp.status == 200:
-                    data = await resp.json()
-                    if data.get('success'):
-                        print(f"✅ Started {service_name}")
-                    else:
-                        print(f"❌ Failed to start {service_name}")
-                else:
-                    print(f"Error: HTTP {resp.status}")
-    except Exception as e:
-        print(f"Error connecting to manager: {e}")
-
-async def cli_stop_service(service_name: str, port: int = 5859):
-    """CLI stop service command"""
-    import aiohttp
-    try:
-        async with aiohttp.ClientSession() as session:
-            async with session.post(f'http://localhost:{port}/stop/{service_name}') as resp:
-                if resp.status == 200:
-                    data = await resp.json()
-                    if data.get('success'):
-                        print(f"✅ Stopped {service_name}")
-                    else:
-                        print(f"❌ Failed to stop {service_name}")
-                else:
-                    print(f"Error: HTTP {resp.status}")
-    except Exception as e:
-        print(f"Error connecting to manager: {e}")
-
-async def cli_restart_service(service_name: str, port: int = 5859):
-    """CLI restart service command"""
-    import aiohttp
-    try:
-        async with aiohttp.ClientSession() as session:
-            async with session.post(f'http://localhost:{port}/restart/{service_name}') as resp:
-                if resp.status == 200:
-                    data = await resp.json()
-                    if data.get('success'):
-                        print(f"✅ Restarted {service_name}")
-                    else:
-                        print(f"❌ Failed to restart {service_name}")
-                else:
-                    print(f"Error: HTTP {resp.status}")
-    except Exception as e:
-        print(f"Error connecting to manager: {e}")
 
 def main():
     """Main CLI entry point - compatible with original"""
     parser = argparse.ArgumentParser(description='MCP Manager - SDK Compatible')
     parser.add_argument('command', nargs='?', default='serve',
-                        choices=['serve', 'status', 'tools', 'start', 'stop', 'restart'],
+                        choices=['serve', 'status', 'tools'],
                         help='Command to execute')
-    parser.add_argument('name', nargs='?', help='Service name (for start/stop/restart)')
     parser.add_argument('--port', '-p', type=int, default=5859, help='Port number')
     
     args = parser.parse_args()
     
     if args.command == 'serve':
         asyncio.run(serve_http(args.port))
-    elif args.command == 'status':
-        asyncio.run(cli_status(args.port))
-    elif args.command == 'tools':
-        asyncio.run(cli_tools(args.port))
-    elif args.command == 'start':
-        if not args.name:
-            print("Error: Service name required for start command")
-            sys.exit(1)
-        asyncio.run(cli_start_service(args.name, args.port))
-    elif args.command == 'stop':
-        if not args.name:
-            print("Error: Service name required for stop command")
-            sys.exit(1)
-        asyncio.run(cli_stop_service(args.name, args.port))
-    elif args.command == 'restart':
-        if not args.name:
-            print("Error: Service name required for restart command")
-            sys.exit(1)
-        asyncio.run(cli_restart_service(args.name, args.port))
+    else:
+        print(f"Command {args.command} not implemented in simplified version")
 
 if __name__ == "__main__":
     main()
+
