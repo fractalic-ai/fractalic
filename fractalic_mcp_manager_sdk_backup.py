@@ -374,45 +374,25 @@ class MCPSupervisor:
         total_tools = 0
         
         for service in self.services_config:
-            # For OAuth services, don't try to connect during status check
-            # to avoid blocking on OAuth flow
-            if service.spec.get('oauth_client'):
-                # OAuth service - just report configuration status
-                state = self.service_states.get(service.name, "configured")
-                connected = False  # Don't test connection for OAuth services in status
-                tools_count = 0
-                has_oauth = service.name in self.oauth_providers
+            # Get current tools count by testing connection
+            tools = await self.get_tools_for_service(service.name)
+            tools_count = len(tools)
+            total_tools += tools_count
+            
+            # Update state based on successful tool retrieval
+            if tools_count > 0:
+                state = "running"
+                connected = True
+                self.service_states[service.name] = "running"
             else:
-                # Non-OAuth service - test connection normally
-                try:
-                    tools = await asyncio.wait_for(self.get_tools_for_service(service.name), timeout=3)
-                    tools_count = len(tools)
-                    total_tools += tools_count
-                    
-                    if tools_count > 0:
-                        state = "running"
-                        connected = True
-                        self.service_states[service.name] = "running"
-                    else:
-                        state = self.service_states.get(service.name, "stopped")
-                        connected = False
-                        
-                except asyncio.TimeoutError:
-                    state = "timeout"
-                    connected = False
-                    tools_count = 0
-                except Exception:
-                    state = "error"
-                    connected = False
-                    tools_count = 0
-                
-                has_oauth = False
+                state = self.service_states.get(service.name, "stopped")
+                connected = False
             
             services[service.name] = {
                 "status": state,
                 "connected": connected,
                 "tools_count": tools_count,
-                "has_oauth": has_oauth,
+                "has_oauth": service.name in self.oauth_providers,
                 "transport": service.transport
             }
         
@@ -613,8 +593,7 @@ class MCPSupervisor:
     
     async def _get_tools_with_timeout(self, service):
         """Helper method to get tools with proper cleanup"""
-        # Set up OAuth provider if needed (per-request)
-        oauth_provider = await self.setup_oauth_provider(service)
+        oauth_provider = self.oauth_providers.get(service.name)
         
         if service.transport == "stdio":
             # STDIO transport
@@ -768,11 +747,6 @@ supervisor = MCPSupervisor()
 async def _json_response(data):
     """Return JSON response"""
     return web.json_response(data)
-
-async def _health_handler(request):
-    """GET /health - Simple health check without connecting to services"""
-    logger.info("Health endpoint accessed")
-    return await _json_response({"status": "ok", "message": "MCP Manager is running"})
 
 async def _status_handler(request):
     """GET /status - Compatible with original API"""
@@ -1064,6 +1038,12 @@ async def _oauth_callback_handler(request):
         logger.error(f"OAuth callback error: {e}")
         return web.Response(text="OAuth callback error", status=500)
 
+# Global supervisor instance
+supervisor = MCPSupervisor()
+
+# Global supervisor instance
+supervisor = MCPSupervisor()
+
 def create_app():
     """Create web application with compatible API endpoints"""
     app = web.Application()
@@ -1079,7 +1059,6 @@ def create_app():
     })
     
     # Compatible API routes
-    app.router.add_get('/health', _health_handler)
     app.router.add_get('/status', _status_handler)
     app.router.add_get('/tools', _tools_handler)
     app.router.add_get('/list_tools', _tools_handler)  # Alias
@@ -1110,9 +1089,11 @@ async def serve_http(port: int = 5859):
     
     logger.info(f"MCP Manager running on port {port}")
     
-    # Skip service startup for per-request pattern - services are started on-demand  
-    # This avoids the MCP SDK concurrent initialization bug that causes SIGINT
-    logger.info("Using per-request pattern - services will be initialized when needed")
+    # Try to start services in background (don't block the web server)
+    try:
+        await supervisor.start()  # Start all services
+    except Exception as e:
+        logger.error(f"Some services failed to start: {e}")
     
     try:
         # Keep running

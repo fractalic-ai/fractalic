@@ -29,6 +29,9 @@ from mcp.shared.auth import OAuthClientInformationFull, OAuthClientMetadata, OAu
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+# MCP Protocol Version (Required for 2025-06-18)
+MCP_PROTOCOL_VERSION = "2025-06-18"
+
 @dataclass
 class ServiceConfig:
     """Service configuration"""
@@ -39,9 +42,17 @@ class ServiceConfig:
     
     @classmethod
     def from_dict(cls, name: str, config: Dict[str, Any]) -> 'ServiceConfig':
+        # Auto-detect transport if not specified
+        transport = config.get('transport', 'stdio')
+        if 'url' in config and transport == 'stdio':
+            if '/sse' in config['url']:
+                transport = 'sse'
+            else:
+                transport = 'http'  # Use streamable HTTP as default for URLs
+        
         return cls(
             name=name,
-            transport=config.get('transport', 'stdio'),
+            transport=transport,
             spec=config,
             has_oauth=config.get('has_oauth', False)
         )
@@ -148,11 +159,51 @@ class MCPSupervisorV2:
             return {}
     
     def _init_oauth_providers(self):
-        """Initialize OAuth providers for services that support OAuth"""
+        """
+        Initialize OAuth providers for services that support OAuth.
+        The MCP SDK will automatically handle RFC 9728 OAuth discovery when needed.
+        """
         for name, service in self.config.items():
+            # Only create OAuth providers for services explicitly configured with OAuth
             if service.has_oauth:
+                self._create_oauth_provider(name, service)
+                logger.info(f"OAuth provider created for explicitly configured service: {name}")
+        
+        # For other services, the SDK will automatically discover OAuth requirements
+        # when they return 401 + WWW-Authenticate headers (per RFC 9728)
+    
+    def _has_embedded_auth(self, url: str) -> bool:
+        """
+        Simple heuristic to detect embedded auth tokens in URLs.
+        This is only used for informational purposes - the SDK handles OAuth discovery.
+        """
+        from urllib.parse import urlparse, parse_qs
+        import re
+        
+        parsed = urlparse(url)
+        
+        # Look for long parameter values that might be tokens
+        query_params = parse_qs(parsed.query)
+        for values in query_params.values():
+            for value in values:
+                if len(value) > 15 and re.match(r'^[A-Za-z0-9+/=_-]+$', value):
+                    return True
+        
+        # Look for long path segments that might be tokens
+        path_segments = parsed.path.split('/')
+        for segment in path_segments:
+            if len(segment) >= 20 and re.match(r'^[A-Za-z0-9+/=_-]+$', segment):
+                return True
+        
+        return False
+
+    def _create_oauth_provider(self, name: str, service: ServiceConfig):
+        """Create OAuth provider for a service"""
+        try:
+            server_url = service.spec.get('oauth_server_url', service.spec.get('url', ''))
+            if server_url:
                 provider = OAuthClientProvider(
-                    server_url=service.spec.get('oauth_server_url', service.spec.get('url', '')),
+                    server_url=server_url,
                     client_metadata=OAuthClientMetadata(
                         client_name=f"Fractalic MCP Client - {name}",
                         redirect_uris=[AnyUrl("http://localhost:5859/oauth/callback")],
@@ -162,210 +213,521 @@ class MCPSupervisorV2:
                     ),
                     storage=self.token_storage,
                     redirect_handler=self._handle_oauth_redirect,
-                    callback_handler=self._handle_oauth_callback,
+                    callback_handler=self._create_callback_handler_for_service(name),
                 )
                 self.oauth_providers[name] = provider
+                logger.info(f"OAuth provider initialized for {name}")
+        except Exception as e:
+            logger.error(f"Failed to initialize OAuth for {name}: {e}")
     
-    def _handle_oauth_redirect(self, auth_url: str) -> None:
-        """Handle OAuth redirect by opening browser"""
+    def _create_dynamic_oauth_provider(self, name: str, server_url: str) -> OAuthClientProvider:
+        """Create OAuth provider dynamically for automatic OAuth discovery"""
+        try:
+            provider = OAuthClientProvider(
+                server_url=server_url,
+                client_metadata=OAuthClientMetadata(
+                    client_name=f"Fractalic MCP Client - {name}",
+                    redirect_uris=[AnyUrl("http://localhost:5859/oauth/callback")],
+                    grant_types=["authorization_code", "refresh_token"],
+                    response_types=["code"],
+                    scope="read write",
+                ),
+                storage=self.token_storage,
+                redirect_handler=self._handle_oauth_redirect,
+                callback_handler=self._create_callback_handler_for_service(name),
+            )
+            # Store it for future use
+            self.oauth_providers[name] = provider
+            logger.info(f"Dynamic OAuth provider created for {name}")
+            return provider
+        except Exception as e:
+            logger.error(f"Failed to create dynamic OAuth provider for {name}: {e}")
+            return None
+    
+    async def _handle_oauth_redirect(self, auth_url: str) -> None:
+        """Handle OAuth redirect by opening browser (async)"""
         logger.info(f"Opening OAuth authorization URL: {auth_url}")
         
         def open_browser():
             webbrowser.open(auth_url)
         
+        # Run browser opening in thread to avoid blocking
         threading.Thread(target=open_browser, daemon=True).start()
         
-    async def _handle_oauth_callback(self) -> tuple[str, str | None]:
-        """Handle OAuth callback by waiting for the callback server"""
-        # Clear any previous callback data
-        oauth_callback_data.clear()
-        
-        # Wait for the callback with timeout
-        timeout = 300  # 5 minutes
-        logger.info("Waiting for OAuth callback...")
-        
-        for _ in range(timeout * 10):  # Check every 100ms
-            if oauth_callback_data.get("received"):
-                break
-            await asyncio.sleep(0.1)
-        else:
-            logger.error("OAuth callback timeout after 5 minutes")
-            return ("", None)
-        
-        if oauth_callback_data.get("error"):
-            logger.error(f"OAuth error: {oauth_callback_data['error']}")
-            return ("", None)
-        
-        if not oauth_callback_data.get("code"):
-            logger.error("No authorization code received")
-            return ("", None)
-        
-        logger.info("OAuth authorization code received successfully")
-        return (oauth_callback_data["code"], oauth_callback_data.get("state"))
+        # Small delay to ensure browser has time to start
+        await asyncio.sleep(0.1)
     
-    async def _create_session_for_service(self, service: ServiceConfig) -> tuple[ClientSession, Any]:
-        """Create a new session for a service (per-request pattern)"""
-        oauth_provider = self.oauth_providers.get(service.name)
-        
-        if service.transport == "stdio":
-            # STDIO transport
-            server_params = StdioServerParameters(
-                command=service.spec['command'],
-                args=service.spec.get('args', []),
-                env=service.spec.get('env', {})
-            )
-            connection = stdio_client(server_params)
-            read_stream, write_stream = await connection.__aenter__()
+    def _create_callback_handler_for_service(self, service_name: str):
+        """Create a service-specific callback handler to avoid state mixing"""
+        async def callback_handler() -> tuple[str, str | None]:
+            """Service-specific OAuth callback handler"""
+            # Create a unique callback key for this service's OAuth session
+            callback_key = f"{service_name}_{id(asyncio.current_task())}"
             
-        elif service.transport == "sse":
-            # SSE transport with optional OAuth
-            url = service.spec['url']
-            connection = sse_client(url, auth=oauth_provider)
-            read_stream, write_stream = await connection.__aenter__()
+            # Register this callback session
+            oauth_callback_data[callback_key] = {"received": False}
             
-        elif service.transport == "http":
-            # HTTP transport (streamable) with optional OAuth
-            url = service.spec['url']
-            connection = streamablehttp_client(url, auth=oauth_provider)
-            read_stream, write_stream, _ = await connection.__aenter__()
+            # Wait for the callback with timeout
+            timeout = 300  # 5 minutes
+            logger.info(f"Waiting for OAuth callback for service: {service_name}")
             
-        else:
-            raise ValueError(f"Unsupported transport: {service.transport}")
+            try:
+                for _ in range(timeout * 10):  # Check every 100ms
+                    if oauth_callback_data[callback_key].get("received"):
+                        break
+                    await asyncio.sleep(0.1)
+                else:
+                    logger.error(f"OAuth callback timeout after 5 minutes for {service_name}")
+                    return ("", None)
+                
+                callback_data = oauth_callback_data.get(callback_key, {})
+                
+                if callback_data.get("error"):
+                    logger.error(f"OAuth error for {service_name}: {callback_data['error']}")
+                    return ("", None)
+                
+                if not callback_data.get("code"):
+                    logger.error(f"No authorization code received for {service_name}")
+                    return ("", None)
+                
+                logger.info(f"OAuth authorization code received successfully for {service_name}")
+                
+                return (callback_data["code"], callback_data.get("state"))
+                
+            finally:
+                # Clean up the callback data
+                oauth_callback_data.pop(callback_key, None)
         
-        # Create and initialize session
-        session = ClientSession(read_stream, write_stream)
-        await session.initialize()
+        return callback_handler
+    
+    async def _handle_oauth_redirect(self, auth_url: str) -> None:
+        """Handle OAuth redirect by opening browser (async)"""
+        logger.info(f"Opening OAuth authorization URL: {auth_url}")
         
-        return session, connection
+        def open_browser():
+            webbrowser.open(auth_url)
+        
+        # Run browser opening in thread to avoid blocking
+        threading.Thread(target=open_browser, daemon=True).start()
+        
+        # Small delay to ensure browser has time to start
+        await asyncio.sleep(0.1)
     
     async def get_tools_for_service(self, service_name: str) -> List[Dict[str, Any]]:
-        """Get tools for a service using per-request session"""
+        """Get tools for a service using per-request session with proper context management"""
         if service_name not in self.config:
             return []
         
         service = self.config[service_name]
+        connection = None
         
         try:
-            session, connection = await self._create_session_for_service(service)
-            try:
-                # List tools
-                tools_result = await session.list_tools()
-                tools = []
-                for tool in tools_result.tools:
-                    tools.append({
-                        "name": tool.name,
-                        "description": tool.description,
-                        "inputSchema": tool.inputSchema
-                    })
-                return tools
-            finally:
-                # Clean up connection
-                if hasattr(connection, '__aexit__'):
-                    await connection.__aexit__(None, None, None)
-                    
+            if service.transport == "stdio":
+                # STDIO transport
+                server_params = StdioServerParameters(
+                    command=service.spec['command'],
+                    args=service.spec.get('args', []),
+                    env=service.spec.get('env', {})
+                )
+                
+                # Use proper context manager pattern as per SDK examples
+                async with stdio_client(server_params) as (read_stream, write_stream):
+                    async with ClientSession(read_stream, write_stream) as session:
+                        # Initialize the connection
+                        await session.initialize()
+                        
+                        # List tools
+                        tools_result = await session.list_tools()
+                        tools = []
+                        
+                        for tool in tools_result.tools:
+                            tool_dict = {
+                                "name": tool.name,
+                                "description": tool.description,
+                                "inputSchema": tool.inputSchema
+                            }
+                            
+                            # Include title if available (2025-06-18 feature)
+                            if hasattr(tool, 'title') and tool.title:
+                                tool_dict["title"] = tool.title
+                            
+                            # Include annotations if available (2025-06-18 feature)  
+                            if hasattr(tool, 'annotations') and tool.annotations:
+                                tool_dict["annotations"] = tool.annotations
+                            
+                            tools.append(tool_dict)
+                        
+                        return tools
+                        
+            elif service.transport == "sse":
+                # SSE transport with automatic OAuth discovery
+                url = service.spec['url']
+                headers = {}
+                if MCP_PROTOCOL_VERSION:
+                    headers['MCP-Protocol-Version'] = MCP_PROTOCOL_VERSION
+                
+                # Create OAuth provider dynamically if needed and not already exists
+                oauth_provider = self.oauth_providers.get(service.name)
+                if not oauth_provider and not self._has_embedded_auth(url):
+                    # Create OAuth provider for potential OAuth discovery
+                    oauth_provider = self._create_dynamic_oauth_provider(service.name, url)
+                
+                async with sse_client(url, auth=oauth_provider, headers=headers) as (read_stream, write_stream):
+                    async with ClientSession(read_stream, write_stream) as session:
+                        # Initialize the connection
+                        await session.initialize()
+                        
+                        # List tools
+                        tools_result = await session.list_tools()
+                        tools = []
+                        
+                        for tool in tools_result.tools:
+                            tool_dict = {
+                                "name": tool.name,
+                                "description": tool.description,
+                                "inputSchema": tool.inputSchema
+                            }
+                            
+                            # Include title if available (2025-06-18 feature)
+                            if hasattr(tool, 'title') and tool.title:
+                                tool_dict["title"] = tool.title
+                            
+                            # Include annotations if available (2025-06-18 feature)  
+                            if hasattr(tool, 'annotations') and tool.annotations:
+                                tool_dict["annotations"] = tool.annotations
+                            
+                            tools.append(tool_dict)
+                        
+                        return tools
+                        
+            elif service.transport == "http":
+                # HTTP transport (streamable) with automatic OAuth discovery
+                url = service.spec['url']
+                headers = {}
+                if MCP_PROTOCOL_VERSION:
+                    headers['MCP-Protocol-Version'] = MCP_PROTOCOL_VERSION
+                
+                # Create OAuth provider dynamically if needed and not already exists
+                oauth_provider = self.oauth_providers.get(service.name)
+                if not oauth_provider and not self._has_embedded_auth(url):
+                    # Create OAuth provider for potential OAuth discovery
+                    oauth_provider = self._create_dynamic_oauth_provider(service.name, url)
+                
+                async with streamablehttp_client(url, auth=oauth_provider, headers=headers) as (read_stream, write_stream, _):
+                    async with ClientSession(read_stream, write_stream) as session:
+                        # Initialize the connection
+                        await session.initialize()
+                        
+                        # List tools
+                        tools_result = await session.list_tools()
+                        tools = []
+                        
+                        for tool in tools_result.tools:
+                            tool_dict = {
+                                "name": tool.name,
+                                "description": tool.description,
+                                "inputSchema": tool.inputSchema
+                            }
+                            
+                            # Include title if available (2025-06-18 feature)
+                            if hasattr(tool, 'title') and tool.title:
+                                tool_dict["title"] = tool.title
+                            
+                            # Include annotations if available (2025-06-18 feature)  
+                            if hasattr(tool, 'annotations') and tool.annotations:
+                                tool_dict["annotations"] = tool.annotations
+                            
+                            tools.append(tool_dict)
+                        
+                        return tools
+                        
+            else:
+                raise ValueError(f"Unsupported transport: {service.transport}")
+            
         except Exception as e:
             logger.error(f"Failed to get tools for {service_name}: {e}")
             return []
     
     async def call_tool_for_service(self, service_name: str, tool_name: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
-        """Call a tool on a service using per-request session"""
+        """Call a tool on a service using per-request session with proper context management"""
         if service_name not in self.config:
             raise ValueError(f"Service {service_name} not found")
         
         service = self.config[service_name]
         
-        session, connection = await self._create_session_for_service(service)
         try:
-            # Call tool
-            result = await session.call_tool(tool_name, arguments)
-            
-            # Format response
-            response = {
-                "content": [],
-                "isError": getattr(result, 'isError', False)
-            }
-            
-            # Handle content
-            for content in result.content:
-                if hasattr(content, 'text'):
-                    response["content"].append({
-                        "type": "text",
-                        "text": content.text
-                    })
-                elif hasattr(content, 'data'):
-                    response["content"].append({
-                        "type": "image",
-                        "data": content.data,
-                        "mimeType": getattr(content, 'mimeType', 'image/png')
-                    })
-            
-            # Handle structured content
-            if hasattr(result, 'structuredContent') and result.structuredContent:
-                response["structuredContent"] = result.structuredContent
-            
-            return response
-            
-        finally:
-            # Clean up connection
-            if hasattr(connection, '__aexit__'):
-                await connection.__aexit__(None, None, None)
+            if service.transport == "stdio":
+                # STDIO transport
+                server_params = StdioServerParameters(
+                    command=service.spec['command'],
+                    args=service.spec.get('args', []),
+                    env=service.spec.get('env', {})
+                )
+                
+                # Use proper context manager pattern as per SDK examples
+                async with stdio_client(server_params) as (read_stream, write_stream):
+                    async with ClientSession(read_stream, write_stream) as session:
+                        # Initialize the connection
+                        await session.initialize()
+                        
+                        # Call tool
+                        result = await session.call_tool(tool_name, arguments)
+                        
+                        # Format response with structured output support (2025-06-18)
+                        response = {
+                            "content": [],
+                            "isError": getattr(result, 'isError', False)
+                        }
+                        
+                        # Handle content
+                        for content in result.content:
+                            if hasattr(content, 'text'):
+                                response["content"].append({
+                                    "type": "text",
+                                    "text": content.text
+                                })
+                            elif hasattr(content, 'data'):
+                                response["content"].append({
+                                    "type": "image",
+                                    "data": content.data,
+                                    "mimeType": getattr(content, 'mimeType', 'image/png')
+                                })
+                            elif hasattr(content, 'resource'):
+                                # Handle embedded resources
+                                response["content"].append({
+                                    "type": "resource",
+                                    "resource": {
+                                        "uri": content.resource.uri,
+                                        "text": getattr(content.resource, 'text', None),
+                                        "blob": getattr(content.resource, 'blob', None)
+                                    }
+                                })
+                        
+                        # Handle structured content (2025-06-18 feature)
+                        if hasattr(result, 'structuredContent') and result.structuredContent:
+                            response["structuredContent"] = result.structuredContent
+                        
+                        # Handle tool annotations if present
+                        if hasattr(result, '_meta') and result._meta:
+                            response["_meta"] = result._meta
+                        
+                        return response
+                        
+            elif service.transport == "sse":
+                # SSE transport
+                url = service.spec['url']
+                headers = {}
+                if MCP_PROTOCOL_VERSION:
+                    headers['MCP-Protocol-Version'] = MCP_PROTOCOL_VERSION
+                
+                oauth_provider = self.oauth_providers.get(service.name)
+                if not oauth_provider and not self._has_embedded_auth(url):
+                    oauth_provider = self._create_dynamic_oauth_provider(service.name, url)
+                
+                async with sse_client(url, auth=oauth_provider, headers=headers) as (read_stream, write_stream):
+                    async with ClientSession(read_stream, write_stream) as session:
+                        await session.initialize()
+                        
+                        result = await session.call_tool(tool_name, arguments)
+                        
+                        # Format response (same as stdio)
+                        response = {
+                            "content": [],
+                            "isError": getattr(result, 'isError', False)
+                        }
+                        
+                        for content in result.content:
+                            if hasattr(content, 'text'):
+                                response["content"].append({
+                                    "type": "text",
+                                    "text": content.text
+                                })
+                            elif hasattr(content, 'data'):
+                                response["content"].append({
+                                    "type": "image",
+                                    "data": content.data,
+                                    "mimeType": getattr(content, 'mimeType', 'image/png')
+                                })
+                            elif hasattr(content, 'resource'):
+                                response["content"].append({
+                                    "type": "resource",
+                                    "resource": {
+                                        "uri": content.resource.uri,
+                                        "text": getattr(content.resource, 'text', None),
+                                        "blob": getattr(content.resource, 'blob', None)
+                                    }
+                                })
+                        
+                        if hasattr(result, 'structuredContent') and result.structuredContent:
+                            response["structuredContent"] = result.structuredContent
+                        
+                        if hasattr(result, '_meta') and result._meta:
+                            response["_meta"] = result._meta
+                        
+                        return response
+                        
+            elif service.transport == "http":
+                # HTTP transport
+                url = service.spec['url']
+                headers = {}
+                if MCP_PROTOCOL_VERSION:
+                    headers['MCP-Protocol-Version'] = MCP_PROTOCOL_VERSION
+                
+                oauth_provider = self.oauth_providers.get(service.name)
+                if not oauth_provider and not self._has_embedded_auth(url):
+                    oauth_provider = self._create_dynamic_oauth_provider(service.name, url)
+                
+                async with streamablehttp_client(url, auth=oauth_provider, headers=headers) as (read_stream, write_stream, _):
+                    async with ClientSession(read_stream, write_stream) as session:
+                        await session.initialize()
+                        
+                        result = await session.call_tool(tool_name, arguments)
+                        
+                        # Format response (same as stdio)
+                        response = {
+                            "content": [],
+                            "isError": getattr(result, 'isError', False)
+                        }
+                        
+                        for content in result.content:
+                            if hasattr(content, 'text'):
+                                response["content"].append({
+                                    "type": "text",
+                                    "text": content.text
+                                })
+                            elif hasattr(content, 'data'):
+                                response["content"].append({
+                                    "type": "image",
+                                    "data": content.data,
+                                    "mimeType": getattr(content, 'mimeType', 'image/png')
+                                })
+                            elif hasattr(content, 'resource'):
+                                response["content"].append({
+                                    "type": "resource",
+                                    "resource": {
+                                        "uri": content.resource.uri,
+                                        "text": getattr(content.resource, 'text', None),
+                                        "blob": getattr(content.resource, 'blob', None)
+                                    }
+                                })
+                        
+                        if hasattr(result, 'structuredContent') and result.structuredContent:
+                            response["structuredContent"] = result.structuredContent
+                        
+                        if hasattr(result, '_meta') and result._meta:
+                            response["_meta"] = result._meta
+                        
+                        return response
+                        
+            else:
+                raise ValueError(f"Unsupported transport: {service.transport}")
+                
+        except Exception as e:
+            logger.error(f"Failed to call tool {tool_name} for {service_name}: {e}")
+            raise
     
     async def test_service_connection(self, service_name: str) -> bool:
-        """Test connection to a service (no persistent sessions)"""
+        """Test connection to a service with proper context management"""
         if service_name not in self.config:
             return False
         
         service = self.config[service_name]
+        
         try:
-            session, connection = await self._create_session_for_service(service)
-            try:
-                # Test connection by listing tools
-                await session.list_tools()
-                self.service_states[service_name] = "running"
-                logger.info(f"Service {service_name} connection tested successfully")
-                return True
-            finally:
-                if hasattr(connection, '__aexit__'):
-                    await connection.__aexit__(None, None, None)
+            if service.transport == "stdio":
+                # STDIO transport
+                server_params = StdioServerParameters(
+                    command=service.spec['command'],
+                    args=service.spec.get('args', []),
+                    env=service.spec.get('env', {})
+                )
+                
+                # Use proper context manager pattern
+                async with stdio_client(server_params) as (read_stream, write_stream):
+                    async with ClientSession(read_stream, write_stream) as session:
+                        # Initialize and test connection
+                        await session.initialize()
+                        await session.list_tools()
+                        
+                        self.service_states[service_name] = "running"
+                        logger.info(f"Service {service_name} connection tested successfully")
+                        return True
+                        
+            elif service.transport == "sse":
+                # SSE transport
+                url = service.spec['url']
+                headers = {}
+                if MCP_PROTOCOL_VERSION:
+                    headers['MCP-Protocol-Version'] = MCP_PROTOCOL_VERSION
+                
+                oauth_provider = self.oauth_providers.get(service_name)
+                if not oauth_provider and not self._has_embedded_auth(url):
+                    oauth_provider = self._create_dynamic_oauth_provider(service_name, url)
+                
+                async with sse_client(url, auth=oauth_provider, headers=headers) as (read_stream, write_stream):
+                    async with ClientSession(read_stream, write_stream) as session:
+                        await session.initialize()
+                        await session.list_tools()
+                        
+                        self.service_states[service_name] = "running"
+                        logger.info(f"Service {service_name} connection tested successfully")
+                        return True
+                        
+            elif service.transport == "http":
+                # HTTP transport
+                url = service.spec['url']
+                headers = {}
+                if MCP_PROTOCOL_VERSION:
+                    headers['MCP-Protocol-Version'] = MCP_PROTOCOL_VERSION
+                
+                oauth_provider = self.oauth_providers.get(service_name)
+                if not oauth_provider and not self._has_embedded_auth(url):
+                    oauth_provider = self._create_dynamic_oauth_provider(service_name, url)
+                
+                async with streamablehttp_client(url, auth=oauth_provider, headers=headers) as (read_stream, write_stream, _):
+                    async with ClientSession(read_stream, write_stream) as session:
+                        await session.initialize()
+                        await session.list_tools()
+                        
+                        self.service_states[service_name] = "running"
+                        logger.info(f"Service {service_name} connection tested successfully")
+                        return True
+                        
+            else:
+                raise ValueError(f"Unsupported transport: {service.transport}")
+            
+        except asyncio.TimeoutError:
+            self.service_states[service_name] = "timeout"
+            logger.error(f"Connection timeout for {service_name}")
+            return False
         except Exception as e:
             self.service_states[service_name] = "error"
             logger.error(f"Failed to connect to {service_name}: {e}")
             return False
     
     async def status(self) -> Dict[str, Any]:
-        """Get status of all services"""
+        """Get status of all services - NO CONNECTIONS, just configuration status"""
         services = {}
-        total_tools = 0
         
         for name, service in self.config.items():
-            # Get current tools count by testing connection
-            tools = await self.get_tools_for_service(name)
-            tools_count = len(tools)
-            total_tools += tools_count
-            
-            # Update state based on successful tool retrieval
-            if tools_count > 0:
-                state = "running"
-                connected = True
-                self.service_states[name] = "running"
-            else:
-                state = self.service_states.get(name, "stopped")
-                connected = False
-            
+            # Don't connect to services in status - just show configuration
             services[name] = {
-                "status": state,
-                "connected": connected,
-                "tools_count": tools_count,
-                "has_oauth": service.has_oauth,
-                "transport": service.transport
+                "status": self.service_states.get(name, "not_tested"),
+                "connected": False,  # Per-request pattern - no persistent connections
+                "tools_count": 0,    # Will be populated when actually used
+                "has_oauth": service.has_oauth or name in self.oauth_providers,
+                "transport": service.transport,
+                "url": service.spec.get('url', None),
+                "command": service.spec.get('command', None)
             }
         
         return {
             "services": services,
             "total_services": len(self.config),
-            "running_services": sum(1 for s in services.values() if s["connected"]),
+            "running_services": 0,  # Per-request pattern - no persistent connections
             "oauth_enabled": len(self.oauth_providers) > 0,
-            "total_tools": total_tools
+            "total_tools": 0,       # Will be populated when actually used
+            "mcp_version": MCP_PROTOCOL_VERSION
         }
 
 # Global supervisor instance
@@ -379,13 +741,22 @@ async def oauth_callback_handler(request):
     query = request.query
     
     if 'code' in query:
-        oauth_callback_data.update({
-            'received': True,
-            'code': query['code'],
-            'state': query.get('state'),
-            'error': None
-        })
-        logger.info("OAuth authorization code received")
+        # Store callback data for all active OAuth sessions
+        # Since we can't know which service this callback is for, we store it for all pending sessions
+        code = query['code']
+        state = query.get('state')
+        
+        # Find all pending OAuth sessions and notify them
+        for key in list(oauth_callback_data.keys()):
+            if not oauth_callback_data[key].get("received"):
+                oauth_callback_data[key].update({
+                    'received': True,
+                    'code': code,
+                    'state': state,
+                    'error': None
+                })
+        
+        logger.info("OAuth authorization code received and broadcast to all pending sessions")
         
         return web.Response(
             text="""
@@ -413,12 +784,17 @@ async def oauth_callback_handler(request):
     
     elif 'error' in query:
         error = query['error']
-        oauth_callback_data.update({
-            'received': True,
-            'code': None,
-            'state': None,
-            'error': error
-        })
+        
+        # Broadcast error to all pending OAuth sessions
+        for key in list(oauth_callback_data.keys()):
+            if not oauth_callback_data[key].get("received"):
+                oauth_callback_data[key].update({
+                    'received': True,
+                    'code': None,
+                    'state': None,
+                    'error': error
+                })
+        
         logger.error(f"OAuth authorization error: {error}")
         
         return web.Response(
@@ -428,7 +804,7 @@ async def oauth_callback_handler(request):
             <head>
                 <title>OAuth Authorization Error</title>
                 <style>
-                    body { font-family: Arial, sans-serif; text-align: center; margin-top: 50px; }
+                    body {{ font-family: Arial, sans-serif; text-align: center; margin-top: 50px; }}
                     .error {{ color: #f44336; }}
                     .container {{ max-width: 500px; margin: 0 auto; padding: 20px; }}
                 </style>
@@ -446,12 +822,15 @@ async def oauth_callback_handler(request):
         )
     
     else:
-        oauth_callback_data.update({
-            'received': True,
-            'code': None,
-            'state': None,
-            'error': 'invalid_request'
-        })
+        # Broadcast invalid request to all pending OAuth sessions
+        for key in list(oauth_callback_data.keys()):
+            if not oauth_callback_data[key].get("received"):
+                oauth_callback_data[key].update({
+                    'received': True,
+                    'code': None,
+                    'state': None,
+                    'error': 'invalid_request'
+                })
         
         return web.Response(
             text="Invalid OAuth callback request",

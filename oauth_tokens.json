@@ -1,9 +1,9 @@
 {
   "default": {
-    "access_token": "replicate-dimusdim:6kjsH8vE1McOuwGx:vZsSTYga3p0VOOb2UNFypkZWIbQUlcOo",
+    "access_token": "replicate-dimusdim:xPPlnuSUqSp9NI04:q5ueA3VGXVgXQi3wZnLcraPb22S14ewN",
     "token_type": "Bearer",
     "expires_in": 3600,
-    "scope": "read write",
-    "refresh_token": "replicate-dimusdim:6kjsH8vE1McOuwGx:WmYDOpDxTGyxSs9Ydcl4VDMLg5xZZRS9"
+    "refresh_token": "replicate-dimusdim:xPPlnuSUqSp9NI04:gUp60l8LvekqyzYA3MwqZiiAMCJXUVw3",
+    "scope": "read write"
   }
 }
