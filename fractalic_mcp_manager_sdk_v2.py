@@ -374,10 +374,10 @@ class MCPSupervisorV2:
             # This prevents indefinite hangs when SSE servers send data too slowly
             return await asyncio.wait_for(
                 self._get_tools_for_service_impl(service_name, service), 
-                timeout=60.0  # 60 second timeout - balances OAuth flows with hang protection
+                timeout=3.0  # 3 second timeout - fast fail, non-blocking
             )
         except asyncio.TimeoutError:
-            logger.warning(f"Timeout (60s) getting tools for {service_name} - SSE server experiencing slow response (httpx low-and-slow issue). Service may be temporarily unavailable.")
+            logger.warning(f"Timeout (3s) getting tools for {service_name} - fast fail, non-blocking.")
             return []
         except Exception as e:
             logger.error(f"Failed to get tools for {service_name}: {e}")
@@ -442,7 +442,7 @@ class MCPSupervisorV2:
                 
                 # Configure timeouts for OAuth services (especially dynamic ones like Replicate)
                 # SSE client expects float timeouts (seconds) - per SDK issue #936
-                connection_timeout = 30.0  # Connection establishment timeout
+                connection_timeout = 3.0  # Connection establishment timeout
                 # Let SDK use default sse_read_timeout
                 
                 logger.info(f"Connecting to {service_name} SSE service with {connection_timeout}s connection timeout, default read timeout")
@@ -517,8 +517,8 @@ class MCPSupervisorV2:
                 # Configure timeouts for OAuth services
                 # Streamable HTTP client expects timedelta timeouts (per SDK issue #936)
                 from datetime import timedelta
-                connection_timeout = timedelta(seconds=30)    # Connection establishment timeout
-                sse_read_timeout = timedelta(seconds=45)      # Reduced read timeout for faster failure detection
+                connection_timeout = timedelta(seconds=3)    # Connection establishment timeout
+                sse_read_timeout = timedelta(seconds=3)      # Fast fail, non-blocking
                 
                 logger.info(f"Connecting to {service_name} HTTP service with {connection_timeout.total_seconds()}s connection timeout, {sse_read_timeout.total_seconds()}s read timeout")
                 
@@ -706,8 +706,8 @@ class MCPSupervisorV2:
                     oauth_provider = self._create_dynamic_oauth_provider(service.name, url)
                 
                 # Configure timeouts for OAuth services (SSE client expects float)
-                connection_timeout = 30.0   # Connection establishment timeout
-                sse_read_timeout = 300.0     # Extended SSE read timeout for OAuth + tool calls (5 min)
+                connection_timeout = 3.0   # Connection establishment timeout
+                sse_read_timeout = 3.0     # Fast fail, non-blocking
                 
                 async with sse_client(
                     url, 
@@ -770,8 +770,8 @@ class MCPSupervisorV2:
                 
                 # Configure timeouts for OAuth services (Streamable HTTP client expects timedelta)
                 from datetime import timedelta
-                connection_timeout = timedelta(seconds=30)    # Connection establishment timeout
-                sse_read_timeout = timedelta(seconds=600)     # Extended read timeout for OAuth + tool calls
+                connection_timeout = timedelta(seconds=3)    # Connection establishment timeout
+                sse_read_timeout = timedelta(seconds=3)     # Fast fail, non-blocking
                 
                 async with streamablehttp_client(
                     url, 
@@ -877,8 +877,8 @@ class MCPSupervisorV2:
                     oauth_provider = self._create_dynamic_oauth_provider(service_name, url)
                 
                 # Configure timeouts for OAuth services (SSE client expects float)
-                connection_timeout = 15.0   # Shorter connection timeout for tests
-                sse_read_timeout = 20.0     # Shorter SSE read timeout for tests
+                connection_timeout = 3.0   # Shorter connection timeout for tests
+                sse_read_timeout = 3.0     # Fast fail, non-blocking
                 
                 logger.info(f"Testing {service_name} SSE connection with {connection_timeout}s connection timeout, {sse_read_timeout}s read timeout")
                 
@@ -910,8 +910,8 @@ class MCPSupervisorV2:
                 
                 # Configure timeouts for OAuth services (Streamable HTTP client expects timedelta)
                 from datetime import timedelta
-                connection_timeout = timedelta(seconds=15)    # Shorter connection timeout for tests
-                sse_read_timeout = timedelta(seconds=20)      # Shorter read timeout for tests
+                connection_timeout = timedelta(seconds=3)    # Shorter connection timeout for tests
+                sse_read_timeout = timedelta(seconds=3)      # Fast fail, non-blocking
                 
                 logger.info(f"Testing {service_name} HTTP connection with {connection_timeout.total_seconds()}s connection timeout, {sse_read_timeout.total_seconds()}s read timeout")
                 
