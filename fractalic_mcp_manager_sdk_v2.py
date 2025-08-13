@@ -17,6 +17,21 @@ from urllib.parse import urlparse, parse_qs
 from aiohttp import web
 from pydantic import AnyUrl
 
+# Token counting support (aligned with legacy manager)
+try:
+    import tiktoken
+    TOKENIZER = tiktoken.get_encoding("cl100k_base")
+    TIKTOKEN_AVAILABLE = True
+except ImportError:
+    TIKTOKEN_AVAILABLE = False
+    TOKENIZER = None
+
+try:
+    import litellm
+    LITELLM_AVAILABLE = True
+except ImportError:
+    LITELLM_AVAILABLE = False
+
 # MCP SDK imports
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
@@ -448,6 +463,66 @@ class MCPSupervisorV2:
             logger.error(f"Failed to get tools for {service_name}: {e}")
             return []
     
+    async def get_tools_info_for_service(self, service_name: str) -> Dict[str, Any]:
+        """
+        Get tool count and token count for a specific service.
+        Returns count information aligned with legacy MCP manager.
+        """
+        if service_name not in self.config:
+            return {"tool_count": 0, "token_count": 0, "tools_error": "Service not found"}
+        
+        try:
+            tools = await self.get_tools_for_service(service_name)
+            
+            if not tools:
+                return {"tool_count": 0, "token_count": 0}
+            
+            tool_count = len(tools)
+            
+            # Calculate token count using available tokenizer
+            if LITELLM_AVAILABLE:
+                try:
+                    # Convert MCP tools to OpenAI format for LiteLLM (aligned with legacy)
+                    openai_tools = []
+                    for tool in tools:
+                        openai_tool = {
+                            "type": "function", 
+                            "function": {
+                                "name": tool.get("name", "unknown"),
+                                "description": tool.get("description", ""),
+                                "parameters": tool.get("inputSchema", {})
+                            }
+                        }
+                        openai_tools.append(openai_tool)
+                    
+                    # Use LiteLLM to count tokens (same as legacy manager)
+                    token_count = litellm.token_counter(model="gpt-4", messages=[], tools=openai_tools)
+                    
+                except Exception as e:
+                    # Fallback to tiktoken if LiteLLM fails
+                    if TIKTOKEN_AVAILABLE:
+                        schema_json = json.dumps(tools)
+                        token_count = len(TOKENIZER.encode(schema_json))
+                    else:
+                        # Rough estimate if no tokenizer available
+                        schema_json = json.dumps(tools)
+                        token_count = len(schema_json) // 4  # Rough approximation
+                        
+            elif TIKTOKEN_AVAILABLE:
+                # Direct tiktoken approach (same as legacy manager)
+                schema_json = json.dumps(tools)
+                token_count = len(TOKENIZER.encode(schema_json))
+            else:
+                # Rough estimate if no tokenizer available
+                schema_json = json.dumps(tools)
+                token_count = len(schema_json) // 4  # Rough approximation
+            
+            return {"tool_count": tool_count, "token_count": token_count}
+            
+        except Exception as e:
+            logger.error(f"Failed to get tools info for {service_name}: {e}")
+            return {"tool_count": 0, "token_count": 0, "tools_error": str(e)}
+    
     async def call_tool_for_service(self, service_name: str, tool_name: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
         """Call a tool on a service using per-request session with proper context management"""
         if service_name not in self.config:
@@ -705,28 +780,60 @@ class MCPSupervisorV2:
             logger.error(f"Failed to connect to {service_name}: {e}")
             return False
     
-    async def status(self) -> Dict[str, Any]:
-        """Get status of all services - NO CONNECTIONS, just configuration status"""
+    async def status(self, include_tools_info: bool = False) -> Dict[str, Any]:
+        """
+        Get status of all services.
+        If include_tools_info=True, fetches actual tools count and token count for each service.
+        Otherwise, returns configuration status only (faster for health checks).
+        """
         services = {}
+        total_tools = 0
+        total_tokens = 0
         
         for name, service in self.config.items():
-            # Don't connect to services in status - just show configuration
-            services[name] = {
+            # Base configuration info
+            service_info = {
                 "status": self.service_states.get(name, "not_tested"),
                 "connected": False,  # Per-request pattern - no persistent connections
-                "tools_count": 0,    # Will be populated when actually used
                 "has_oauth": service.has_oauth or name in self.oauth_providers,
                 "transport": service.transport,
                 "url": service.spec.get('url', None),
                 "command": service.spec.get('command', None)
             }
+            
+            # Include tools information if requested (aligned with legacy manager)
+            if include_tools_info:
+                try:
+                    tools_info = await self.get_tools_info_for_service(name)
+                    service_info.update(tools_info)  # Adds tool_count, token_count, and any tools_error
+                    
+                    # Accumulate totals
+                    total_tools += tools_info.get("tool_count", 0)
+                    total_tokens += tools_info.get("token_count", 0)
+                    
+                except Exception as e:
+                    logger.error(f"Failed to get tools info for {name}: {e}")
+                    service_info.update({
+                        "tool_count": 0,
+                        "token_count": 0,
+                        "tools_error": str(e)
+                    })
+            else:
+                # Placeholder values for fast status checks
+                service_info.update({
+                    "tool_count": 0,     # Will be populated when tools info is requested
+                    "token_count": 0     # Will be populated when tools info is requested
+                })
+            
+            services[name] = service_info
         
         return {
             "services": services,
             "total_services": len(self.config),
             "running_services": 0,  # Per-request pattern - no persistent connections
             "oauth_enabled": len(self.oauth_providers) > 0,
-            "total_tools": 0,       # Will be populated when actually used
+            "total_tools": total_tools if include_tools_info else 0,
+            "total_tokens": total_tokens if include_tools_info else 0,
             "mcp_version": MCP_PROTOCOL_VERSION
         }
 
@@ -839,9 +946,11 @@ async def oauth_callback_handler(request):
 
 # REST API endpoints
 async def status_handler(request):
-    """GET /status - Get services status"""
+    """GET /status - Get services status with optional tools info"""
     try:
-        status = await supervisor.status()
+        # Check for include_tools_info query parameter
+        include_tools = request.query.get('include_tools_info', '').lower() in ('true', '1', 'yes')
+        status = await supervisor.status(include_tools_info=include_tools)
         return web.json_response(status)
     except Exception as e:
         logger.error(f"Status error: {e}")
@@ -858,11 +967,25 @@ async def test_service_handler(request):
         return web.json_response({"error": str(e)}, status=500)
 
 async def get_tools_handler(request):
-    """GET /tools/{name} - Get tools for a service"""
+    """GET /tools/{name} - Get tools for a service with count and token information"""
     service_name = request.match_info['name']
     try:
+        # Get both tools and tools info (includes token counting)
         tools = await supervisor.get_tools_for_service(service_name)
-        return web.json_response({"tools": tools, "count": len(tools)})
+        tools_info = await supervisor.get_tools_info_for_service(service_name)
+        
+        response = {
+            "tools": tools, 
+            "count": len(tools),
+            "tool_count": tools_info.get("tool_count", len(tools)),
+            "token_count": tools_info.get("token_count", 0)
+        }
+        
+        # Include any error information from tools_info
+        if "tools_error" in tools_info:
+            response["tools_error"] = tools_info["tools_error"]
+            
+        return web.json_response(response)
     except Exception as e:
         logger.error(f"Get tools error: {e}")
         return web.json_response({"error": str(e)}, status=500)
