@@ -1,0 +1,9 @@
+{
+  "default": {
+    "access_token": "replicate-dimusdim:6kjsH8vE1McOuwGx:vZsSTYga3p0VOOb2UNFypkZWIbQUlcOo",
+    "token_type": "Bearer",
+    "expires_in": 3600,
+    "scope": "read write",
+    "refresh_token": "replicate-dimusdim:6kjsH8vE1McOuwGx:WmYDOpDxTGyxSs9Ydcl4VDMLg5xZZRS9"
+  }
+}

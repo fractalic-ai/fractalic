@@ -23,9 +23,172 @@ from mcp.client.session          import ClientSession
 from mcp.client.stdio            import stdio_client, StdioServerParameters
 from mcp.client.streamable_http  import streamablehttp_client
 from mcp.client.sse              import sse_client
+from mcp.client.auth             import OAuthClientProvider
+from mcp.shared.auth             import OAuthClientMetadata, OAuthToken
 
 import errno
 import tiktoken
+
+# OAuth token storage directory
+OAUTH_STORAGE_DIR = os.environ.get("OAUTH_STORAGE_PATH", "/tmp/fractalic_oauth")
+
+class FileTokenStorage:
+    """File-based OAuth token storage for persistence across restarts"""
+    
+    def __init__(self, server_name: str):
+        self.server_name = server_name
+        self.storage_dir = Path(OAUTH_STORAGE_DIR)
+        self.token_file = self.storage_dir / f"{server_name}_tokens.json"
+        self.client_file = self.storage_dir / f"{server_name}_client.json"
+        
+        # Ensure storage directory exists
+        self.storage_dir.mkdir(parents=True, exist_ok=True)
+        
+    async def get_tokens(self) -> Optional[OAuthToken]:
+        """Retrieve stored OAuth tokens"""
+        try:
+            if self.token_file.exists():
+                with open(self.token_file, 'r') as f:
+                    token_data = json.load(f)
+                return OAuthToken(**token_data)
+        except Exception as e:
+            log(f"FileTokenStorage({self.server_name}): Failed to load tokens: {e}")
+        return None
+        
+    async def set_tokens(self, tokens: OAuthToken) -> None:
+        """Store OAuth tokens persistently"""
+        try:
+            with open(self.token_file, 'w') as f:
+                json.dump(tokens.model_dump(), f, indent=2)
+            log(f"FileTokenStorage({self.server_name}): Tokens saved to {self.token_file}")
+        except Exception as e:
+            log(f"FileTokenStorage({self.server_name}): Failed to save tokens: {e}")
+            
+    async def get_client_info(self):
+        """Retrieve stored OAuth client information"""
+        try:
+            if self.client_file.exists():
+                with open(self.client_file, 'r') as f:
+                    return json.load(f)
+        except Exception as e:
+            log(f"FileTokenStorage({self.server_name}): Failed to load client info: {e}")
+        return None
+        
+    async def set_client_info(self, client_info) -> None:
+        """Store OAuth client information persistently"""
+        try:
+            with open(self.client_file, 'w') as f:
+                json.dump(client_info, f, indent=2)
+            log(f"FileTokenStorage({self.server_name}): Client info saved to {self.client_file}")
+        except Exception as e:
+            log(f"FileTokenStorage({self.server_name}): Failed to save client info: {e}")
+
+def migrate_oauth_tokens(source_dir: str, target_dir: str) -> bool:
+    """
+    Migrate OAuth tokens from source to target directory for deployment.
+    
+    Args:
+        source_dir: Source directory (e.g., development environment)
+        target_dir: Target directory (e.g., container volume)
+        
+    Returns:
+        bool: True if migration successful, False otherwise
+    """
+    try:
+        source_path = Path(source_dir)
+        target_path = Path(target_dir)
+        
+        if not source_path.exists():
+            log(f"OAuth migration: Source directory does not exist: {source_path}")
+            return False
+            
+        # Create target directory
+        target_path.mkdir(parents=True, exist_ok=True)
+        
+        # Find all OAuth token files
+        token_files = list(source_path.glob("*_tokens.json"))
+        client_files = list(source_path.glob("*_client.json"))
+        
+        if not token_files:
+            log(f"OAuth migration: No token files found in {source_path}")
+            return True  # Not an error if no tokens exist
+            
+        # Copy token files
+        copied_count = 0
+        for token_file in token_files:
+            target_file = target_path / token_file.name
+            with open(token_file, 'r') as src, open(target_file, 'w') as dst:
+                dst.write(src.read())
+            log(f"OAuth migration: Copied {token_file.name}")
+            copied_count += 1
+            
+        # Copy client files
+        for client_file in client_files:
+            target_file = target_path / client_file.name
+            with open(client_file, 'r') as src, open(target_file, 'w') as dst:
+                dst.write(src.read())
+            log(f"OAuth migration: Copied {client_file.name}")
+            
+        log(f"OAuth migration: Successfully migrated {copied_count} token files")
+        return True
+        
+    except Exception as e:
+        log(f"OAuth migration failed: {e}")
+        return False
+
+def list_oauth_tokens(storage_dir: str = None) -> Dict[str, Dict]:
+    """
+    List all available OAuth tokens and their status.
+    
+    Args:
+        storage_dir: OAuth storage directory (uses default if None)
+        
+    Returns:
+        Dict mapping server names to token information
+    """
+    if storage_dir is None:
+        storage_dir = OAUTH_STORAGE_DIR
+        
+    result = {}
+    storage_path = Path(storage_dir)
+    
+    if not storage_path.exists():
+        return result
+        
+    try:
+        for token_file in storage_path.glob("*_tokens.json"):
+            server_name = token_file.stem.replace("_tokens", "")
+            
+            try:
+                with open(token_file, 'r') as f:
+                    token_data = json.load(f)
+                    
+                # Check token expiry
+                expires_at = token_data.get("expires_at")
+                is_expired = False
+                if expires_at:
+                    is_expired = time.time() > expires_at
+                    
+                result[server_name] = {
+                    "token_file": str(token_file),
+                    "has_access_token": bool(token_data.get("access_token")),
+                    "has_refresh_token": bool(token_data.get("refresh_token")),
+                    "expires_at": expires_at,
+                    "is_expired": is_expired,
+                    "last_modified": datetime.datetime.fromtimestamp(
+                        token_file.stat().st_mtime
+                    ).isoformat()
+                }
+                
+            except Exception as e:
+                result[server_name] = {
+                    "error": f"Failed to read token file: {e}"
+                }
+                
+    except Exception as e:
+        log(f"Failed to list OAuth tokens: {e}")
+        
+    return result
 
 # Import litellm for optional token counting alignment with Fractalic execution
 try:
@@ -445,39 +608,36 @@ class Child:
         # Create service profile for adaptive behavior
         self.profile = ServiceProfile(name, spec, self.transport)
         
-        self.proc        = None
-        self.pid         = None
+        # Core MCP client state (SDK-managed)
         self.session     : Optional[ClientSession] = None
         self.session_at  = 0.0
-        self._exit_stack = None
+        self._transport_context = None
+        self._session_context = None
+        
+        # Health and lifecycle management
         self._health     = None
         self.retries     = 0
         self.started_at  = None
         self._cmd_q      : asyncio.Queue = asyncio.Queue()
         self._runner     = asyncio.create_task(self._loop())
-        self.healthy     = False          # Track liveness separately from readiness
-        self.restart_count = 0            # Track total number of restarts
-        self.last_error   = None          # Store last error message
-        self.last_tool_request = 0.0      # Track last tool request time for rate limiting
-        self.health_failures = 0          # Track consecutive health check failures
-        self.last_restart_time = 0        # Track when last restart occurred
-        # --- New fields for output capture ---
-        self.stdout_buffer = []  # List of dicts: {"timestamp": str, "line": str}
-        self.stderr_buffer = []  # List of dicts: {"timestamp": str, "line": str}
-        self.last_output_renewal = None  # ISO8601 string of last output change
-        self._output_buffer_limit = 1000  # Max lines to keep per buffer
-        # --- Output capture tasks ---
-        self._stdout_task = None
-        self._stderr_task = None
-        # --- Caching for tools_info ---
-        self._last_tools_list = None
-        self._last_token_count = None
-        self._last_schema_json = None
-        # --- Tools caching ---
+        self.healthy     = False
+        self.restart_count = 0
+        self.last_error   = None
+        self.last_tool_request = 0.0
+        self.health_failures = 0
+        self.last_restart_time = 0
+        
+        # Output capture (for UI display)
+        self.stdout_buffer = []
+        self.stderr_buffer = []
+        self.last_output_renewal = None
+        self._output_buffer_limit = 1000
+        
+        # Tools caching
         self._cached_tools = None
         self._tools_cache_time = 0
 
-        # --- Service profile for adaptive settings ---
+        # Service profile for adaptive settings
         self.service_profile = ServiceProfile(name, spec, self.transport)
 
     async def start(self):
@@ -508,201 +668,202 @@ class Child:
         
         log(f"{self.name}: Cleanup complete")
 
-    async def _setup_stdio_monitoring(self, transport):
-        """Setup monitoring for stdio subprocess stderr output."""
+    def _setup_oauth_auth(self):
+        """
+        Setup OAuth authentication using MCP SDK's built-in OAuth 2.1 support.
+        Uses persistent file-based token storage for seamless deployment.
+        """
         try:
-            # The transport is a tuple (read_stream, write_stream)
-            read_stream, write_stream = transport
+            from pydantic import AnyUrl
             
-            # Try to access the underlying process through various methods
-            process = None
+            # Create persistent token storage
+            token_storage = FileTokenStorage(self.name)
             
-            # Method 1: Try to access via stream internals
-            for stream in [read_stream, write_stream]:
-                if hasattr(stream, '_transport'):
-                    transport_obj = stream._transport
-                    if hasattr(transport_obj, 'get_extra_info'):
-                        try:
-                            subprocess_obj = transport_obj.get_extra_info('subprocess')
-                            if subprocess_obj:
-                                process = subprocess_obj
-                                break
-                        except:
-                            pass
-                    
-                    # Try other common process attributes
-                    for attr in ['_process', '_protocol']:
-                        if hasattr(transport_obj, attr):
-                            obj = getattr(transport_obj, attr)
-                            if hasattr(obj, 'pid'):  # Looks like a process
-                                process = obj
-                                break
-                            elif hasattr(obj, '_process'):
-                                process = obj._process
-                                break
-                    
-                    if process:
-                        break
+            # Default OAuth client metadata for automatic authentication
+            client_metadata = OAuthClientMetadata(
+                client_name=f"Fractalic MCP Client - {self.name}",
+                redirect_uris=[AnyUrl("http://localhost:0/callback")],  # Use dynamic port
+                grant_types=["authorization_code", "refresh_token"],
+                response_types=["code"],
+                scope="user",  # Default scope, server will specify what's needed
+            )
             
-            if process and hasattr(process, 'pid'):
-                self.proc = process
-                self.pid = process.pid
-                log(f"{self.name}: Found subprocess PID {self.pid}")
+            # OAuth redirect and callback handlers for interactive authentication
+            async def handle_redirect(auth_url: str):
+                """Handle OAuth authorization redirect - open browser automatically"""
+                import webbrowser
+                import platform
                 
-                # If the process has stderr available, monitor it
-                if hasattr(process, 'stderr') and process.stderr:
-                    log(f"{self.name}: Starting stderr monitoring")
-                    self._stderr_task = asyncio.create_task(self._monitor_stderr(process.stderr))
-                else:
-                    log(f"{self.name}: No stderr available for monitoring")
-            else:
-                log(f"{self.name}: Could not access subprocess for stderr monitoring")
+                log(f"{self.name}: OAuth authentication required")
+                log(f"{self.name}: Opening browser for authorization...")
                 
-        except Exception as e:
-            log(f"{self.name}: Failed to setup stdio monitoring: {e}")
-
-    async def _create_stderr_wrapper(self, command: str, args: list) -> str:
-        """Create a wrapper script that captures stderr for a stdio server."""
-        try:
-            # Create wrapper script path
-            wrapper_path = f"/tmp/mcp_{self.name}_wrapper.sh"
-            log_file_path = f"/tmp/mcp_{self.name}_stderr.log"
-            
-            # Build the command with proper escaping
-            escaped_args = [shlex.quote(arg) for arg in args]
-            full_command = f"{shlex.quote(command)} {' '.join(escaped_args)}"
-            
-            # Create wrapper script content
-            wrapper_content = f"""#!/bin/bash
-
-# Auto-generated stderr capture wrapper for MCP server: {self.name}
-SERVER_NAME="{self.name}"
-LOG_FILE="{log_file_path}"
-
-# Clean up old log file
-rm -f "$LOG_FILE"
-
-# Write initial marker
-echo "[$SERVER_NAME] Starting MCP server..." >> "$LOG_FILE"
-
-# Execute the actual server with stderr redirected to log file only
-# We preserve stdin/stdout for MCP protocol and only redirect stderr
-exec {full_command} 2>> "$LOG_FILE"
-"""
-
-            # Write wrapper script
-            with open(wrapper_path, 'w') as f:
-                f.write(wrapper_content)
-                
-            # Make executable
-            os.chmod(wrapper_path, 0o755)
-            
-            log(f"{self.name}: Created stderr wrapper: {wrapper_path}")
-            return wrapper_path
-            
-        except Exception as e:
-            log(f"{self.name}: Failed to create stderr wrapper: {e}")
-            # Fall back to original command
-            return command
-
-    async def _monitor_stderr(self, stderr_stream):
-        """Monitor stderr stream and capture output."""
-        try:
-            buffer = b""
-            while True:
                 try:
-                    # Read from stderr stream
-                    chunk = await stderr_stream.read(1024)
-                    if not chunk:
-                        break  # EOF - process ended
+                    # Try to open the browser automatically
+                    if platform.system() == "Darwin":  # macOS
+                        os.system(f'open "{auth_url}"')
+                    elif platform.system() == "Windows":
+                        os.system(f'start "" "{auth_url}"')
+                    else:  # Linux
+                        os.system(f'xdg-open "{auth_url}"')
                     
-                    buffer += chunk
+                    log(f"{self.name}: Browser opened. Please complete authorization and return to this application.")
+                except Exception as e:
+                    log(f"{self.name}: Could not open browser automatically: {e}")
+                    log(f"{self.name}: Please manually visit: {auth_url}")
+                
+            async def handle_callback():
+                """Handle OAuth callback - automatic local server approach"""
+                log(f"{self.name}: Starting local callback server...")
+                
+                try:
+                    # Start a temporary local HTTP server for OAuth callback
+                    import asyncio
+                    from aiohttp import web, ClientTimeout
+                    import socket
                     
-                    # Process complete lines
-                    while b'\n' in buffer:
-                        line, buffer = buffer.split(b'\n', 1)
-                        decoded = line.decode('utf-8', errors='replace').rstrip()
+                    # Find an available port automatically
+                    def find_free_port():
+                        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                            s.bind(('', 0))
+                            s.listen(1)
+                            port = s.getsockname()[1]
+                        return port
+                    
+                    callback_port = find_free_port()
+                    callback_data = {"code": None, "state": None, "error": None}
+                    
+                    async def callback_handler(request):
+                        """Handle the OAuth callback request"""
+                        callback_data["code"] = request.query.get("code")
+                        callback_data["state"] = request.query.get("state") 
+                        callback_data["error"] = request.query.get("error")
                         
-                        if decoded:
-                            # Create prefixed line for both console and buffer
-                            prefixed_line = f"[{self.name}:stderr] {decoded}"
-                            print(prefixed_line, flush=True)
+                        if callback_data["code"]:
+                            html = """
+                            <html><body style="font-family: Arial, sans-serif; text-align: center; padding: 50px;">
+                                <h2 style="color: green;">✅ Authorization Successful!</h2>
+                                <p>You can close this window and return to Fractalic.</p>
+                                <script>setTimeout(() => window.close(), 3000);</script>
+                            </body></html>
+                            """
+                        else:
+                            html = f"""
+                            <html><body style="font-family: Arial, sans-serif; text-align: center; padding: 50px;">
+                                <h2 style="color: red;">❌ Authorization Failed</h2>
+                                <p>Error: {callback_data['error']}</p>
+                                <p>Please try again or contact support.</p>
+                            </body></html>
+                            """
                             
-                            # Add to stderr buffer for UI
-                            entry = {
-                                "timestamp": datetime.datetime.now().isoformat(),
-                                "line": prefixed_line
-                            }
-                            self.stderr_buffer.append(entry)
-                            if len(self.stderr_buffer) > self._output_buffer_limit:
-                                del self.stderr_buffer[0:len(self.stderr_buffer) - self._output_buffer_limit]
-                            self.last_output_renewal = entry["timestamp"]
-                            
-                except asyncio.CancelledError:
-                    break
-                except Exception as e:
-                    log(f"{self.name}: Error reading stderr: {e}")
-                    break
+                        return web.Response(text=html, content_type="text/html")
                     
-        except Exception as e:
-            log(f"{self.name}: stderr monitoring error: {e}")
-
-    async def _setup_log_monitoring(self):
-        """Setup monitoring for stderr log file created by wrapper script."""
-        try:
-            # Only monitor stdio servers (HTTP servers don't need stderr capture)
-            if self.transport != "stdio":
-                return
+                    # Create temporary web app
+                    app = web.Application()
+                    app.router.add_get("/callback", callback_handler)
+                    
+                    # Start server on available port
+                    runner = web.AppRunner(app)
+                    await runner.setup()
+                    site = web.TCPSite(runner, "localhost", callback_port)
+                    await site.start()
+                    
+                    callback_url = f"http://localhost:{callback_port}/callback"
+                    log(f"{self.name}: Local callback server started on {callback_url}")
+                    log(f"{self.name}: Waiting for OAuth authorization (timeout: 120s)...")
+                    
+                    # Update redirect URI to use the actual port
+                    client_metadata.redirect_uris = [AnyUrl(callback_url)]
+                    
+                    # Wait for callback with timeout
+                    timeout = 120  # 2 minutes
+                    start_time = time.time()
+                    
+                    while time.time() - start_time < timeout:
+                        if callback_data["code"] or callback_data["error"]:
+                            break
+                        await asyncio.sleep(0.5)
+                    
+                    # Cleanup
+                    await runner.cleanup()
+                    
+                    if callback_data["code"]:
+                        log(f"{self.name}: OAuth authorization successful ✅")
+                        return callback_data["code"], callback_data["state"]
+                    elif callback_data["error"]:
+                        log(f"{self.name}: OAuth authorization failed: {callback_data['error']}")
+                        return "", None
+                    else:
+                        log(f"{self.name}: OAuth authorization timed out")
+                        return "", None
+                        
+                except Exception as e:
+                    log(f"{self.name}: Local callback server failed: {e}")
+                    # Fallback to console input
+                    return await self._console_oauth_callback()
+                    
+            async def _console_oauth_callback(self):
+                """Fallback console-based OAuth callback"""
+                log(f"{self.name}: ============ OAUTH AUTHORIZATION REQUIRED ============")
+                log(f"{self.name}: ")
+                log(f"{self.name}: 🌐 A browser window should have opened automatically.")
+                log(f"{self.name}: 🔐 Please complete the authorization in your browser.")
+                log(f"{self.name}: ")
+                log(f"{self.name}: 📋 AFTER authorizing, the browser will show a URL like:")
+                log(f"{self.name}: 📋 http://localhost:XXXX/callback?code=abc123&state=xyz")
+                log(f"{self.name}: ")
+                log(f"{self.name}: 📝 Copy that ENTIRE URL and paste it below:")
+                log(f"{self.name}: =====================================================")
                 
-            log_file_path = f"/tmp/mcp_{self.name}_stderr.log"
-            
-            # Only monitor if log file monitoring is not already active
-            if not hasattr(self, '_log_monitor_task') or self._log_monitor_task is None:
-                self._log_monitor_task = asyncio.create_task(self._monitor_log_file(log_file_path))
-                log(f"{self.name}: Started log file monitoring: {log_file_path}")
-        except Exception as e:
-            log(f"{self.name}: Failed to setup log monitoring: {e}")
-
-    async def _monitor_log_file(self, log_file_path):
-        """Monitor a log file for new stderr content."""
-        try:
-            last_position = 0
-            
-            while True:
                 try:
-                    # Check if file exists and read new content
-                    if os.path.exists(log_file_path):
-                        with open(log_file_path, 'r', encoding='utf-8', errors='replace') as f:
-                            f.seek(last_position)
-                            new_content = f.read()
-                            last_position = f.tell()
-                            
-                            if new_content:
-                                # Process new lines
-                                lines = new_content.splitlines()
-                                for line in lines:
-                                    if line.strip():
-                                        # Add to stderr buffer
-                                        entry = {
-                                            "timestamp": datetime.datetime.now().isoformat(),
-                                            "line": line  # Line already has server prefix from wrapper
-                                        }
-                                        self.stderr_buffer.append(entry)
-                                        if len(self.stderr_buffer) > self._output_buffer_limit:
-                                            del self.stderr_buffer[0:len(self.stderr_buffer) - self._output_buffer_limit]
-                                        self.last_output_renewal = entry["timestamp"]
+                    import sys
+                    if hasattr(sys, 'ps1'):  # Interactive shell
+                        callback_url = input(f"[{self.name}] 📝 Paste the full callback URL here: ")
+                    else:
+                        log(f"{self.name}: ❌ Non-interactive mode - manual OAuth not supported")
+                        log(f"{self.name}: 💡 Run Fractalic interactively for OAuth authentication")
+                        return "", None
+                        
+                    from urllib.parse import parse_qs, urlparse
+                    parsed = urlparse(callback_url.strip())
+                    params = parse_qs(parsed.query)
                     
-                    # Wait before checking again
-                    await asyncio.sleep(1)
+                    code = params.get("code", [None])[0]
+                    state = params.get("state", [None])[0]
                     
-                except asyncio.CancelledError:
-                    break
+                    if code:
+                        log(f"{self.name}: ✅ Authorization code received successfully!")
+                        return code, state
+                    else:
+                        log(f"{self.name}: ❌ No authorization code found in URL")
+                        log(f"{self.name}: 💡 Make sure you copied the complete URL with ?code=...")
+                        return "", None
+                        
                 except Exception as e:
-                    log(f"{self.name}: Error monitoring log file: {e}")
-                    await asyncio.sleep(5)  # Wait longer on error
-                    
+                    log(f"{self.name}: ❌ Console OAuth callback failed: {e}")
+                    return "", None
+            
+            # Create OAuth provider using SDK with persistent storage
+            oauth_provider = OAuthClientProvider(
+                server_url=self.spec["url"],  # MCP server will provide OAuth endpoints
+                client_metadata=client_metadata,
+                storage=token_storage,  # Use file-based storage
+                redirect_handler=handle_redirect,
+                callback_handler=handle_callback,
+            )
+            
+            log(f"{self.name}: OAuth 2.1 configured with persistent storage at {token_storage.storage_dir}")
+            return oauth_provider
+            
         except Exception as e:
-            log(f"{self.name}: log file monitoring error: {e}")
+            log(f"{self.name}: OAuth setup failed, will try without authentication: {e}")
+            return None
+
+    # REMOVED: All custom STDIO/HTTP code - now handled by MCP SDK
+    # The SDK provides:
+    # - Automatic transport selection (stdio_client, streamablehttp_client, sse_client)
+    # - Built-in error handling and retry logic
+    # - OAuth 2.1 authentication support
+    # - Proper session lifecycle management
 
     async def _loop(self):
         while True:
@@ -1041,221 +1202,125 @@ exec {full_command} 2>> "$LOG_FILE"
 
     async def _ensure_session(self, force=False):
         """
-        Ensures a valid MCP session is available for communication.
-        
-        This method handles session lifecycle management including:
-        - Session reuse when possible to avoid connection overhead
-        - Health checks to verify session validity
-        - Graceful session recreation when needed
-        - Proper cleanup and resource management
-        
-        Args:
-            force (bool): If True, forces creation of a new session even if current one seems valid
+        Create MCP session using the official SDK instead of custom implementation.
+        This replaces all custom transport and session management code.
         """
         
         # STEP 1: Check if we can reuse the existing session
-        # We can reuse if: not forced, session exists, session is fresh, and service is healthy
         if (not force and self.session
                 and time.time() - self.session_at < SESSION_TTL
-                and self.healthy):  # Only reuse if healthy
-            try:
-                # Perform a quick health check on the existing session
-                # Some MCP servers support ping for lightweight connectivity testing
-                if hasattr(self.session, 'ping'):
-                    await asyncio.wait_for(self.session.ping(), timeout=5)
-                # If ping not available, trust the session is valid (health check will catch issues)
-                return  # Session is good, reuse it
-            except Exception as e:
-                log(f"{self.name}: Session health check failed: {e}, creating new session")
-                force = True  # Force new session creation
-                # Mark this as a temporary reset to preserve cache
-                self._temporary_session_reset = True
+                and self.healthy):
+            return  # Session is good, reuse it
                 
-        # STEP 2: Clean up any existing session and prepare for new one
-        # Close current session properly and initialize new context manager
+        # STEP 2: Clean up any existing session
         await self._close_session()
-        self._exit_stack = contextlib.AsyncExitStack()
         
         try:
-            # STEP 3: Create appropriate transport based on service configuration
-            # Handle HTTP-based and stdio-based MCP servers differently
+            # STEP 3: Use SDK for transport and session creation
             if self.transport == "http":
-                # HTTP transport: distinguish between SSE and regular HTTP endpoints
-                if "/sse" in self.spec["url"]:
-                    # Server-Sent Events (SSE) client for real-time streaming
-                    # Returns only read_stream and write_stream (no additional info)
-                    read_stream, write_stream = await self._exit_stack.enter_async_context(
-                        sse_client(self.spec["url"])
-                    )
-                else:
-                    # Regular HTTP client for request/response communication
-                    # Returns read_stream, write_stream, and additional connection info
-                    read_stream, write_stream, _ = await self._exit_stack.enter_async_context(
-                        streamablehttp_client(self.spec["url"])
-                    )
-                # Create MCP session using the HTTP streams
-                self.session = await self._exit_stack.enter_async_context(
-                    ClientSession(
-                        read_stream,
-                        write_stream,
-                        client_info={"name": "Fractalic MCP Manager", "version": "0.3.0"},
-                    )
+                # Try without OAuth first, SDK will handle OAuth automatically if required
+                oauth_auth = None
+                
+                try:
+                    # Use SDK's HTTP clients - OAuth will be triggered automatically if needed
+                    if "/sse" in self.spec["url"]:
+                        # SSE transport via SDK
+                        self._transport_context = sse_client(self.spec["url"], auth=oauth_auth)
+                        read_stream, write_stream = await self._transport_context.__aenter__()
+                    else:
+                        # Streamable HTTP transport via SDK
+                        self._transport_context = streamablehttp_client(self.spec["url"], auth=oauth_auth)
+                        read_stream, write_stream, _ = await self._transport_context.__aenter__()
+                
+                except Exception as auth_error:
+                    # Check if this is an OAuth authentication error
+                    if "unauthorized" in str(auth_error).lower() or "401" in str(auth_error):
+                        log(f"{self.name}: Server requires OAuth authentication, setting up...")
+                        oauth_auth = self._setup_oauth_auth()
+                        
+                        # Retry with OAuth
+                        if "/sse" in self.spec["url"]:
+                            self._transport_context = sse_client(self.spec["url"], auth=oauth_auth)
+                            read_stream, write_stream = await self._transport_context.__aenter__()
+                        else:
+                            self._transport_context = streamablehttp_client(self.spec["url"], auth=oauth_auth)
+                            read_stream, write_stream, _ = await self._transport_context.__aenter__()
+                    else:
+                        # Not an auth error, re-raise
+                        raise
+                
+                # Create session using SDK
+                self._session_context = ClientSession(
+                    read_stream,
+                    write_stream,
+                    client_info={"name": "Fractalic MCP Manager", "version": "0.3.0"},
                 )
+                self.session = await self._session_context.__aenter__()
+                
             else:
-                # STDIO transport: communicate with local process via stdin/stdout
-                # This is for MCP servers that run as separate processes
-                
-                # Create stderr capture wrapper for stdio servers
-                original_command = self.spec["command"]
-                original_args = self.spec.get("args", [])
-                wrapper_script = await self._create_stderr_wrapper(original_command, original_args)
-                
-                # Use default stderr (don't interfere with subprocess creation)
-                stdio_ctx = stdio_client(
-                    StdioServerParameters(
-                        command=wrapper_script,
-                        args=[],  # All args are embedded in the wrapper script
-                        env=self.spec.get("env", {})
-                    )
-                    # Note: not using errlog parameter to avoid issues with subprocess creation
+                # STDIO transport via SDK
+                server_params = StdioServerParameters(
+                    command=self.spec["command"],
+                    args=self.spec.get("args", []),
+                    env=self.spec.get("env", {})
                 )
                 
-                # Create transport and session
-                transport = await self._exit_stack.enter_async_context(stdio_ctx)
-                self.session = await self._exit_stack.enter_async_context(
-                    ClientSession(*transport)
-                )
+                # Use SDK's stdio client instead of custom implementation
+                self._transport_context = stdio_client(server_params)
+                read_stream, write_stream = await self._transport_context.__aenter__()
                 
-                # Try to access the subprocess created by stdio_client to monitor stderr
-                # This approach uses process monitoring to capture stderr
-                await self._setup_stdio_monitoring(transport)
-                
-                # Also setup log file monitoring for stderr (fallback approach)
-                await self._setup_log_monitoring()
+                self._session_context = ClientSession(read_stream, write_stream)
+                self.session = await self._session_context.__aenter__()
             
-            # STEP 4: Perform MCP handshake with adaptive timeout handling
-            # The handshake establishes the MCP protocol and confirms server capabilities
-            try:
-                # Use timeout based on service profile (external services get longer timeouts)
-                init_timeout = self.profile.init_timeout
-                    
-                log(f"{self.name}: Starting MCP session initialization (timeout: {init_timeout}s)")
-                await asyncio.wait_for(self.session.initialize(), timeout=init_timeout)
-                log(f"{self.name}: MCP session initialization completed successfully")
-            except asyncio.TimeoutError:
-                # Handshake took too long - likely server is unresponsive
-                error_msg = f"MCP session initialization timed out after {init_timeout}s"
-                log(f"{self.name}: {error_msg}")
-                self.last_error = error_msg
-                raise Exception(error_msg)
-            except Exception as e:
-                # Handle different types of handshake failures with context-aware messaging
-                error_str = str(e).lower()
-                if "500 internal server error" in error_str and self.profile.is_external:
-                    # External API is having issues - this is often temporary
-                    error_msg = f"External service error (HTTP 500): {e}. This is likely a temporary issue with the external API."
-                    log(f"{self.name}: {error_msg}")
-                    self.last_error = error_msg
-                    # For external service errors, mark as retriable
-                    raise Exception(error_msg)
-                else:
-                    # Generic handshake failure - could be protocol mismatch, auth issues, etc.
-                    error_msg = f"MCP session initialization failed: {e}"
-                    log(f"{self.name}: {error_msg}")
-                    self.last_error = error_msg
-                    raise
+            # STEP 4: Initialize session using SDK
+            init_timeout = self.profile.init_timeout
+            log(f"{self.name}: Starting SDK-based MCP session initialization (timeout: {init_timeout}s)")
+            await asyncio.wait_for(self.session.initialize(), timeout=init_timeout)
+            log(f"{self.name}: SDK session initialization completed successfully")
             
             # STEP 5: Mark session as successfully established
-            # Update timestamps and health status after successful handshake
             self.session_at = time.time()
             self.started_at = self.started_at or self.session_at
-            self.healthy = True               # Mark as healthy after successful handshake
-            # Clear temporary reset flag after successful session establishment
-            if hasattr(self, '_temporary_session_reset'):
-                delattr(self, '_temporary_session_reset')
+            self.healthy = True
             
         except Exception as e:
-            # STEP 6: Clean up on any failure during session creation
-            # Ensure we don't leave partial sessions or resources hanging
+            # STEP 6: Clean up on any failure
             await self._close_session()
-            raise
+            error_str = str(e).lower()
+            if "500 internal server error" in error_str and self.profile.is_external:
+                error_msg = f"External service error (HTTP 500): {e}. This is likely a temporary issue with the external API."
+            else:
+                error_msg = f"SDK session initialization failed: {e}"
+            
+            log(f"{self.name}: {error_msg}")
+            self.last_error = error_msg
+            raise Exception(error_msg)
 
     async def _close_session(self):
-        """Close the session and cleanup all resources properly."""
-        try:
-            # Cancel any ongoing tasks first
-            if hasattr(self, '_health') and self._health and not self._health.done():
-                self._health.cancel()
-                with contextlib.suppress(asyncio.CancelledError):
-                    await self._health
-                    
-            # Cancel output capture tasks
-            if self._stdout_task and not self._stdout_task.done():
-                self._stdout_task.cancel()
-                with contextlib.suppress(asyncio.CancelledError):
-                    await self._stdout_task
-                    
-            if self._stderr_task and not self._stderr_task.done():
-                self._stderr_task.cancel()
-                with contextlib.suppress(asyncio.CancelledError):
-                    await self._stderr_task
-                    
-            # Close session - check if it has a close method first
-            if self.session:
-                try:
-                    if hasattr(self.session, 'close'):
-                        await asyncio.wait_for(self.session.close(), timeout=3.0)
-                    else:
-                        # MCP ClientSession doesn't have close method, just clear reference
-                        log(f"{self.name}: Session cleanup (no close method available)")
-                except asyncio.TimeoutError:
-                    log(f"{self.name}: Session close timed out")
-                except Exception as e:
-                    log(f"{self.name}: Error closing session: {e}")
-                    
-            # Close exit stack with better error handling for cross-task issues
-            if self._exit_stack:
-                try:
-                    # Store reference and clear immediately to prevent cross-task access
-                    exit_stack = self._exit_stack
-                    self._exit_stack = None
-                    
-                    # Wrap in shield to prevent cancellation during cleanup
-                    await asyncio.shield(
-                        asyncio.wait_for(exit_stack.aclose(), timeout=5.0)
-                    )
-                except asyncio.TimeoutError:
-                    log(f"{self.name}: Exit stack close timed out")
-                except asyncio.CancelledError:
-                    # Handle cancellation during close gracefully
-                    log(f"{self.name}: Exit stack close was cancelled")
-                except Exception as e:
-                    # Suppress common asyncio context errors that don't affect functionality
-                    error_msg = str(e)
-                    if ("cancel scope" in error_msg or "different task" in error_msg or 
-                        "Attempted to exit cancel scope" in error_msg or
-                        "unhandled errors in a TaskGroup" in error_msg):
-                        # These are common async context errors that don't affect functionality
-                        pass  # Silently ignore these specific errors
-                    else:
-                        log(f"{self.name}: Error closing exit stack: {e}")
-                    
-        except Exception as e:
-            log(f"{self.name}: Error during session cleanup: {e}")
-        finally:
-            # Always reset these regardless of errors
-            self.session = None
-            self._exit_stack = None
-            self._stdout_task = None
-            self._stderr_task = None
-            self._health = None
-            # Only clear cached tools if session was actually broken (not just a health check reset)
-            # Keep cache for temporary reconnections to reduce repeated tool list generation
-            if not hasattr(self, '_temporary_session_reset'):
-                self._cached_tools = None
-                self._tools_cache_time = 0
-            self.session_at = 0.0
-            self.healthy = False
+        """
+        Close MCP session using SDK's cleanup mechanisms.
+        The SDK handles all transport and resource cleanup automatically.
+        """
+        if hasattr(self, '_session_context') and self._session_context:
+            try:
+                await self._session_context.__aexit__(None, None, None)
+            except Exception as e:
+                log(f"{self.name}: Warning during SDK session cleanup: {e}")
+            finally:
+                self._session_context = None
+                
+        if hasattr(self, '_transport_context') and self._transport_context:
+            try:
+                await self._transport_context.__aexit__(None, None, None)
+            except Exception as e:
+                log(f"{self.name}: Warning during SDK transport cleanup: {e}")
+            finally:
+                self._transport_context = None
+                
+        # Reset session state
+        self.session = None
+        self.healthy = False
+        self.session_at = 0.0
 
     async def _health_loop(self):
         # Give newly started processes more time before first health check
@@ -2171,10 +2236,23 @@ def _parser():
     sub.add_parser("kill")
     for v in ("start", "stop", "restart"):
         sc = sub.add_parser(v); sc.add_argument("target")
-    # Add tools-dump command
+    
+    # Tools command
     dump = sub.add_parser("tools-dump")
     dump.add_argument("output_file", help="Path to output JSON file")
     dump.add_argument("target", nargs="?", default="all", help="Optional: server name (default: all)")
+    
+    # OAuth management commands
+    oauth_list = sub.add_parser("oauth-list", help="List OAuth tokens and their status")
+    oauth_list.add_argument("--storage-dir", help="OAuth storage directory (optional)")
+    
+    oauth_migrate = sub.add_parser("oauth-migrate", help="Migrate OAuth tokens for deployment")
+    oauth_migrate.add_argument("source", help="Source directory containing OAuth tokens")
+    oauth_migrate.add_argument("target", help="Target directory for deployment")
+    
+    oauth_setup = sub.add_parser("oauth-setup", help="Setup OAuth for all HTTP servers")
+    oauth_setup.add_argument("--server", help="Setup OAuth for specific server only")
+    
     return p
 
 def main():
@@ -2196,6 +2274,83 @@ def main():
                     json.dump(tools, f, indent=2)
                 print(f"Tools schema dumped to {a.output_file}")
         asyncio.run(dump_tools())
+    elif a.cmd == "oauth-list":
+        # List OAuth tokens
+        tokens = list_oauth_tokens(a.storage_dir)
+        if not tokens:
+            print("No OAuth tokens found.")
+        else:
+            print(f"OAuth tokens in {a.storage_dir or OAUTH_STORAGE_DIR}:")
+            for server_name, info in tokens.items():
+                if "error" in info:
+                    print(f"  ❌ {server_name}: {info['error']}")
+                else:
+                    status = "✅ Valid" if not info["is_expired"] else "⚠️ Expired"
+                    print(f"  {status} {server_name}:")
+                    print(f"     Access Token: {'✓' if info['has_access_token'] else '✗'}")
+                    print(f"     Refresh Token: {'✓' if info['has_refresh_token'] else '✗'}")
+                    if info["expires_at"]:
+                        expires = datetime.datetime.fromtimestamp(info["expires_at"])
+                        print(f"     Expires: {expires.isoformat()}")
+                    print(f"     Last Modified: {info['last_modified']}")
+    elif a.cmd == "oauth-migrate":
+        # Migrate OAuth tokens
+        success = migrate_oauth_tokens(a.source, a.target)
+        if success:
+            print(f"✅ OAuth tokens migrated from {a.source} to {a.target}")
+        else:
+            print(f"❌ OAuth token migration failed")
+            sys.exit(1)
+    elif a.cmd == "oauth-setup":
+        # Setup OAuth for servers
+        print("🔐 OAuth Setup for MCP Servers")
+        print("This will trigger OAuth authentication for HTTP servers...")
+        print("⚠️  Make sure no other Fractalic instance is running!")
+        
+        # Load configuration
+        config_path = os.path.join(os.path.dirname(__file__), "mcp_servers.json")
+        if not os.path.exists(config_path):
+            print(f"❌ Configuration file not found: {config_path}")
+            sys.exit(1)
+            
+        with open(config_path) as f:
+            config = json.load(f)
+            
+        # Find HTTP servers
+        http_servers = []
+        for name, spec in config.get("mcpServers", {}).items():
+            if "url" in spec:  # HTTP server
+                if a.server is None or name == a.server:
+                    http_servers.append((name, spec))
+                    
+        if not http_servers:
+            if a.server:
+                print(f"❌ Server '{a.server}' not found or not an HTTP server")
+            else:
+                print("ℹ️  No HTTP servers found in configuration")
+            sys.exit(0)
+            
+        print(f"Found {len(http_servers)} HTTP server(s) for OAuth setup:")
+        for name, spec in http_servers:
+            print(f"  - {name}: {spec['url']}")
+        print()
+        
+        # Setup OAuth for each server
+        async def setup_oauth():
+            for name, spec in http_servers:
+                print(f"🔑 Setting up OAuth for {name}...")
+                try:
+                    child = Child(name, spec)
+                    # Try to connect - this will trigger OAuth if needed
+                    await child._ensure_session(force=True)
+                    print(f"✅ {name}: OAuth setup completed")
+                    await child.cleanup()
+                except Exception as e:
+                    print(f"❌ {name}: OAuth setup failed: {e}")
+                print()
+                
+        asyncio.run(setup_oauth())
+        print("🎉 OAuth setup completed!")
     else:
         asyncio.run(client_call(a.port, a.cmd, getattr(a, "target", None)))
 
