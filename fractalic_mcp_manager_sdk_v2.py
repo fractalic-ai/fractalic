@@ -1196,6 +1196,44 @@ async def toggle_service_handler(request):
         logger.error(f"Toggle service error: {e}")
         return web.json_response({"error": str(e)}, status=500)
 
+async def list_tools_handler(request):
+    """GET /list_tools - Get all tools from all enabled services (Fractalic compatibility endpoint)"""
+    try:
+        all_tools = []
+        total_token_count = 0
+        
+        for service_name, service in supervisor.config.items():
+            # Only include enabled services
+            if supervisor.service_states.get(service_name, "enabled") == "enabled":
+                try:
+                    tools = await supervisor.get_tools_for_service(service_name)
+                    tools_info = await supervisor.get_tools_info_for_service(service_name)
+                    
+                    # Add service prefix to tool names for uniqueness
+                    for tool in tools:
+                        tool_with_service = {
+                            **tool,
+                            "name": f"{service_name}.{tool['name']}",
+                            "service": service_name,
+                            "original_name": tool['name']
+                        }
+                        all_tools.append(tool_with_service)
+                    
+                    total_token_count += tools_info.get("token_count", 0)
+                    
+                except Exception as e:
+                    logger.warning(f"Failed to get tools for {service_name}: {e}")
+        
+        return web.json_response({
+            "tools": all_tools,
+            "count": len(all_tools),
+            "total_token_count": total_token_count,
+            "services_count": len([s for s in supervisor.service_states.values() if s == "enabled"])
+        })
+    except Exception as e:
+        logger.error(f"List tools error: {e}")
+        return web.json_response({"error": str(e)}, status=500)
+
 async def get_tools_handler(request):
     """GET /tools/{name} - Get tools for a service with count and token information"""
     service_name = request.match_info['name']
@@ -1257,6 +1295,7 @@ def create_app():
     
     # API routes
     app.router.add_get('/status', status_handler)
+    app.router.add_get('/list_tools', list_tools_handler)  # Fractalic compatibility endpoint
     app.router.add_post('/toggle/{name}', toggle_service_handler)
     app.router.add_get('/tools/{name}', get_tools_handler)
     app.router.add_post('/call/{service}/{tool}', call_tool_handler)
