@@ -61,10 +61,9 @@ class ServiceConfig:
         # Auto-detect transport if not specified
         transport = config.get('transport', 'stdio')
         if 'url' in config and transport == 'stdio':
-            if '/sse' in config['url']:
-                transport = 'sse'
-            else:
-                transport = 'http'  # Use streamable HTTP as default for URLs
+            # Always use streamable HTTP for URLs (SSE deprecated since 2025-03-26)
+            # Replicate and other modern MCP servers use Streamable HTTP, not SSE
+            transport = 'http'
         
         return cls(
             name=name,
@@ -434,18 +433,27 @@ class MCPSupervisorV2:
                 if MCP_PROTOCOL_VERSION:
                     headers['MCP-Protocol-Version'] = MCP_PROTOCOL_VERSION
                 
-                # Create OAuth provider dynamically if needed and not already exists
-                oauth_provider = self.oauth_providers.get(service.name)
-                if not oauth_provider and not self._has_embedded_auth(url):
-                    # Create OAuth provider for potential OAuth discovery
-                    oauth_provider = self._create_dynamic_oauth_provider(service.name, url)
+                # For services with saved tokens, use simple token auth instead of OAuth provider
+                oauth_provider = None
+                if service.has_oauth or service_name in self.oauth_providers:
+                    # Try to load existing tokens first
+                    token_storage = FileTokenStorage("oauth_tokens.json", service_name)
+                    tokens = await token_storage.get_tokens()
+                    if tokens:
+                        # Use simple Bearer token authentication
+                        headers['Authorization'] = f'Bearer {tokens.access_token}'
+                        logger.info(f"Using saved Bearer token for {service_name}")
+                    else:
+                        # Fall back to OAuth provider for new authentication
+                        oauth_provider = self.oauth_providers.get(service_name)
+                        if not oauth_provider:
+                            oauth_provider = self._create_dynamic_oauth_provider(service_name, url)
                 
                 # Configure timeouts for OAuth services (especially dynamic ones like Replicate)
                 # SSE client expects float timeouts (seconds) - per SDK issue #936
                 connection_timeout = 3.0  # Connection establishment timeout
-                # Let SDK use default sse_read_timeout
                 
-                logger.info(f"Connecting to {service_name} SSE service with {connection_timeout}s connection timeout, default read timeout")
+                logger.info(f"Connecting to {service_name} SSE service with {connection_timeout}s connection timeout")
                 
                 # Store tools_result outside context manager to handle cleanup timeouts
                 tools_result = None
@@ -701,20 +709,29 @@ class MCPSupervisorV2:
                 if MCP_PROTOCOL_VERSION:
                     headers['MCP-Protocol-Version'] = MCP_PROTOCOL_VERSION
                 
-                oauth_provider = self.oauth_providers.get(service.name)
-                if not oauth_provider and not self._has_embedded_auth(url):
-                    oauth_provider = self._create_dynamic_oauth_provider(service.name, url)
+                # For services with saved tokens, use simple token auth instead of OAuth provider
+                oauth_provider = None
+                if service.has_oauth or service_name in self.oauth_providers:
+                    # Try to load existing tokens first
+                    token_storage = FileTokenStorage("oauth_tokens.json", service_name)
+                    tokens = await token_storage.get_tokens()
+                    if tokens:
+                        # Use simple Bearer token authentication
+                        headers['Authorization'] = f'Bearer {tokens.access_token}'
+                    else:
+                        # Fall back to OAuth provider for new authentication
+                        oauth_provider = self.oauth_providers.get(service_name)
+                        if not oauth_provider:
+                            oauth_provider = self._create_dynamic_oauth_provider(service_name, url)
                 
                 # Configure timeouts for OAuth services (SSE client expects float)
                 connection_timeout = 3.0   # Connection establishment timeout
-                sse_read_timeout = 3.0     # Fast fail, non-blocking
                 
                 async with sse_client(
                     url, 
                     auth=oauth_provider, 
                     headers=headers,
-                    timeout=connection_timeout,
-                    sse_read_timeout=sse_read_timeout
+                    timeout=connection_timeout
                 ) as (read_stream, write_stream):
                     async with ClientSession(read_stream, write_stream) as session:
                         await session.initialize()
@@ -872,22 +889,31 @@ class MCPSupervisorV2:
                 if MCP_PROTOCOL_VERSION:
                     headers['MCP-Protocol-Version'] = MCP_PROTOCOL_VERSION
                 
-                oauth_provider = self.oauth_providers.get(service_name)
-                if not oauth_provider and not self._has_embedded_auth(url):
-                    oauth_provider = self._create_dynamic_oauth_provider(service_name, url)
+                # For services with saved tokens, use simple token auth instead of OAuth provider
+                oauth_provider = None
+                if service.has_oauth or service_name in self.oauth_providers:
+                    # Try to load existing tokens first
+                    token_storage = FileTokenStorage("oauth_tokens.json", service_name)
+                    tokens = await token_storage.get_tokens()
+                    if tokens:
+                        # Use simple Bearer token authentication
+                        headers['Authorization'] = f'Bearer {tokens.access_token}'
+                    else:
+                        # Fall back to OAuth provider for new authentication
+                        oauth_provider = self.oauth_providers.get(service_name)
+                        if not oauth_provider:
+                            oauth_provider = self._create_dynamic_oauth_provider(service_name, url)
                 
                 # Configure timeouts for OAuth services (SSE client expects float)
                 connection_timeout = 3.0   # Shorter connection timeout for tests
-                sse_read_timeout = 3.0     # Fast fail, non-blocking
                 
-                logger.info(f"Testing {service_name} SSE connection with {connection_timeout}s connection timeout, {sse_read_timeout}s read timeout")
+                logger.info(f"Testing {service_name} SSE connection with {connection_timeout}s connection timeout")
                 
                 async with sse_client(
                     url, 
                     auth=oauth_provider, 
                     headers=headers,
-                    timeout=connection_timeout,
-                    sse_read_timeout=sse_read_timeout
+                    timeout=connection_timeout
                 ) as (read_stream, write_stream):
                     async with ClientSession(read_stream, write_stream) as session:
                         await session.initialize()
