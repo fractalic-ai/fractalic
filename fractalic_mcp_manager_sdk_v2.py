@@ -577,6 +577,487 @@ class MCPSupervisorV2:
                     logger.warning(f"Timeout detected for {service_name}. Service may be slow or unresponsive.")
             raise  # Re-raise to be caught by the outer timeout handler
     
+    async def get_service_capabilities(self, service_name: str) -> Dict[str, bool]:
+        """
+        Get server capabilities by connecting and calling initialize().
+        Returns dict with capability flags: {'prompts': bool, 'resources': bool, 'tools': bool}
+        """
+        if service_name not in self.config:
+            return {"prompts": False, "resources": False, "tools": False}
+        
+        # Check if service is enabled before attempting connection
+        if self.service_states.get(service_name, "enabled") == "disabled":
+            logger.debug(f"Service {service_name} is disabled, capabilities unavailable")
+            return {"prompts": False, "resources": False, "tools": False}
+        
+        service = self.config[service_name]
+        
+        try:
+            return await asyncio.wait_for(
+                self._get_service_capabilities_impl(service_name, service), 
+                timeout=3.0  # 3 second timeout - fast fail, non-blocking
+            )
+        except asyncio.TimeoutError:
+            logger.warning(f"Timeout (3s) getting capabilities for {service_name} - fast fail, non-blocking.")
+            return {"prompts": False, "resources": False, "tools": False}
+        except Exception as e:
+            logger.debug(f"Failed to get capabilities for {service_name}: {e}")
+            return {"prompts": False, "resources": False, "tools": False}
+    
+    async def _get_service_capabilities_impl(self, service_name: str, service: ServiceConfig) -> Dict[str, bool]:
+        """Internal implementation of get_service_capabilities"""
+        try:
+            if service.transport == "stdio":
+                # STDIO transport
+                server_params = StdioServerParameters(
+                    command=service.spec['command'],
+                    args=service.spec.get('args', []),
+                    env=service.spec.get('env', {})
+                )
+                
+                async with stdio_client(server_params) as (read_stream, write_stream):
+                    async with ClientSession(read_stream, write_stream) as session:
+                        init_result = await session.initialize()
+                        
+                        # Extract capabilities from initialization result
+                        capabilities = {"prompts": False, "resources": False, "tools": False}
+                        
+                        if hasattr(init_result, 'capabilities') and init_result.capabilities:
+                            server_caps = init_result.capabilities
+                            capabilities["prompts"] = getattr(server_caps, 'prompts', None) is not None
+                            capabilities["resources"] = getattr(server_caps, 'resources', None) is not None  
+                            capabilities["tools"] = getattr(server_caps, 'tools', None) is not None
+                        
+                        return capabilities
+                        
+            elif service.transport == "sse":
+                # SSE transport
+                url = service.spec['url']
+                headers = {}
+                if MCP_PROTOCOL_VERSION:
+                    headers['MCP-Protocol-Version'] = MCP_PROTOCOL_VERSION
+                
+                oauth_provider = None
+                if service.has_oauth or service_name in self.oauth_providers:
+                    token_storage = FileTokenStorage("oauth_tokens.json", service_name)
+                    tokens = await token_storage.get_tokens()
+                    if tokens:
+                        headers['Authorization'] = f'Bearer {tokens.access_token}'
+                    else:
+                        oauth_provider = self.oauth_providers.get(service_name)
+                        if not oauth_provider:
+                            oauth_provider = self._create_dynamic_oauth_provider(service_name, url)
+                
+                connection_timeout = 3.0
+                
+                async with sse_client(
+                    url, 
+                    auth=oauth_provider, 
+                    headers=headers,
+                    timeout=connection_timeout
+                ) as (read_stream, write_stream):
+                    async with ClientSession(read_stream, write_stream) as session:
+                        init_result = await session.initialize()
+                        
+                        # Extract capabilities from initialization result
+                        capabilities = {"prompts": False, "resources": False, "tools": False}
+                        
+                        if hasattr(init_result, 'capabilities') and init_result.capabilities:
+                            server_caps = init_result.capabilities
+                            capabilities["prompts"] = getattr(server_caps, 'prompts', None) is not None
+                            capabilities["resources"] = getattr(server_caps, 'resources', None) is not None  
+                            capabilities["tools"] = getattr(server_caps, 'tools', None) is not None
+                        
+                        return capabilities
+                        
+            elif service.transport == "http":
+                # HTTP transport
+                url = service.spec['url']
+                headers = {}
+                if MCP_PROTOCOL_VERSION:
+                    headers['MCP-Protocol-Version'] = MCP_PROTOCOL_VERSION
+                
+                oauth_provider = self.oauth_providers.get(service_name)
+                if not oauth_provider and not self._has_embedded_auth(url):
+                    oauth_provider = self._create_dynamic_oauth_provider(service_name, url)
+                
+                from datetime import timedelta
+                connection_timeout = timedelta(seconds=3)
+                sse_read_timeout = timedelta(seconds=3)
+                
+                async with streamablehttp_client(
+                    url, 
+                    auth=oauth_provider, 
+                    headers=headers,
+                    timeout=connection_timeout,
+                    sse_read_timeout=sse_read_timeout
+                ) as (read_stream, write_stream, _):
+                    async with ClientSession(read_stream, write_stream) as session:
+                        init_result = await session.initialize()
+                        
+                        # Extract capabilities from initialization result
+                        capabilities = {"prompts": False, "resources": False, "tools": False}
+                        
+                        if hasattr(init_result, 'capabilities') and init_result.capabilities:
+                            server_caps = init_result.capabilities
+                            capabilities["prompts"] = getattr(server_caps, 'prompts', None) is not None
+                            capabilities["resources"] = getattr(server_caps, 'resources', None) is not None  
+                            capabilities["tools"] = getattr(server_caps, 'tools', None) is not None
+                        
+                        return capabilities
+                        
+            else:
+                raise ValueError(f"Unsupported transport: {service.transport}")
+        
+        except Exception as e:
+            logger.debug(f"Error in _get_service_capabilities_impl for {service_name}: {e}")
+            return {"prompts": False, "resources": False, "tools": False}
+
+    async def get_prompts_for_service(self, service_name: str) -> List[Dict[str, Any]]:
+        """Get prompts for a service using per-request session with capability checking"""
+        if service_name not in self.config:
+            return []
+        
+        # Check if service is enabled before attempting connection
+        if self.service_states.get(service_name, "enabled") == "disabled":
+            logger.info(f"Service {service_name} is disabled, skipping prompt retrieval")
+            return []
+        
+        # Check if service supports prompts capability first
+        try:
+            capabilities = await self.get_service_capabilities(service_name)
+            if not capabilities.get("prompts", False):
+                logger.debug(f"Service {service_name} does not support prompts capability")
+                return []
+        except Exception as e:
+            logger.debug(f"Could not check capabilities for {service_name}: {e}")
+            return []
+        
+        service = self.config[service_name]
+        
+        try:
+            return await asyncio.wait_for(
+                self._get_prompts_for_service_impl(service_name, service), 
+                timeout=3.0  # 3 second timeout - fast fail, non-blocking
+            )
+        except asyncio.TimeoutError:
+            logger.warning(f"Timeout (3s) getting prompts for {service_name} - fast fail, non-blocking.")
+            return []
+        except Exception as e:
+            logger.error(f"Failed to get prompts for {service_name}: {e}")
+            return []
+    
+    async def _get_prompts_for_service_impl(self, service_name: str, service: ServiceConfig) -> List[Dict[str, Any]]:
+        """Internal implementation of get_prompts_for_service"""
+        try:
+            if service.transport == "stdio":
+                # STDIO transport
+                server_params = StdioServerParameters(
+                    command=service.spec['command'],
+                    args=service.spec.get('args', []),
+                    env=service.spec.get('env', {})
+                )
+                
+                async with stdio_client(server_params) as (read_stream, write_stream):
+                    async with ClientSession(read_stream, write_stream) as session:
+                        await session.initialize()
+                        
+                        prompts_result = await session.list_prompts()
+                        prompts = []
+                        
+                        for prompt in prompts_result.prompts:
+                            prompt_dict = {
+                                "name": prompt.name,
+                                "description": prompt.description,
+                                "arguments": []
+                            }
+                            
+                            # Include prompt arguments if available
+                            if hasattr(prompt, 'arguments') and prompt.arguments:
+                                for arg in prompt.arguments:
+                                    arg_dict = {
+                                        "name": arg.name,
+                                        "description": getattr(arg, 'description', ''),
+                                        "required": getattr(arg, 'required', False)
+                                    }
+                                    prompt_dict["arguments"].append(arg_dict)
+                            
+                            prompts.append(prompt_dict)
+                        
+                        return prompts
+                        
+            elif service.transport == "sse":
+                # SSE transport
+                url = service.spec['url']
+                headers = {}
+                if MCP_PROTOCOL_VERSION:
+                    headers['MCP-Protocol-Version'] = MCP_PROTOCOL_VERSION
+                
+                oauth_provider = None
+                if service.has_oauth or service_name in self.oauth_providers:
+                    token_storage = FileTokenStorage("oauth_tokens.json", service_name)
+                    tokens = await token_storage.get_tokens()
+                    if tokens:
+                        headers['Authorization'] = f'Bearer {tokens.access_token}'
+                    else:
+                        oauth_provider = self.oauth_providers.get(service_name)
+                        if not oauth_provider:
+                            oauth_provider = self._create_dynamic_oauth_provider(service_name, url)
+                
+                connection_timeout = 3.0
+                
+                async with sse_client(
+                    url, 
+                    auth=oauth_provider, 
+                    headers=headers,
+                    timeout=connection_timeout
+                ) as (read_stream, write_stream):
+                    async with ClientSession(read_stream, write_stream) as session:
+                        await session.initialize()
+                        
+                        prompts_result = await session.list_prompts()
+                        prompts = []
+                        
+                        for prompt in prompts_result.prompts:
+                            prompt_dict = {
+                                "name": prompt.name,
+                                "description": prompt.description,
+                                "arguments": []
+                            }
+                            
+                            if hasattr(prompt, 'arguments') and prompt.arguments:
+                                for arg in prompt.arguments:
+                                    arg_dict = {
+                                        "name": arg.name,
+                                        "description": getattr(arg, 'description', ''),
+                                        "required": getattr(arg, 'required', False)
+                                    }
+                                    prompt_dict["arguments"].append(arg_dict)
+                            
+                            prompts.append(prompt_dict)
+                        
+                        return prompts
+                        
+            elif service.transport == "http":
+                # HTTP transport
+                url = service.spec['url']
+                headers = {}
+                if MCP_PROTOCOL_VERSION:
+                    headers['MCP-Protocol-Version'] = MCP_PROTOCOL_VERSION
+                
+                oauth_provider = self.oauth_providers.get(service_name)
+                if not oauth_provider and not self._has_embedded_auth(url):
+                    oauth_provider = self._create_dynamic_oauth_provider(service_name, url)
+                
+                from datetime import timedelta
+                connection_timeout = timedelta(seconds=3)
+                sse_read_timeout = timedelta(seconds=3)
+                
+                async with streamablehttp_client(
+                    url, 
+                    auth=oauth_provider, 
+                    headers=headers,
+                    timeout=connection_timeout,
+                    sse_read_timeout=sse_read_timeout
+                ) as (read_stream, write_stream, _):
+                    async with ClientSession(read_stream, write_stream) as session:
+                        await session.initialize()
+                        
+                        prompts_result = await session.list_prompts()
+                        prompts = []
+                        
+                        for prompt in prompts_result.prompts:
+                            prompt_dict = {
+                                "name": prompt.name,
+                                "description": prompt.description,
+                                "arguments": []
+                            }
+                            
+                            if hasattr(prompt, 'arguments') and prompt.arguments:
+                                for arg in prompt.arguments:
+                                    arg_dict = {
+                                        "name": arg.name,
+                                        "description": getattr(arg, 'description', ''),
+                                        "required": getattr(arg, 'required', False)
+                                    }
+                                    prompt_dict["arguments"].append(arg_dict)
+                            
+                            prompts.append(prompt_dict)
+                        
+                        return prompts
+                        
+            else:
+                raise ValueError(f"Unsupported transport: {service.transport}")
+        
+        except Exception as e:
+            logger.error(f"Error in _get_prompts_for_service_impl for {service_name}: {e}")
+            raise
+    
+    async def get_resources_for_service(self, service_name: str) -> List[Dict[str, Any]]:
+        """Get resources for a service using per-request session with capability checking"""
+        if service_name not in self.config:
+            return []
+        
+        # Check if service is enabled before attempting connection
+        if self.service_states.get(service_name, "enabled") == "disabled":
+            logger.info(f"Service {service_name} is disabled, skipping resource retrieval")
+            return []
+        
+        # Check if service supports resources capability first
+        try:
+            capabilities = await self.get_service_capabilities(service_name)
+            if not capabilities.get("resources", False):
+                logger.debug(f"Service {service_name} does not support resources capability")
+                return []
+        except Exception as e:
+            logger.debug(f"Could not check capabilities for {service_name}: {e}")
+            return []
+        
+        service = self.config[service_name]
+        
+        try:
+            return await asyncio.wait_for(
+                self._get_resources_for_service_impl(service_name, service), 
+                timeout=3.0  # 3 second timeout - fast fail, non-blocking
+            )
+        except asyncio.TimeoutError:
+            logger.warning(f"Timeout (3s) getting resources for {service_name} - fast fail, non-blocking.")
+            return []
+        except Exception as e:
+            logger.error(f"Failed to get resources for {service_name}: {e}")
+            return []
+    
+    async def _get_resources_for_service_impl(self, service_name: str, service: ServiceConfig) -> List[Dict[str, Any]]:
+        """Internal implementation of get_resources_for_service"""
+        try:
+            if service.transport == "stdio":
+                # STDIO transport
+                server_params = StdioServerParameters(
+                    command=service.spec['command'],
+                    args=service.spec.get('args', []),
+                    env=service.spec.get('env', {})
+                )
+                
+                async with stdio_client(server_params) as (read_stream, write_stream):
+                    async with ClientSession(read_stream, write_stream) as session:
+                        await session.initialize()
+                        
+                        resources_result = await session.list_resources()
+                        resources = []
+                        
+                        for resource in resources_result.resources:
+                            resource_dict = {
+                                "uri": str(resource.uri),
+                                "name": resource.name,
+                                "description": getattr(resource, 'description', ''),
+                                "mimeType": getattr(resource, 'mimeType', None)
+                            }
+                            
+                            # Include annotations if available
+                            if hasattr(resource, 'annotations') and resource.annotations:
+                                resource_dict["annotations"] = resource.annotations
+                            
+                            resources.append(resource_dict)
+                        
+                        return resources
+                        
+            elif service.transport == "sse":
+                # SSE transport
+                url = service.spec['url']
+                headers = {}
+                if MCP_PROTOCOL_VERSION:
+                    headers['MCP-Protocol-Version'] = MCP_PROTOCOL_VERSION
+                
+                oauth_provider = None
+                if service.has_oauth or service_name in self.oauth_providers:
+                    token_storage = FileTokenStorage("oauth_tokens.json", service_name)
+                    tokens = await token_storage.get_tokens()
+                    if tokens:
+                        headers['Authorization'] = f'Bearer {tokens.access_token}'
+                    else:
+                        oauth_provider = self.oauth_providers.get(service_name)
+                        if not oauth_provider:
+                            oauth_provider = self._create_dynamic_oauth_provider(service_name, url)
+                
+                connection_timeout = 3.0
+                
+                async with sse_client(
+                    url, 
+                    auth=oauth_provider, 
+                    headers=headers,
+                    timeout=connection_timeout
+                ) as (read_stream, write_stream):
+                    async with ClientSession(read_stream, write_stream) as session:
+                        await session.initialize()
+                        
+                        resources_result = await session.list_resources()
+                        resources = []
+                        
+                        for resource in resources_result.resources:
+                            resource_dict = {
+                                "uri": str(resource.uri),
+                                "name": resource.name,
+                                "description": getattr(resource, 'description', ''),
+                                "mimeType": getattr(resource, 'mimeType', None)
+                            }
+                            
+                            if hasattr(resource, 'annotations') and resource.annotations:
+                                resource_dict["annotations"] = resource.annotations
+                            
+                            resources.append(resource_dict)
+                        
+                        return resources
+                        
+            elif service.transport == "http":
+                # HTTP transport
+                url = service.spec['url']
+                headers = {}
+                if MCP_PROTOCOL_VERSION:
+                    headers['MCP-Protocol-Version'] = MCP_PROTOCOL_VERSION
+                
+                oauth_provider = self.oauth_providers.get(service_name)
+                if not oauth_provider and not self._has_embedded_auth(url):
+                    oauth_provider = self._create_dynamic_oauth_provider(service_name, url)
+                
+                from datetime import timedelta
+                connection_timeout = timedelta(seconds=3)
+                sse_read_timeout = timedelta(seconds=3)
+                
+                async with streamablehttp_client(
+                    url, 
+                    auth=oauth_provider, 
+                    headers=headers,
+                    timeout=connection_timeout,
+                    sse_read_timeout=sse_read_timeout
+                ) as (read_stream, write_stream, _):
+                    async with ClientSession(read_stream, write_stream) as session:
+                        await session.initialize()
+                        
+                        resources_result = await session.list_resources()
+                        resources = []
+                        
+                        for resource in resources_result.resources:
+                            resource_dict = {
+                                "uri": str(resource.uri),
+                                "name": resource.name,
+                                "description": getattr(resource, 'description', ''),
+                                "mimeType": getattr(resource, 'mimeType', None)
+                            }
+                            
+                            if hasattr(resource, 'annotations') and resource.annotations:
+                                resource_dict["annotations"] = resource.annotations
+                            
+                            resources.append(resource_dict)
+                        
+                        return resources
+                        
+            else:
+                raise ValueError(f"Unsupported transport: {service.transport}")
+        
+        except Exception as e:
+            logger.error(f"Error in _get_resources_for_service_impl for {service_name}: {e}")
+            raise
+    
     async def get_tools_info_for_service(self, service_name: str) -> Dict[str, Any]:
         """
         Get tool count and token count for a specific service.
@@ -843,6 +1324,368 @@ class MCPSupervisorV2:
                 
         except Exception as e:
             logger.error(f"Failed to call tool {tool_name} for {service_name}: {e}")
+            raise
+    
+    async def get_prompt_for_service(self, service_name: str, prompt_name: str, arguments: Dict[str, str] = None) -> Dict[str, Any]:
+        """Get prompt content for a service using per-request session"""
+        if service_name not in self.config:
+            raise ValueError(f"Service {service_name} not found")
+        
+        service = self.config[service_name]
+        
+        try:
+            if service.transport == "stdio":
+                # STDIO transport
+                server_params = StdioServerParameters(
+                    command=service.spec['command'],
+                    args=service.spec.get('args', []),
+                    env=service.spec.get('env', {})
+                )
+                
+                async with stdio_client(server_params) as (read_stream, write_stream):
+                    async with ClientSession(read_stream, write_stream) as session:
+                        await session.initialize()
+                        
+                        result = await session.get_prompt(prompt_name, arguments or {})
+                        
+                        # Format prompt response
+                        response = {
+                            "description": getattr(result, 'description', ''),
+                            "messages": []
+                        }
+                        
+                        # Handle prompt messages
+                        for message in result.messages:
+                            msg_dict = {
+                                "role": message.role.value if hasattr(message.role, 'value') else str(message.role),
+                                "content": []
+                            }
+                            
+                            # Handle message content
+                            for content in message.content:
+                                if hasattr(content, 'text'):
+                                    msg_dict["content"].append({
+                                        "type": "text",
+                                        "text": content.text
+                                    })
+                                elif hasattr(content, 'data'):
+                                    msg_dict["content"].append({
+                                        "type": "image",
+                                        "data": content.data,
+                                        "mimeType": getattr(content, 'mimeType', 'image/png')
+                                    })
+                                elif hasattr(content, 'resource'):
+                                    msg_dict["content"].append({
+                                        "type": "resource",
+                                        "resource": {
+                                            "uri": content.resource.uri,
+                                            "text": getattr(content.resource, 'text', None),
+                                            "blob": getattr(content.resource, 'blob', None)
+                                        }
+                                    })
+                            
+                            response["messages"].append(msg_dict)
+                        
+                        return response
+                        
+            elif service.transport == "sse":
+                # SSE transport
+                url = service.spec['url']
+                headers = {}
+                if MCP_PROTOCOL_VERSION:
+                    headers['MCP-Protocol-Version'] = MCP_PROTOCOL_VERSION
+                
+                oauth_provider = None
+                if service.has_oauth or service_name in self.oauth_providers:
+                    token_storage = FileTokenStorage("oauth_tokens.json", service_name)
+                    tokens = await token_storage.get_tokens()
+                    if tokens:
+                        headers['Authorization'] = f'Bearer {tokens.access_token}'
+                    else:
+                        oauth_provider = self.oauth_providers.get(service_name)
+                        if not oauth_provider:
+                            oauth_provider = self._create_dynamic_oauth_provider(service_name, url)
+                
+                connection_timeout = 3.0
+                
+                async with sse_client(
+                    url, 
+                    auth=oauth_provider, 
+                    headers=headers,
+                    timeout=connection_timeout
+                ) as (read_stream, write_stream):
+                    async with ClientSession(read_stream, write_stream) as session:
+                        await session.initialize()
+                        
+                        result = await session.get_prompt(prompt_name, arguments or {})
+                        
+                        # Format prompt response (same as stdio)
+                        response = {
+                            "description": getattr(result, 'description', ''),
+                            "messages": []
+                        }
+                        
+                        for message in result.messages:
+                            msg_dict = {
+                                "role": message.role.value if hasattr(message.role, 'value') else str(message.role),
+                                "content": []
+                            }
+                            
+                            for content in message.content:
+                                if hasattr(content, 'text'):
+                                    msg_dict["content"].append({
+                                        "type": "text",
+                                        "text": content.text
+                                    })
+                                elif hasattr(content, 'data'):
+                                    msg_dict["content"].append({
+                                        "type": "image",
+                                        "data": content.data,
+                                        "mimeType": getattr(content, 'mimeType', 'image/png')
+                                    })
+                                elif hasattr(content, 'resource'):
+                                    msg_dict["content"].append({
+                                        "type": "resource",
+                                        "resource": {
+                                            "uri": content.resource.uri,
+                                            "text": getattr(content.resource, 'text', None),
+                                            "blob": getattr(content.resource, 'blob', None)
+                                        }
+                                    })
+                            
+                            response["messages"].append(msg_dict)
+                        
+                        return response
+                        
+            elif service.transport == "http":
+                # HTTP transport
+                url = service.spec['url']
+                headers = {}
+                if MCP_PROTOCOL_VERSION:
+                    headers['MCP-Protocol-Version'] = MCP_PROTOCOL_VERSION
+                
+                oauth_provider = self.oauth_providers.get(service_name)
+                if not oauth_provider and not self._has_embedded_auth(url):
+                    oauth_provider = self._create_dynamic_oauth_provider(service_name, url)
+                
+                from datetime import timedelta
+                connection_timeout = timedelta(seconds=3)
+                sse_read_timeout = timedelta(seconds=3)
+                
+                async with streamablehttp_client(
+                    url, 
+                    auth=oauth_provider, 
+                    headers=headers,
+                    timeout=connection_timeout,
+                    sse_read_timeout=sse_read_timeout
+                ) as (read_stream, write_stream, _):
+                    async with ClientSession(read_stream, write_stream) as session:
+                        await session.initialize()
+                        
+                        result = await session.get_prompt(prompt_name, arguments or {})
+                        
+                        # Format prompt response (same as stdio)
+                        response = {
+                            "description": getattr(result, 'description', ''),
+                            "messages": []
+                        }
+                        
+                        for message in result.messages:
+                            msg_dict = {
+                                "role": message.role.value if hasattr(message.role, 'value') else str(message.role),
+                                "content": []
+                            }
+                            
+                            for content in message.content:
+                                if hasattr(content, 'text'):
+                                    msg_dict["content"].append({
+                                        "type": "text",
+                                        "text": content.text
+                                    })
+                                elif hasattr(content, 'data'):
+                                    msg_dict["content"].append({
+                                        "type": "image",
+                                        "data": content.data,
+                                        "mimeType": getattr(content, 'mimeType', 'image/png')
+                                    })
+                                elif hasattr(content, 'resource'):
+                                    msg_dict["content"].append({
+                                        "type": "resource",
+                                        "resource": {
+                                            "uri": content.resource.uri,
+                                            "text": getattr(content.resource, 'text', None),
+                                            "blob": getattr(content.resource, 'blob', None)
+                                        }
+                                    })
+                            
+                            response["messages"].append(msg_dict)
+                        
+                        return response
+                        
+            else:
+                raise ValueError(f"Unsupported transport: {service.transport}")
+                
+        except Exception as e:
+            logger.error(f"Failed to get prompt {prompt_name} for {service_name}: {e}")
+            raise
+    
+    async def read_resource_for_service(self, service_name: str, resource_uri: str) -> Dict[str, Any]:
+        """Read resource content for a service using per-request session"""
+        if service_name not in self.config:
+            raise ValueError(f"Service {service_name} not found")
+        
+        service = self.config[service_name]
+        
+        try:
+            uri = AnyUrl(resource_uri)
+            
+            if service.transport == "stdio":
+                # STDIO transport
+                server_params = StdioServerParameters(
+                    command=service.spec['command'],
+                    args=service.spec.get('args', []),
+                    env=service.spec.get('env', {})
+                )
+                
+                async with stdio_client(server_params) as (read_stream, write_stream):
+                    async with ClientSession(read_stream, write_stream) as session:
+                        await session.initialize()
+                        
+                        result = await session.read_resource(uri)
+                        
+                        # Format resource response
+                        response = {
+                            "uri": resource_uri,
+                            "contents": []
+                        }
+                        
+                        # Handle resource contents
+                        for content in result.contents:
+                            if hasattr(content, 'text'):
+                                response["contents"].append({
+                                    "type": "text",
+                                    "text": content.text,
+                                    "uri": getattr(content, 'uri', resource_uri)
+                                })
+                            elif hasattr(content, 'blob'):
+                                response["contents"].append({
+                                    "type": "blob",
+                                    "blob": content.blob,
+                                    "mimeType": getattr(content, 'mimeType', 'application/octet-stream'),
+                                    "uri": getattr(content, 'uri', resource_uri)
+                                })
+                        
+                        return response
+                        
+            elif service.transport == "sse":
+                # SSE transport
+                url = service.spec['url']
+                headers = {}
+                if MCP_PROTOCOL_VERSION:
+                    headers['MCP-Protocol-Version'] = MCP_PROTOCOL_VERSION
+                
+                oauth_provider = None
+                if service.has_oauth or service_name in self.oauth_providers:
+                    token_storage = FileTokenStorage("oauth_tokens.json", service_name)
+                    tokens = await token_storage.get_tokens()
+                    if tokens:
+                        headers['Authorization'] = f'Bearer {tokens.access_token}'
+                    else:
+                        oauth_provider = self.oauth_providers.get(service_name)
+                        if not oauth_provider:
+                            oauth_provider = self._create_dynamic_oauth_provider(service_name, url)
+                
+                connection_timeout = 3.0
+                
+                async with sse_client(
+                    url, 
+                    auth=oauth_provider, 
+                    headers=headers,
+                    timeout=connection_timeout
+                ) as (read_stream, write_stream):
+                    async with ClientSession(read_stream, write_stream) as session:
+                        await session.initialize()
+                        
+                        result = await session.read_resource(uri)
+                        
+                        # Format resource response (same as stdio)
+                        response = {
+                            "uri": resource_uri,
+                            "contents": []
+                        }
+                        
+                        for content in result.contents:
+                            if hasattr(content, 'text'):
+                                response["contents"].append({
+                                    "type": "text",
+                                    "text": content.text,
+                                    "uri": getattr(content, 'uri', resource_uri)
+                                })
+                            elif hasattr(content, 'blob'):
+                                response["contents"].append({
+                                    "type": "blob",
+                                    "blob": content.blob,
+                                    "mimeType": getattr(content, 'mimeType', 'application/octet-stream'),
+                                    "uri": getattr(content, 'uri', resource_uri)
+                                })
+                        
+                        return response
+                        
+            elif service.transport == "http":
+                # HTTP transport
+                url = service.spec['url']
+                headers = {}
+                if MCP_PROTOCOL_VERSION:
+                    headers['MCP-Protocol-Version'] = MCP_PROTOCOL_VERSION
+                
+                oauth_provider = self.oauth_providers.get(service_name)
+                if not oauth_provider and not self._has_embedded_auth(url):
+                    oauth_provider = self._create_dynamic_oauth_provider(service_name, url)
+                
+                from datetime import timedelta
+                connection_timeout = timedelta(seconds=3)
+                sse_read_timeout = timedelta(seconds=3)
+                
+                async with streamablehttp_client(
+                    url, 
+                    auth=oauth_provider, 
+                    headers=headers,
+                    timeout=connection_timeout,
+                    sse_read_timeout=sse_read_timeout
+                ) as (read_stream, write_stream, _):
+                    async with ClientSession(read_stream, write_stream) as session:
+                        await session.initialize()
+                        
+                        result = await session.read_resource(uri)
+                        
+                        # Format resource response (same as stdio)
+                        response = {
+                            "uri": resource_uri,
+                            "contents": []
+                        }
+                        
+                        for content in result.contents:
+                            if hasattr(content, 'text'):
+                                response["contents"].append({
+                                    "type": "text",
+                                    "text": content.text,
+                                    "uri": getattr(content, 'uri', resource_uri)
+                                })
+                            elif hasattr(content, 'blob'):
+                                response["contents"].append({
+                                    "type": "blob",
+                                    "blob": content.blob,
+                                    "mimeType": getattr(content, 'mimeType', 'application/octet-stream'),
+                                    "uri": getattr(content, 'uri', resource_uri)
+                                })
+                        
+                        return response
+                        
+            else:
+                raise ValueError(f"Unsupported transport: {service.transport}")
+                
+        except Exception as e:
+            logger.error(f"Failed to read resource {resource_uri} for {service_name}: {e}")
             raise
     
     async def test_service_connection(self, service_name: str) -> bool:
@@ -1273,6 +2116,84 @@ async def call_tool_handler(request):
         logger.error(f"Call tool error: {e}")
         return web.json_response({"error": str(e)}, status=500)
 
+async def list_prompts_handler(request):
+    """GET /list_prompts - Get all prompts from all enabled services"""
+    try:
+        services_response = {}
+        
+        for service_name, service in supervisor.config.items():
+            # Check if service is enabled
+            if supervisor.service_states.get(service_name, "enabled") == "disabled":
+                continue
+                
+            try:
+                prompts = await supervisor.get_prompts_for_service(service_name)
+                if prompts:
+                    services_response[service_name] = {"prompts": prompts}
+            except Exception as e:
+                logger.warning(f"Failed to get prompts for {service_name}: {e}")
+                services_response[service_name] = {"error": str(e), "prompts": []}
+        
+        return web.json_response(services_response)
+    except Exception as e:
+        logger.error(f"List prompts error: {e}")
+        return web.json_response({"error": str(e)}, status=500)
+
+async def get_prompt_handler(request):
+    """POST /prompt/{service}/{prompt} - Get prompt content with arguments"""
+    service_name = request.match_info['service']
+    prompt_name = request.match_info['prompt']
+    
+    try:
+        data = await request.json()
+        arguments = data.get('arguments', {})
+        
+        result = await supervisor.get_prompt_for_service(service_name, prompt_name, arguments)
+        return web.json_response(result)
+    except Exception as e:
+        logger.error(f"Get prompt error: {e}")
+        return web.json_response({"error": str(e)}, status=500)
+
+async def list_resources_handler(request):
+    """GET /list_resources - Get all resources from all enabled services"""
+    try:
+        services_response = {}
+        
+        for service_name, service in supervisor.config.items():
+            # Check if service is enabled
+            if supervisor.service_states.get(service_name, "enabled") == "disabled":
+                continue
+                
+            try:
+                resources = await supervisor.get_resources_for_service(service_name)
+                if resources:
+                    services_response[service_name] = {"resources": resources}
+            except Exception as e:
+                logger.warning(f"Failed to get resources for {service_name}: {e}")
+                services_response[service_name] = {"error": str(e), "resources": []}
+        
+        return web.json_response(services_response)
+    except Exception as e:
+        logger.error(f"List resources error: {e}")
+        return web.json_response({"error": str(e)}, status=500)
+
+async def read_resource_handler(request):
+    """POST /resource/{service}/read - Read resource content by URI"""
+    service_name = request.match_info['service']
+    
+    try:
+        data = await request.json()
+        resource_uri = data.get('uri')
+        
+        if not resource_uri:
+            return web.json_response({"error": "Missing 'uri' parameter"}, status=400)
+        
+        result = await supervisor.read_resource_for_service(service_name, resource_uri)
+        return web.json_response(result)
+    except Exception as e:
+        logger.error(f"Read resource error: {e}")
+        return web.json_response({"error": str(e)}, status=500)
+
 async def oauth_start_handler(request):
     """POST /oauth/start/{service} - Start OAuth flow for a service"""
     service_name = request.match_info['service']
@@ -1299,6 +2220,13 @@ def create_app():
     app.router.add_post('/toggle/{name}', toggle_service_handler)
     app.router.add_get('/tools/{name}', get_tools_handler)
     app.router.add_post('/call/{service}/{tool}', call_tool_handler)
+    
+    # MCP Full Feature Set routes
+    app.router.add_get('/list_prompts', list_prompts_handler)
+    app.router.add_post('/prompt/{service}/{prompt}', get_prompt_handler)
+    app.router.add_get('/list_resources', list_resources_handler)
+    app.router.add_post('/resource/{service}/read', read_resource_handler)
+    
     app.router.add_post('/oauth/start/{service}', oauth_start_handler)
     
     # OAuth callback route
