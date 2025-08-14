@@ -556,6 +556,27 @@ class MCPSupervisorV2:
         indicators = ('/oauth', '/auth', '/authorize', '/token', 'login.', 'accounts.', 'signin')
         return any(ind in path or ind in domain for ind in indicators)
 
+    def _has_embedded_auth(self, url: str) -> bool:
+        """Detect if URL already contains embedded authentication material.
+
+        This prevents us from attempting to create an OAuth provider for endpoints that
+        already embed credentials (user:pass@host) or API key query parameters. We keep
+        this intentionally lightweight; absence never blocks dynamic OAuth creation.
+        """
+        if not url:
+            return False
+        from urllib.parse import urlparse, parse_qs
+        try:
+            p = urlparse(url)
+            if '@' in p.netloc:
+                return True  # user:pass@host style
+            qs = parse_qs(p.query)
+            # Common api key param names (extendable)
+            key_markers = {'api_key', 'apikey', 'token', 'auth', 'key'}
+            return any(k.lower() in key_markers for k in qs.keys())
+        except Exception:
+            return False
+
     # Adaptive timeout metrics helpers (generic)
     def _record_timeout(self, service_name: str):
         m = getattr(self, 'service_metrics', None)
@@ -2108,12 +2129,13 @@ async def oauth_start_handler(request):
         return web.json_response({"error": "Service does not support OAuth"}, status=400)
     
     try:
-        # OAuth flow will be triggered when the service is first accessed
-        # For now, just test the service connection which will trigger OAuth if needed
         success = await supervisor.test_service_connection(service_name)
+        # Structured log
+        supervisor._log_event(service_name, "oauth_start", supervisor.config.get(service_name).transport if service_name in supervisor.config else None, time.perf_counter(), status="ok" if success else "pending")
         return web.json_response({"oauth_started": True, "service": service_name, "success": success})
     except Exception as e:
         logger.error(f"OAuth start error: {e}")
+        supervisor._log_event(service_name, "oauth_start", supervisor.config.get(service_name).transport if service_name in supervisor.config else None, time.perf_counter(), status="error", error=type(e).__name__)
         return web.json_response({"error": str(e)}, status=500)
 
 async def oauth_reset_handler(request):
@@ -2123,12 +2145,14 @@ async def oauth_reset_handler(request):
         return web.json_response({"error": "Service not found"}, status=404)
     try:
         success = await supervisor.reset_oauth_tokens(service_name)
+        supervisor._log_event(service_name, "oauth_reset", supervisor.config.get(service_name).transport if service_name in supervisor.config else None, time.perf_counter(), status="ok" if success else "failed")
         return web.json_response({
             "service": service_name,
             "reset": success
         }, status=200 if success else 500)
     except Exception as e:
         logger.error(f"OAuth reset error: {e}")
+        supervisor._log_event(service_name, "oauth_reset", supervisor.config.get(service_name).transport if service_name in supervisor.config else None, time.perf_counter(), status="error", error=type(e).__name__)
         return web.json_response({"error": str(e)}, status=500)
 
 async def oauth_authorize_handler(request):
@@ -2139,9 +2163,10 @@ async def oauth_authorize_handler(request):
     try:
         ensured = supervisor.ensure_oauth_provider(service_name)
         if not ensured:
+            supervisor._log_event(service_name, "oauth_authorize", supervisor.config.get(service_name).transport if service_name in supervisor.config else None, time.perf_counter(), status="error", error="provider_create_failed")
             return web.json_response({"error": "Could not create OAuth provider"}, status=500)
-        # Trigger flow: test connection (will 401 -> browser redirect)
         started = await supervisor.test_service_connection(service_name)
+        supervisor._log_event(service_name, "oauth_authorize", supervisor.config.get(service_name).transport if service_name in supervisor.config else None, time.perf_counter(), status="ok" if started else "pending")
         return web.json_response({
             "service": service_name,
             "authorization_triggered": True,
@@ -2149,6 +2174,7 @@ async def oauth_authorize_handler(request):
         })
     except Exception as e:
         logger.error(f"OAuth authorize error: {e}")
+        supervisor._log_event(service_name, "oauth_authorize", supervisor.config.get(service_name).transport if service_name in supervisor.config else None, time.perf_counter(), status="error", error=type(e).__name__)
         return web.json_response({"error": str(e)}, status=500)
 
 def create_app():
@@ -2178,8 +2204,15 @@ def create_app():
     
     return app
 
-async def serve(port: int = 5859, host: str = '0.0.0.0'):
-    """Run the HTTP server on specified host/port (default 0.0.0.0:5859)"""
+async def serve(port: int = 5859, host: str = '0.0.0.0', disable_signals: bool = False):
+    """Run the HTTP server on specified host/port (default 0.0.0.0:5859).
+
+    Revised signal handling: instead of raising KeyboardInterrupt from inside a signal
+    handler (which can surface as 'weird' SIGINT traces), we set an asyncio.Event and
+    allow the main coroutine to unwind gracefully. This avoids spurious stack traces
+    and makes shutdown idempotent. Pass disable_signals=True to skip registration
+    (useful under certain orchestrators / test harnesses).
+    """
     import signal
     # Force working directory to repository root so relative paths (config, tokens) are consistent
     try:
@@ -2188,17 +2221,17 @@ async def serve(port: int = 5859, host: str = '0.0.0.0'):
             logger.info(f"Changed working directory to repo root: {ROOT_DIR}")
     except Exception as _cwd_e:
         logger.warning(f"Could not change working directory to root: {_cwd_e}")
-    
+
     app = create_app()
     runner = web.AppRunner(app)
     await runner.setup()
-    
+
     site = web.TCPSite(runner, host, port)
     await site.start()
-    
+
     logger.info(f"MCP Manager V2 started on http://{host}:{port}")
     logger.info("Per-request session pattern - no persistent connections")
-    
+
     # Populate initial tools cache asynchronously so server can accept requests immediately
     async def _background_cache():
         try:
@@ -2207,23 +2240,35 @@ async def serve(port: int = 5859, host: str = '0.0.0.0'):
             logger.error(f"Initial cache population failed: {e}")
     asyncio.create_task(_background_cache())
     logger.info("Initial cache population started in background")
-    
-    # Proper signal handling
-    def signal_handler(signum, frame):
-        logger.info("Received interrupt signal, shutting down...")
-        raise KeyboardInterrupt()
-    
-    signal.signal(signal.SIGINT, signal_handler)
-    signal.signal(signal.SIGTERM, signal_handler)
-    
+
+    shutdown_event = asyncio.Event()
+
+    def _graceful(sig: int, frame=None):  # frame kept for signal API compatibility
+        try:
+            if not shutdown_event.is_set():
+                logger.info(f"Signal {signal.Signals(sig).name} received - initiating graceful shutdown")
+                shutdown_event.set()
+        except Exception:
+            # Never let signal handler explode
+            pass
+
+    if not disable_signals:
+        loop = asyncio.get_running_loop()
+        # Use loop.add_signal_handler when available (Unix); fallback to signal.signal
+        try:
+            loop.add_signal_handler(signal.SIGINT, _graceful, signal.SIGINT)
+            loop.add_signal_handler(signal.SIGTERM, _graceful, signal.SIGTERM)
+        except NotImplementedError:  # e.g. on Windows event loop policy
+            signal.signal(signal.SIGINT, _graceful)
+            signal.signal(signal.SIGTERM, _graceful)
+
+    # Wait until shutdown requested
+    await shutdown_event.wait()
+
+    logger.info("Shutdown event set - cleaning up server")
     try:
-        # Keep server running
-        while True:
-            await asyncio.sleep(1)
-    except KeyboardInterrupt:
-        logger.info("Shutting down gracefully...")
-    finally:
         await runner.cleanup()
+    finally:
         logger.info("Server shutdown complete")
 
 # CLI interface
