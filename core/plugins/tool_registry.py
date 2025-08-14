@@ -83,6 +83,31 @@ def _sanitize_schema_for_gemini(schema: dict, max_depth: int = 6, current_depth:
     
     return sanitized
 
+
+def _sanitize_function_name_for_openai(name: str) -> str:
+    """
+    Sanitize function name for OpenAI compatibility.
+    OpenAI requires function names to match pattern: ^[a-zA-Z0-9_-]+$
+    
+    Args:
+        name: Original function name (may contain dots, spaces, etc.)
+        
+    Returns:
+        Sanitized function name with invalid characters replaced by underscores
+    """
+    import re
+    # Replace any character that's not alphanumeric, underscore, or hyphen with underscore
+    sanitized = re.sub(r'[^a-zA-Z0-9_-]', '_', name)
+    
+    # Remove leading/trailing underscores and collapse multiple underscores
+    sanitized = re.sub(r'_+', '_', sanitized).strip('_')
+    
+    # Ensure it starts with a letter or underscore (not a number)
+    if sanitized and sanitized[0].isdigit():
+        sanitized = '_' + sanitized
+        
+    return sanitized if sanitized else 'unnamed_tool'
+
 # Add the missing ToolParameterParser class
 class ToolParameterParser:
     """Convert tool parameters to command line arguments"""
@@ -144,12 +169,20 @@ class ToolRegistry(dict):
             if hasattr(Config, 'LLM_PROVIDER') and Config.LLM_PROVIDER and 'gemini' in Config.LLM_PROVIDER.lower():
                 parameters = _sanitize_schema_for_gemini(parameters)
             
+            # Sanitize function name for OpenAI compatibility (dots -> underscores)
+            original_name = m["name"]
+            sanitized_name = _sanitize_function_name_for_openai(original_name)
+            
             # Create the function schema
             function_schema = {
-                "name": m["name"],
+                "name": sanitized_name,
                 "description": m.get("description", ""),
                 "parameters": parameters
             }
+            
+            # Store original name for reverse lookup during tool execution
+            function_schema["_original_name"] = original_name
+            
             # Add to schema list
             schema.append({
                 "type": "function",
@@ -211,8 +244,19 @@ class ToolRegistry(dict):
                     # print(f"[ToolRegistry] MCP {srv} returned empty or None response.")
                     continue
                 
-                # Check if all services have errors
-                if isinstance(response, dict) and all(isinstance(service_data, dict) and "error" in service_data for service_data in response.values()):
+                # Check if all services have errors (handle both old and new formats)
+                if isinstance(response, dict):
+                    # Check for new SDK v2 format first
+                    if "tools" in response and isinstance(response["tools"], list):
+                        # New format is working if we get tools list
+                        all_services_have_errors = False
+                    else:
+                        # Old format - check if all services have errors
+                        all_services_have_errors = all(isinstance(service_data, dict) and "error" in service_data for service_data in response.values())
+                else:
+                    all_services_have_errors = True
+
+                if all_services_have_errors:
                     print(f"[ToolRegistry] All services have errors. Attempting to restart MCP server...")
                     try:
                         import subprocess, time
@@ -241,35 +285,55 @@ class ToolRegistry(dict):
                         print(f"[ToolRegistry] Failed to restart MCP server: {restart_err}")
                         continue
                 
-                # Process tools from each service
+                # Handle both old and new MCP manager response formats
                 if isinstance(response, dict):
-                    for service_name, service_data in response.items():
-                        if isinstance(service_data, dict) and "error" in service_data:
-                            print(f"[ToolRegistry] Error in service {service_name}: {service_data['error']}")
-                            continue
-                            
-                        if not isinstance(service_data, dict) or "tools" not in service_data:
-                            print(f"[ToolRegistry] Invalid service data format for {service_name}: {service_data}")
-                            continue
-                            
-                        tools = service_data.get("tools", [])
-                        if not tools:
-                            print(f"[ToolRegistry] No tools found for service {service_name}")
-                            continue
-                            
-                        # print(f"[ToolRegistry] Processing {len(tools)} tools from service: {service_name}")
+                    # Check if this is the new SDK v2 format (flat tools list)
+                    if "tools" in response and isinstance(response["tools"], list):
+                        # New SDK v2 format: {"tools": [{"name": "...", "service": "...", ...}, ...]}
+                        tools = response["tools"]
+                        print(f"[ToolRegistry] Processing {len(tools)} tools from new SDK v2 format")
+                        
                         for tool in tools:
                             if "name" not in tool:
-                                # print(f"[ToolRegistry] Tool missing name: {tool}")
+                                print(f"[ToolRegistry] Tool missing name: {tool}")
                                 continue
-                                
-                            # print(f"[ToolRegistry] Registering MCP tool manifest: {tool}")
+                            
+                            # Get service name from tool
+                            service_name = tool.get("service", "unknown")
+                            
+                            # Register the tool
                             tool["_mcp"] = srv
                             tool["_service"] = service_name
                             self._register(tool, from_mcp=True)
-                            # print(f"[ToolRegistry] Registered MCP tool: {tool.get('name')} from {srv} ({service_name})")
+                            print(f"[ToolRegistry] Registered MCP tool: {tool.get('name')} from {srv} ({service_name})")
+                    else:
+                        # Old format: {service_name: {"tools": [...], ...}, ...}
+                        for service_name, service_data in response.items():
+                            if isinstance(service_data, dict) and "error" in service_data:
+                                print(f"[ToolRegistry] Error in service {service_name}: {service_data['error']}")
+                                continue
+                                
+                            if not isinstance(service_data, dict) or "tools" not in service_data:
+                                print(f"[ToolRegistry] Invalid service data format for {service_name}: {service_data}")
+                                continue
+                                
+                            tools = service_data.get("tools", [])
+                            if not tools:
+                                print(f"[ToolRegistry] No tools found for service {service_name}")
+                                continue
+                                
+                            print(f"[ToolRegistry] Processing {len(tools)} tools from service: {service_name}")
+                            for tool in tools:
+                                if "name" not in tool:
+                                    print(f"[ToolRegistry] Tool missing name: {tool}")
+                                    continue
+                                    
+                                tool["_mcp"] = srv
+                                tool["_service"] = service_name
+                                self._register(tool, from_mcp=True)
+                                print(f"[ToolRegistry] Registered MCP tool: {tool.get('name')} from {srv} ({service_name})")
                 else:
-                    # print(f"[ToolRegistry] Invalid response format from {srv}: {type(response)}")
+                    print(f"[ToolRegistry] Invalid response format from {srv}: {type(response)}")
                     pass
             except Exception as e:
                 # Increment attempt counter
@@ -315,10 +379,6 @@ class ToolRegistry(dict):
                 print(f"[ToolRegistry] MCP tool '{name}' missing server information, skipping")
                 return
                 
-            # Set up the runner function to call the MCP server
-            runner = lambda **kw: mcp_call(srv, name, kw)
-            self[name] = runner
-            
             # Patch manifest to OpenAI schema style if needed
             # Use 'inputSchema' as 'parameters' if present
             if "inputSchema" in meta and "parameters" not in meta:
@@ -328,6 +388,9 @@ class ToolRegistry(dict):
             if "parameters" not in meta or not isinstance(meta["parameters"], dict):
                 print(f"[ToolRegistry] MCP tool '{name}' missing valid parameters schema, creating empty schema")
                 meta["parameters"] = {"type": "object", "properties": {}, "required": []}
+                
+            # Mark this as an MCP tool for the _create_tool_function method
+            meta["_type"] = "mcp"
                 
             # Add to manifests list so it appears in the schema sent to the LLM
             self._manifests.append(meta)
@@ -761,3 +824,59 @@ class ToolRegistry(dict):
                 "message": "Script executed successfully",
                 "explicit_return": False
             }
+
+    def __contains__(self, tool_name: str) -> bool:
+        """Check if a tool exists by name (supports both original and sanitized names)."""
+        # First try direct lookup by name
+        for manifest in self._manifests:
+            if manifest.get("name") == tool_name:
+                return True
+        
+        # Then try lookup by sanitized name
+        for manifest in self._manifests:
+            original_name = manifest.get("name", "")
+            if _sanitize_function_name_for_openai(original_name) == tool_name:
+                return True
+        
+        return False
+
+    def __getitem__(self, tool_name: str):
+        """Get a tool function by name (supports both original and sanitized names)."""
+        # First try direct lookup by name
+        for manifest in self._manifests:
+            if manifest.get("name") == tool_name:
+                return self._create_tool_function(manifest)
+        
+        # Then try lookup by sanitized name  
+        for manifest in self._manifests:
+            original_name = manifest.get("name", "")
+            if _sanitize_function_name_for_openai(original_name) == tool_name:
+                return self._create_tool_function(manifest)
+        
+        raise KeyError(f"Tool '{tool_name}' not found")
+
+    def _create_tool_function(self, manifest: dict):
+        """Create a callable function from a tool manifest."""
+        def tool_function(**kwargs):
+            # Handle different tool types
+            if manifest.get("_type") == "mcp":
+                # MCP tool - delegate to MCP client
+                from .mcp_client import call_tool as mcp_call
+                tool_name = manifest["name"]
+                server = manifest.get("_mcp") or manifest.get("mcp_server")
+                if not server:
+                    raise ValueError(f"MCP tool '{tool_name}' missing server information")
+                return mcp_call(server, tool_name, kwargs)
+            elif manifest.get("_src"):
+                # Local tool - handle file-based tools
+                return self._execute_local_tool(manifest, kwargs)
+            else:
+                raise ValueError(f"Unknown tool type for {manifest.get('name')}")
+                
+        return tool_function
+
+    def _execute_local_tool(self, manifest: dict, args: dict):
+        """Execute a local file-based tool."""
+        # This would implement the execution of local Python/shell tools
+        # For now, return a placeholder
+        return {"error": "Local tool execution not implemented yet"}

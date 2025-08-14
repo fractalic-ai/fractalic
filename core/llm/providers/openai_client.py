@@ -623,7 +623,15 @@ class liteclient:
                 # Check if this tool has MCP metadata and matches the server name
                 if hasattr(self, 'registry') and self.registry:
                     for manifest in self.registry._manifests:
-                        if (manifest.get("name") == tool_name and 
+                        # Check both original name and sanitized name
+                        original_name = manifest.get("name")
+                        sanitized_name = tool["function"].get("_original_name")
+                        
+                        name_matches = (original_name == tool_name or 
+                                      original_name == sanitized_name or
+                                      tool_name == sanitized_name)
+                        
+                        if (name_matches and 
                             manifest.get("_service", "").lower() == mcp_server_name.lower()):
                             filtered_schema.append(tool)
                             break
@@ -647,7 +655,15 @@ class liteclient:
                             # Check if this tool has MCP metadata and matches the server name
                             if hasattr(self, 'registry') and self.registry:
                                 for manifest in self.registry._manifests:
-                                    if (manifest.get("name") == tool_name and 
+                                    # Check both original name and sanitized name
+                                    original_name = manifest.get("name")
+                                    sanitized_name = tool["function"].get("_original_name")
+                                    
+                                    name_matches = (original_name == tool_name or 
+                                                  original_name == sanitized_name or
+                                                  tool_name == sanitized_name)
+                                    
+                                    if (name_matches and 
                                         manifest.get("_service", "").lower() == mcp_server_name.lower()):
                                         should_include = True
                                         break
@@ -729,6 +745,11 @@ class liteclient:
                     max_retries = 2
                     attempt = 0
                     last_exception = None
+                    
+                    # Initialize variables that will be used after the retry loop
+                    content = ""
+                    tool_calls = []
+                    usage_info = None
                     
                     while attempt <= max_retries:
                         try:

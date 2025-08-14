@@ -44,6 +44,42 @@ def list_tools(server: str) -> List[Dict[str, Any]]:
         raise e
 
 def call_tool(server: str, name: str, args: Dict[str, Any]) -> Dict[str, Any]:
-    return requests.post(f"{server.rstrip('/')}/call_tool",
-                         json={"name": name, "arguments": args},
-                         timeout=30).json()
+    """Call a tool on an MCP server with better error handling."""
+    try:
+        # Parse tool name to extract service and tool parts
+        # For tools like "memory.read_graph", service="memory", tool="read_graph"
+        if "." in name:
+            service, tool = name.split(".", 1)
+        else:
+            # Fallback for tools without service prefix
+            service = "unknown"
+            tool = name
+            
+        # Use the SDK v2 endpoint format: /call/{service}/{tool}
+        url = f"{server.rstrip('/')}/call/{service}/{tool}"
+        
+        response = requests.post(url,
+                               json={"arguments": args},  # SDK v2 expects just arguments
+                               timeout=30)
+        
+        # Check HTTP status
+        if response.status_code != 200:
+            return {
+                "error": f"HTTP {response.status_code}: {response.text}",
+                "isError": True
+            }
+        
+        # Try to parse JSON
+        try:
+            return response.json()
+        except ValueError as e:
+            return {
+                "error": f"Invalid JSON response: {str(e)}. Raw response: {response.text[:200]}",
+                "isError": True
+            }
+            
+    except requests.exceptions.RequestException as e:
+        return {
+            "error": f"Network error: {str(e)}",
+            "isError": True
+        }

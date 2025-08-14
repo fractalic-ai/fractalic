@@ -2343,10 +2343,10 @@ async def serve():
     runner = web.AppRunner(app)
     await runner.setup()
     
-    site = web.TCPSite(runner, 'localhost', 5859)
+    site = web.TCPSite(runner, '0.0.0.0', 5859)
     await site.start()
     
-    logger.info("MCP Manager V2 started on http://localhost:5859")
+    logger.info("MCP Manager V2 started on http://0.0.0.0:5859")
     logger.info("Per-request session pattern - no persistent connections")
     
     # Populate initial tools cache now that event loop is running
