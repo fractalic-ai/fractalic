@@ -291,7 +291,7 @@ class ToolRegistry(dict):
                     if "tools" in response and isinstance(response["tools"], list):
                         # New SDK v2 format: {"tools": [{"name": "...", "service": "...", ...}, ...]}
                         tools = response["tools"]
-                        print(f"[ToolRegistry] Processing {len(tools)} tools from new SDK v2 format")
+                        # print(f"[ToolRegistry] Processing {len(tools)} tools from new SDK v2 format")
                         
                         for tool in tools:
                             if "name" not in tool:
@@ -305,7 +305,7 @@ class ToolRegistry(dict):
                             tool["_mcp"] = srv
                             tool["_service"] = service_name
                             self._register(tool, from_mcp=True)
-                            print(f"[ToolRegistry] Registered MCP tool: {tool.get('name')} from {srv} ({service_name})")
+                            # print(f"[ToolRegistry] Registered MCP tool: {tool.get('name')} from {srv} ({service_name})")
                     else:
                         # Old format: {service_name: {"tools": [...], ...}, ...}
                         for service_name, service_data in response.items():
@@ -322,7 +322,7 @@ class ToolRegistry(dict):
                                 print(f"[ToolRegistry] No tools found for service {service_name}")
                                 continue
                                 
-                            print(f"[ToolRegistry] Processing {len(tools)} tools from service: {service_name}")
+                            # print(f"[ToolRegistry] Processing {len(tools)} tools from service: {service_name}")
                             for tool in tools:
                                 if "name" not in tool:
                                     print(f"[ToolRegistry] Tool missing name: {tool}")
@@ -331,7 +331,7 @@ class ToolRegistry(dict):
                                 tool["_mcp"] = srv
                                 tool["_service"] = service_name
                                 self._register(tool, from_mcp=True)
-                                print(f"[ToolRegistry] Registered MCP tool: {tool.get('name')} from {srv} ({service_name})")
+                                # print(f"[ToolRegistry] Registered MCP tool: {tool.get('name')} from {srv} ({service_name})")
                 else:
                     print(f"[ToolRegistry] Invalid response format from {srv}: {type(response)}")
                     pass

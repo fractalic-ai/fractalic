@@ -1,9 +1,9 @@
 {
   "replicate": {
-    "access_token": "replicate-dimusdim:FopnD41lFivC6KAF:LE7oqmhsElR3yfWwMpqziCHVbx0hczT6",
+    "access_token": "replicate-dimusdim:F5pZlCyRTaHBYPT1:5IicvlbO0bPVa5UiuTLE6EED6FnmM51s",
     "token_type": "Bearer",
     "expires_in": 3600,
-    "refresh_token": "replicate-dimusdim:FopnD41lFivC6KAF:B1Fb9Kn0ffQQGIKSQOzGIUKS3Zc7y8hi",
+    "refresh_token": "replicate-dimusdim:F5pZlCyRTaHBYPT1:ba5fwMdTyz2ZrXP5Xg2qetLlK8lxFgt6",
     "scope": "read write"
   }
 }
