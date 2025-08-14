@@ -356,6 +356,40 @@ class ToolRegistry(dict):
                 else:
                     print(f"[ToolRegistry] MCP Manager: No connection after {attempts} attempts to {srv}", file=sys.stderr)
 
+            # Fallback: auto-start local MCP manager if 127.0.0.1 endpoint unreachable
+            local_entries = [srv for srv, _ in connection_failed if srv.startswith("http://127.0.0.1:5859")]
+            if local_entries:
+                try:
+                    mgr_script = None
+                    # Prefer local CWD shim then project root
+                    for candidate in [
+                        Path.cwd() / "fractalic_mcp_manager_v2.py",
+                        Path(__file__).resolve().parent.parent.parent / "fractalic_mcp_manager_v2.py",
+                        Path.cwd() / "fractalic_mcp_manager_sdk_v2.py",
+                        Path(__file__).resolve().parent.parent.parent / "fractalic_mcp_manager_sdk_v2.py",
+                    ]:
+                        if candidate.exists():
+                            mgr_script = candidate
+                            break
+                    if mgr_script:
+                        import subprocess, time
+                        print(f"[ToolRegistry] Attempting auto-start of MCP manager via {mgr_script} …")
+                        subprocess.Popen(["python3", str(mgr_script), "serve", "--port", "5859"])  # nosec
+                        time.sleep(4)
+                        # Retry once after startup
+                        try:
+                            for srv in local_entries:
+                                resp = mcp_list(srv)
+                                if resp:
+                                    print("[ToolRegistry] MCP manager auto-start success")
+                                    break
+                        except Exception:
+                            pass
+                    else:
+                        print("[ToolRegistry] Auto-start skipped: manager script not found")
+                except Exception as auto_e:
+                    print(f"[ToolRegistry] Auto-start failed: {auto_e}")
+
     def _register(self, meta: Dict[str, Any],
                   explicit=False, runner_override: Callable | None = None,
                   from_mcp=False):

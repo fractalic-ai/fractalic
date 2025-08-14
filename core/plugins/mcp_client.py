@@ -46,21 +46,47 @@ def list_tools(server: str) -> List[Dict[str, Any]]:
 def call_tool(server: str, name: str, args: Dict[str, Any]) -> Dict[str, Any]:
     """Call a tool on an MCP server with better error handling."""
     try:
+        # Handle server URL resolution
+        if not server.startswith(('http://', 'https://')):
+            # Default to local MCP manager for service names
+            server = "http://127.0.0.1:5859"
+        
         # Parse tool name to extract service and tool parts
         # For tools like "memory.read_graph", service="memory", tool="read_graph"
         if "." in name:
             service, tool = name.split(".", 1)
         else:
-            # Fallback for tools without service prefix
-            service = "unknown"
-            tool = name
+            # For tools without service prefix, try to infer from server or use the original name
+            if server == "http://127.0.0.1:5859":
+                # When calling MCP manager, use the tool name as service if no prefix
+                service = name.split("_")[0] if "_" in name else "unknown"
+                tool = name
+            else:
+                service = "unknown" 
+                tool = name
             
         # Use the SDK v2 endpoint format: /call/{service}/{tool}
         url = f"{server.rstrip('/')}/call/{service}/{tool}"
         
-        response = requests.post(url,
-                               json={"arguments": args},  # SDK v2 expects just arguments
-                               timeout=30)
+        # Increased timeout for complex operations (especially Replicate API calls)
+        # and add retry logic for network issues
+        import time
+        for attempt in range(3):
+            try:
+                response = requests.post(url,
+                                       json={"arguments": args},  # SDK v2 expects just arguments
+                                       timeout=90)  # Increased from 30s to 90s
+                break  # Success, exit retry loop
+            except (requests.exceptions.Timeout, requests.exceptions.ConnectionError, ConnectionResetError) as e:
+                if attempt < 2:  # Only retry for first 2 attempts
+                    print(f"⚠️  Network issue on attempt {attempt + 1}/3: {e}. Retrying in 2s...")
+                    time.sleep(2)
+                    continue
+                else:
+                    return {
+                        "error": f"Network timeout after 3 attempts: {str(e)}",
+                        "isError": True
+                    }
         
         # Check HTTP status
         if response.status_code != 200:

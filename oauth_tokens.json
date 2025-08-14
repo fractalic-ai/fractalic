@@ -1,9 +1,10 @@
 {
   "replicate": {
-    "access_token": "replicate-dimusdim:F5pZlCyRTaHBYPT1:5IicvlbO0bPVa5UiuTLE6EED6FnmM51s",
+    "access_token": "replicate-dimusdim:Ac5Nby4bDPY3QHKp:y3jNv9r9DLXuehtJNeX81ZhyJ1fYkpWw",
     "token_type": "Bearer",
     "expires_in": 3600,
-    "refresh_token": "replicate-dimusdim:F5pZlCyRTaHBYPT1:ba5fwMdTyz2ZrXP5Xg2qetLlK8lxFgt6",
-    "scope": "read write"
+    "refresh_token": "replicate-dimusdim:Ac5Nby4bDPY3QHKp:Y1ltms6oLHhlp7YwCCEj9kzh16PUOqJs",
+    "scope": "read write",
+    "obtained_at": 1755189703.7435222
   }
 }
