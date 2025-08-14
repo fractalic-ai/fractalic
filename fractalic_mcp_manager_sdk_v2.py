@@ -8,6 +8,7 @@ import asyncio
 import json
 import logging
 import threading
+import time
 import traceback
 import webbrowser
 from dataclasses import dataclass
@@ -154,6 +155,10 @@ class MCPSupervisorV2:
         self.token_storages: Dict[str, FileTokenStorage] = {}  # Service-specific token storage
         self.service_states: Dict[str, str] = {}
         
+        # Tools cache - loaded at startup, updated only on enable/disable
+        self.tools_cache: Dict[str, List[Dict[str, Any]]] = {}  # {service_name: tools_list}
+        self.cache_loaded = False
+        
         # Initialize OAuth providers for services that need them
         self._init_oauth_providers()
         
@@ -221,6 +226,62 @@ class MCPSupervisorV2:
                 return True
         
         return False
+
+    async def _load_tools_cache(self):
+        """Load all tools into cache at startup"""
+        if self.cache_loaded:
+            return
+            
+        logger.info("Loading tools cache at startup...")
+        start_time = time.time()
+        
+        # Load tools for all enabled services in parallel
+        tasks = []
+        for service_name in self.config:
+            if self.service_states.get(service_name, "enabled") == "enabled":
+                task = self._fetch_and_cache_service_tools(service_name)
+                tasks.append(task)
+        
+        # Execute all tool loading in parallel
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
+        
+        self.cache_loaded = True
+        load_time = time.time() - start_time
+        total_tools = sum(len(tools) for tools in self.tools_cache.values())
+        logger.info(f"Tools cache loaded: {total_tools} tools from {len(self.tools_cache)} services in {load_time:.2f}s")
+    
+    async def _fetch_and_cache_service_tools(self, service_name: str):
+        """Fetch tools for a service and store in cache"""
+        try:
+            service = self.config[service_name]
+            tools = await self._get_tools_for_service_impl(service_name, service)
+            self.tools_cache[service_name] = tools
+            logger.debug(f"Cached {len(tools)} tools for {service_name}")
+        except Exception as e:
+            logger.warning(f"Failed to cache tools for {service_name}: {e}")
+            self.tools_cache[service_name] = []
+    
+    def enable_service(self, service_name: str):
+        """Enable a service and add its tools to cache"""
+        if service_name in self.config:
+            self.service_states[service_name] = "enabled"
+            # Asynchronously load tools for the newly enabled service
+            asyncio.create_task(self._fetch_and_cache_service_tools(service_name))
+            logger.info(f"Service {service_name} enabled and tools loading...")
+    
+    def disable_service(self, service_name: str):
+        """Disable a service and remove its tools from responses"""
+        if service_name in self.config:
+            self.service_states[service_name] = "disabled"
+            # Keep tools in cache but they won't be included in responses
+            logger.info(f"Service {service_name} disabled")
+    
+    def invalidate_service_cache(self, service_name: str):
+        """Force refresh tools cache for a specific service"""
+        if service_name in self.tools_cache:
+            asyncio.create_task(self._fetch_and_cache_service_tools(service_name))
+            logger.info(f"Cache invalidated for {service_name}, reloading tools...")
 
     def _create_oauth_provider(self, name: str, service: ServiceConfig):
         """Create OAuth provider for a service"""
@@ -348,58 +409,26 @@ class MCPSupervisorV2:
     
     async def get_tools_for_service(self, service_name: str) -> List[Dict[str, Any]]:
         """
-        Get tools for a service using per-request session with proper context management.
+        Get tools for a service from cache (loaded at startup).
         
         For dynamic OAuth services (like Replicate):
-        - Tools are only exposed after successful OAuth authentication
-        - The SDK handles RFC 9728 OAuth Protected Resource Metadata discovery automatically
-        - Extended timeouts are configured to handle OAuth flow + tool discovery
-        - "Dynamic" authentication means tools can change based on user permissions/context
+        - Tools are cached after successful OAuth authentication
+        - Cache is loaded once at startup and updated only on enable/disable
         """
         if service_name not in self.config:
             return []
         
-        # Check if service is enabled before attempting connection
+        # Check if service is enabled before returning cached tools
         if self.service_states.get(service_name, "enabled") == "disabled":
-            logger.info(f"Service {service_name} is disabled, skipping tool retrieval")
+            logger.debug(f"Service {service_name} is disabled, returning empty tools list")
             return []
         
-        service = self.config[service_name]
-        connection = None
+        # Ensure cache is loaded
+        if not self.cache_loaded:
+            await self._load_tools_cache()
         
-        try:
-            # Apply httpx low-and-slow attack protection using asyncio.wait_for
-            # See: https://github.com/encode/httpx/issues/1450
-            # This prevents indefinite hangs when SSE servers send data too slowly
-            
-            # For OAuth services, use longer timeout to allow browser authentication
-            timeout = 3.0  # Default fast timeout
-            if service.has_oauth or service_name in self.oauth_providers:
-                # Check if we have valid tokens first
-                token_storage = FileTokenStorage("oauth_tokens.json", service_name)
-                tokens = await token_storage.get_tokens()
-                if not tokens:
-                    # No tokens available, this will trigger OAuth flow - need longer timeout
-                    timeout = 60.0  # 60 seconds for OAuth authentication
-                    logger.info(f"Using extended timeout ({timeout}s) for OAuth flow for {service_name}")
-                
-            return await asyncio.wait_for(
-                self._get_tools_for_service_impl(service_name, service), 
-                timeout=timeout
-            )
-        except asyncio.TimeoutError:
-            if service.has_oauth or service_name in self.oauth_providers:
-                logger.warning(f"OAuth timeout for {service_name} - user may need to complete browser authentication")
-            else:
-                logger.warning(f"Timeout (3s) getting tools for {service_name} - fast fail, non-blocking.")
-            return []
-        except Exception as e:
-            logger.error(f"Failed to get tools for {service_name}: {e}")
-            # Log more details for debugging OAuth/dynamic tools issues
-            import traceback
-            full_traceback = traceback.format_exc()
-            logger.error(f"Full traceback for {service_name}: {full_traceback}")
-            return []
+        # Return cached tools (fast - no network calls)
+        return self.tools_cache.get(service_name, [])
     
     async def _get_tools_for_service_impl(self, service_name: str, service: ServiceConfig) -> List[Dict[str, Any]]:
         """Internal implementation of get_tools_for_service with proper error handling"""
@@ -2021,7 +2050,11 @@ async def toggle_service_handler(request):
             # Set explicit state
             new_state = "enabled" if enabled else "disabled"
         
-        supervisor.service_states[service_name] = new_state
+        # Update service state and cache
+        if new_state == "enabled":
+            supervisor.enable_service(service_name)
+        else:
+            supervisor.disable_service(service_name)
         
         # If enabling, test connection to validate it works
         connection_test_success = True
@@ -2029,7 +2062,7 @@ async def toggle_service_handler(request):
             try:
                 connection_test_success = await supervisor.test_service_connection(service_name)
                 if not connection_test_success:
-                    supervisor.service_states[service_name] = "disabled"
+                    supervisor.disable_service(service_name)
                     return web.json_response({
                         "success": False,
                         "service": service_name,
@@ -2037,7 +2070,7 @@ async def toggle_service_handler(request):
                         "message": "Service connection test failed, keeping disabled"
                     })
             except Exception as e:
-                supervisor.service_states[service_name] = "disabled"
+                supervisor.disable_service(service_name)
                 return web.json_response({
                     "success": False,
                     "service": service_name, 
@@ -2053,6 +2086,24 @@ async def toggle_service_handler(request):
         })
     except Exception as e:
         logger.error(f"Toggle service error: {e}")
+        return web.json_response({"error": str(e)}, status=500)
+
+async def refresh_cache_handler(request):
+    """POST /refresh_cache/{name} - Force refresh tools cache for a service"""
+    service_name = request.match_info['name']
+    
+    if service_name not in supervisor.config:
+        return web.json_response({"error": f"Service {service_name} not found"}, status=404)
+    
+    try:
+        supervisor.invalidate_service_cache(service_name)
+        return web.json_response({
+            "success": True,
+            "service": service_name,
+            "message": "Cache refresh initiated"
+        })
+    except Exception as e:
+        logger.error(f"Cache refresh error: {e}")
         return web.json_response({"error": str(e)}, status=500)
 
 async def list_tools_handler(request):
@@ -2250,6 +2301,7 @@ def create_app():
     app.router.add_get('/tools/{name}', get_tools_handler)
     app.router.add_get('/capabilities/{name}', get_capabilities_handler)
     app.router.add_post('/call/{service}/{tool}', call_tool_handler)
+    app.router.add_post('/refresh_cache/{name}', refresh_cache_handler)  # Manual cache refresh
     
     # MCP Full Feature Set routes
     app.router.add_get('/list_prompts', list_prompts_handler)
@@ -2266,6 +2318,10 @@ def create_app():
 
 async def serve():
     """Run the HTTP server"""
+    # Load tools cache at startup
+    logger.info("Starting MCP Manager V2...")
+    await supervisor._load_tools_cache()
+    
     app = create_app()
     runner = web.AppRunner(app)
     await runner.setup()
