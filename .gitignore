@@ -10,6 +10,13 @@ oauth_tokens.json.repair
 oauth_redirect_state.json
 *.oauth_tokens.json
 
+# Development and debugging utilities
+utils/oauth_debug/
+debug_*.py
+analyze_*.py
+inspect_*.py
+diagnose_*.py
+
 # Tutorials and examples (user-generated content)
 # tutorials/
 *.ctx
