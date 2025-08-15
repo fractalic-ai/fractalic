@@ -82,12 +82,21 @@ def test_replicate_tools_available():
     if status != 200:
         pytest.skip(f"/tools/replicate returned status {status}")
     data = json.loads(body)
+    if "tools_error" in data:
+        pytest.skip(f"Replicate tools pending: {data['tools_error']}")
     if "error" in data:
         pytest.skip(f"Replicate tools error: {data['error']}")
     assert data.get("tool_count", 0) >= 5, f"Unexpected replicate tool_count: {data.get('tool_count')}"
 
 
 def test_replicate_list_predictions_minimal():
+    # If tools not yet available skip early
+    status_tools, body_tools = _get("/tools/replicate")
+    if status_tools == 200:
+        dt = json.loads(body_tools)
+        if "tools_error" in dt:
+            pytest.skip(f"Replicate tools pending: {dt['tools_error']}")
+    
     payload = {"arguments": {"jq_filter": ".results[:1] | length"}}
     status, body = _post("/call/replicate/list_predictions", payload)
     if status != 200:

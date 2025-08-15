@@ -7,19 +7,31 @@ You can swap this for an official SDK later.
 from __future__ import annotations
 import requests
 import time
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 
 # Simple caching to reduce repeated HTTP calls to MCP servers
-_list_tools_cache: Dict[str, tuple] = {}  # server -> (response, timestamp)
+_list_tools_cache: Dict[str, tuple] = {}      # server -> (response, timestamp)
+_list_prompts_cache: Dict[str, tuple] = {}    # server -> (response, timestamp)
+_list_resources_cache: Dict[str, tuple] = {}  # server -> (response, timestamp)
 _CACHE_DURATION = 30  # Cache for 30 seconds
 
-def clear_cache(server: str = None):
-    """Clear cache for a specific server or all servers."""
-    global _list_tools_cache
+def clear_cache(server: str | None = None):
+    """Clear cached MCP discovery data.
+
+    Args:
+        server: Optional server base URL. If provided, only that server's cached
+                entries (tools/prompts/resources) are cleared; otherwise all
+                cached data is purged.
+    """
+    global _list_tools_cache, _list_prompts_cache, _list_resources_cache
     if server:
         _list_tools_cache.pop(server, None)
+        _list_prompts_cache.pop(server, None)
+        _list_resources_cache.pop(server, None)
     else:
         _list_tools_cache.clear()
+        _list_prompts_cache.clear()
+        _list_resources_cache.clear()
 
 def list_tools(server: str) -> List[Dict[str, Any]]:
     """List tools from MCP server with caching to reduce load."""
@@ -42,6 +54,93 @@ def list_tools(server: str) -> List[Dict[str, Any]]:
             cached_response, _ = _list_tools_cache[server]
             return cached_response
         raise e
+
+def _cached_get(server: str, path: str, cache: Dict[str, tuple], ttl: int) -> Optional[Dict[str, Any]]:
+    """Generic cached GET helper.
+
+    Returns parsed JSON dict (or list) or None on hard failure.
+    """
+    now = time.time()
+    # Serve fresh-enough cache
+    if server in cache:
+        data, ts = cache[server]
+        if now - ts < ttl:
+            return data
+    try:
+        resp = requests.get(f"{server.rstrip('/')}/{path.lstrip('/')}", timeout=5)
+        resp.raise_for_status()
+        data = resp.json()
+        cache[server] = (data, now)
+        return data
+    except Exception:
+        # Return stale if exists
+        if server in cache:
+            return cache[server][0]
+        return None
+
+def list_prompts(server: str, service: Optional[str] = None) -> Dict[str, Any]:
+    """List prompts from MCP manager.
+
+    Server endpoint: GET /list_prompts -> { serviceA: {prompts:[...]}, ... }
+    If service is specified, filter to that service only (empty dict if none).
+    """
+    data = _cached_get(server, "/list_prompts", _list_prompts_cache, _CACHE_DURATION)
+    if not data or not isinstance(data, dict):
+        return {}
+    if service:
+        svc = data.get(service)
+        return {service: svc} if svc else {}
+    return data
+
+def get_prompt(server: str, service: str, prompt: str, arguments: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    """Retrieve a specific prompt template/content.
+
+    POST /prompt/{service}/{prompt}  body: {"arguments": {...}}
+    Returns prompt description + message content structure.
+    """
+    try:
+        resp = requests.post(
+            f"{server.rstrip('/')}/prompt/{service}/{prompt}",
+            json={"arguments": arguments or {}},
+            timeout=15,
+        )
+        if resp.status_code != 200:
+            return {"error": f"HTTP {resp.status_code}: {resp.text}", "isError": True}
+        return resp.json()
+    except requests.exceptions.RequestException as e:
+        return {"error": f"Network error: {e}", "isError": True}
+
+def list_resources(server: str, service: Optional[str] = None) -> Dict[str, Any]:
+    """List resources from MCP manager.
+
+    GET /list_resources -> { serviceA: {resources:[...]}, ... }
+    If service provided, filter accordingly.
+    """
+    data = _cached_get(server, "/list_resources", _list_resources_cache, _CACHE_DURATION)
+    if not data or not isinstance(data, dict):
+        return {}
+    if service:
+        svc = data.get(service)
+        return {service: svc} if svc else {}
+    return data
+
+def read_resource(server: str, service: str, uri: str) -> Dict[str, Any]:
+    """Read a resource's content from MCP manager.
+
+    POST /resource/{service}/read  body: {"uri": "..."}
+    Returns structured contents (text/blob entries).
+    """
+    try:
+        resp = requests.post(
+            f"{server.rstrip('/')}/resource/{service}/read",
+            json={"uri": uri},
+            timeout=20,
+        )
+        if resp.status_code != 200:
+            return {"error": f"HTTP {resp.status_code}: {resp.text}", "isError": True}
+        return resp.json()
+    except requests.exceptions.RequestException as e:
+        return {"error": f"Network error: {e}", "isError": True}
 
 def call_tool(server: str, name: str, args: Dict[str, Any]) -> Dict[str, Any]:
     """Call a tool on an MCP server with better error handling."""

@@ -17,7 +17,11 @@ Logic
       registry.generate_schema() → list[dict]  (OpenAI format)
 """
 from __future__ import annotations
-import json, sys, importlib, subprocess, yaml, textwrap
+import json, sys, importlib, subprocess, textwrap
+try:
+    import yaml  # type: ignore
+except ImportError:  # Graceful degradation if PyYAML not present in analysis env
+    yaml = None
 from pathlib import Path
 from typing import Any, Dict, List, Callable, Optional
 import os
@@ -26,6 +30,14 @@ import uuid
 
 from .cli_introspect import sniff as sniff_cli
 from .mcp_client import list_tools as mcp_list, call_tool as mcp_call
+from .mcp_client import (
+    list_tools as mcp_list,
+    call_tool as mcp_call,
+    list_prompts as mcp_list_prompts,
+    get_prompt as mcp_get_prompt,
+    list_resources as mcp_list_resources,
+    read_resource as mcp_read_resource,
+)
 from core.config import Config
 
 # ─────────────────────────── Tool Execution Configuration ──────────────────────────
@@ -174,9 +186,23 @@ class ToolRegistry(dict):
             sanitized_name = _sanitize_function_name_for_openai(original_name)
             
             # Create the function schema
+            # Build enhanced description: prefer explicit description; prepend title if present and distinct
+            desc = m.get("description", "") or ""
+            title = m.get("title")
+            if title and title not in desc:
+                desc = f"{title}: {desc}" if desc else title
+
+            # Include category/annotations hints (non-intrusive) for LLM disambiguation
+            annotations = m.get("annotations") or {}
+            category = annotations.get("category") or annotations.get("categories")
+            if category and isinstance(category, (str, list)):
+                cat_str = ", ".join(category) if isinstance(category, list) else category
+                if cat_str and cat_str not in desc:
+                    desc = f"[{cat_str}] {desc}" if desc else f"[{cat_str}]"
+
             function_schema = {
                 "name": sanitized_name,
-                "description": m.get("description", ""),
+                "description": desc,
                 "parameters": parameters
             }
             
@@ -191,10 +217,17 @@ class ToolRegistry(dict):
         return schema
 
     def _load_yaml_manifests(self):
+        if not yaml:
+            return
         for y in self.tools_dir.rglob("*.yaml"):
-            m = yaml.safe_load(y.read_text())
-            m["_src"] = str(y.relative_to(self.tools_dir))
-            self._register(m, explicit=True)
+            try:
+                m = yaml.safe_load(y.read_text())
+                if not isinstance(m, dict):
+                    continue
+                m["_src"] = str(y.relative_to(self.tools_dir))
+                self._register(m, explicit=True)
+            except Exception:
+                continue
 
     def _autodiscover_cli(self):
         for src in self.tools_dir.rglob("*"):
@@ -332,6 +365,61 @@ class ToolRegistry(dict):
                                 tool["_service"] = service_name
                                 self._register(tool, from_mcp=True)
                                 # print(f"[ToolRegistry] Registered MCP tool: {tool.get('name')} from {srv} ({service_name})")
+                            self._register(tool, from_mcp=True)
+                    # After registering tools, attempt to fetch prompts and resources once per server
+                    try:
+                        prompts_data = mcp_list_prompts(srv)
+                        if isinstance(prompts_data, dict):
+                            for svc_name, payload in prompts_data.items():
+                                prompts = (payload or {}).get("prompts") or []
+                                for p in prompts:
+                                    # Build synthetic prompt tool manifest
+                                    args_schema = {"type": "object", "properties": {}, "required": []}
+                                    for arg in p.get("arguments", []):
+                                        aname = arg.get("name")
+                                        if not aname:
+                                            continue
+                                        args_schema["properties"][aname] = {
+                                            "type": "string",
+                                            "description": arg.get("description", "")
+                                        }
+                                        if arg.get("required"):
+                                            args_schema.setdefault("required", []).append(aname)
+                                    manifest = {
+                                        "name": f"{svc_name}.prompt.{p.get('name')}",
+                                        "description": p.get("description", "Prompt template"),
+                                        "parameters": args_schema,
+                                        "_mcp": srv,
+                                        "_service": svc_name,
+                                        "_prompt_name": p.get('name'),
+                                        "_type": "mcp_prompt",
+                                    }
+                                    self._manifests.append(manifest)
+                        resources_data = mcp_list_resources(srv)
+                        if isinstance(resources_data, dict):
+                            for svc_name, payload in resources_data.items():
+                                resources = (payload or {}).get("resources") or []
+                                if resources:
+                                    # Generic read_resource tool per service (one per service)
+                                    manifest = {
+                                        "name": f"{svc_name}.read_resource",
+                                        "description": "Read a resource by URI for service '" + svc_name + "'",
+                                        "parameters": {
+                                            "type": "object",
+                                            "properties": {
+                                                "uri": {"type": "string", "description": "Resource URI to read"}
+                                            },
+                                            "required": ["uri"]
+                                        },
+                                        "_mcp": srv,
+                                        "_service": svc_name,
+                                        "_type": "mcp_resource_read",
+                                    }
+                                    # Avoid duplicate if already present
+                                    if not any(m.get("name") == manifest["name"] for m in self._manifests):
+                                        self._manifests.append(manifest)
+                    except Exception:
+                        pass  # Non-fatal: prompts/resources optional
                 else:
                     print(f"[ToolRegistry] Invalid response format from {srv}: {type(response)}")
                     pass
@@ -422,6 +510,11 @@ class ToolRegistry(dict):
             if "parameters" not in meta or not isinstance(meta["parameters"], dict):
                 print(f"[ToolRegistry] MCP tool '{name}' missing valid parameters schema, creating empty schema")
                 meta["parameters"] = {"type": "object", "properties": {}, "required": []}
+
+            # Normalize metadata: propagate optional title / annotations for richer schemas
+            if meta.get("title") and not meta.get("_title_in_description"):
+                # We'll merge title later when generating schema. Mark flag to avoid duplicate merges.
+                meta["_title_in_description"] = True
                 
             # Mark this as an MCP tool for the _create_tool_function method
             meta["_type"] = "mcp"
@@ -901,6 +994,23 @@ class ToolRegistry(dict):
                 if not server:
                     raise ValueError(f"MCP tool '{tool_name}' missing server information")
                 return mcp_call(server, tool_name, kwargs)
+            elif manifest.get("_type") == "mcp_prompt":
+                # Synthetic prompt invocation returns the prompt message content
+                from .mcp_client import get_prompt as _get_prompt
+                server = manifest.get("_mcp")
+                svc = manifest.get("_service")
+                prompt_name = manifest.get("_prompt_name")
+                if not (server and svc and prompt_name):
+                    return {"error": "Prompt manifest incomplete"}
+                return _get_prompt(server, svc, prompt_name, kwargs)
+            elif manifest.get("_type") == "mcp_resource_read":
+                from .mcp_client import read_resource as _read_resource
+                server = manifest.get("_mcp")
+                svc = manifest.get("_service")
+                uri = kwargs.get("uri")
+                if not (server and svc and uri):
+                    return {"error": "Missing required 'uri' for resource read"}
+                return _read_resource(server, svc, uri)
             elif manifest.get("_src"):
                 # Local tool - handle file-based tools
                 return self._execute_local_tool(manifest, kwargs)
