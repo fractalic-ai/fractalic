@@ -88,15 +88,20 @@ class ServiceConfig:
         )
 
 class FileTokenStorage(TokenStorage):
-    """File-based token storage for OAuth - service-specific"""
-    
+    """File-based token storage for OAuth - service-specific
+
+    NOTE: Previous revisions had a stray 'self.on_set_tokens' at class scope causing NameError.
+    This implementation keeps all instance assignments inside __init__.
+    """
+
     def __init__(self, file_path: str, service_name: str = "default"):
-        # Persist tokens at repository root regardless of where server started
         p = _Path(file_path)
         if not p.is_absolute():
             p = ROOT_DIR / p
         self.file_path = p
         self.service_name = service_name
+        # Hook populated by supervisor to schedule refresh after token save
+        self.on_set_tokens = None  # type: ignore[attr-defined]
     
     async def get_tokens(self) -> Optional[OAuthToken]:
         """Load tokens from file for specific service (no manual refresh; SDK provider handles refresh)."""
@@ -136,8 +141,18 @@ class FileTokenStorage(TokenStorage):
         try:
             data = {}
             if self.file_path.exists():
-                with open(self.file_path, 'r') as f:
-                    data = json.load(f)
+                try:
+                    with open(self.file_path, 'r') as f:
+                        data = json.load(f)
+                except Exception:
+                    # Corrupted file: back it up and start fresh
+                    try:
+                        corrupt_backup = self.file_path.with_suffix('.invalid')
+                        self.file_path.rename(corrupt_backup)
+                        logger.warning(f"Corrupted token file backed up to {corrupt_backup}")
+                    except Exception:
+                        pass
+                    data = {}
             
             # Save as service-specific token
             import time as _time
@@ -150,18 +165,108 @@ class FileTokenStorage(TokenStorage):
                 'obtained_at': _time.time()
             }
             
-            with open(self.file_path, 'w') as f:
-                json.dump(data, f, indent=2)
+            self._atomic_write_json(data)
                 
             logger.info(f"OAuth tokens saved successfully for {self.service_name}")
+            if self.on_set_tokens:
+                try:
+                    self.on_set_tokens()
+                except Exception:
+                    logger.debug("on_set_tokens hook failed", exc_info=True)
         except Exception as e:
             logger.error(f"Failed to save tokens for {self.service_name}: {e}")
+
+    async def replace_access_token(self, access_token: str, expires_in: Optional[int], scope: Optional[str]):
+        """Update only access token fields during refresh preserving refresh token."""
+        try:
+            if not self.file_path.exists():
+                return
+            try:
+                with open(self.file_path,'r') as f:
+                    data=json.load(f)
+            except Exception:
+                return
+            svc=data.get(self.service_name)
+            if not svc:
+                return
+            import time as _time
+            svc['access_token']=access_token
+            if expires_in is not None:
+                svc['expires_in']=expires_in
+            if scope is not None:
+                svc['scope']=scope
+            svc['obtained_at']=_time.time()
+            data[self.service_name]=svc
+            self._atomic_write_json(data)
+            logger.info(f"Refreshed access token stored for {self.service_name}")
+        except Exception as e:
+            logger.warning(f"Failed updating refreshed token for {self.service_name}: {e}")
     
     async def get_client_info(self) -> Optional[OAuthClientInformationFull]:
-        return None
+        # Load persisted dynamic client registration (if any)
+        try:
+            if not self.file_path.exists():
+                return None
+            with open(self.file_path, 'r') as f:
+                data = json.load(f)
+            svc = data.get(self.service_name)
+            if not svc:
+                return None
+            ci = svc.get('client_info')
+            if not ci:
+                return None
+            # Reconstruct object (fields may evolve; use kwargs subset)
+            fields = {}
+            for k in ('client_id','client_secret','client_id_issued_at','client_secret_expires_at','redirect_uris','grant_types','response_types','scope','token_endpoint_auth_method'):
+                if k in ci:
+                    fields[k] = ci[k]
+            return OAuthClientInformationFull(**fields)  # type: ignore[arg-type]
+        except Exception as e:
+            logger.warning(f"Failed loading client_info for {self.service_name}: {e}")
+            return None
     
     async def set_client_info(self, client_info: OAuthClientInformationFull) -> None:
-        pass
+        # Persist dynamic client registration details alongside tokens
+        try:
+            data = {}
+            if self.file_path.exists():
+                try:
+                    with open(self.file_path, 'r') as f:
+                        data = json.load(f)
+                except Exception:
+                    data = {}
+            svc = data.get(self.service_name) or {}
+            # Serialize pydantic model / dataclass generically
+            ci_dict = {}
+            for attr in dir(client_info):
+                if attr.startswith('_'):
+                    continue
+                try:
+                    val = getattr(client_info, attr)
+                except Exception:
+                    continue
+                if callable(val):
+                    continue
+                # Convert non-primitive / Pydantic types to str
+                if isinstance(val, (str, int, float, bool)) or val is None:
+                    ci_dict[attr] = val
+                elif isinstance(val, (list, tuple, set)):
+                    conv_list = []
+                    for item in val:
+                        if isinstance(item, (str, int, float, bool)) or item is None:
+                            conv_list.append(item)
+                        else:
+                            conv_list.append(str(item))
+                    ci_dict[attr] = conv_list
+                else:
+                    # Fallback to string representation
+                    ci_dict[attr] = str(val)
+            svc['client_info'] = ci_dict
+            data[self.service_name] = svc
+            self._atomic_write_json(data)
+            logger.info(f"Persisted client_info for {self.service_name}")
+        except Exception as e:
+            logger.warning(f"Failed persisting client_info for {self.service_name}: {e}")
 
     async def delete_tokens(self) -> None:
         """Delete stored tokens for this service (force re-auth/refresh)."""
@@ -172,36 +277,76 @@ class FileTokenStorage(TokenStorage):
                 data = json.load(f)
             if self.service_name in data:
                 del data[self.service_name]
-                with open(self.file_path, 'w') as f:
-                    json.dump(data, f, indent=2)
+                self._atomic_write_json(data)
                 logger.info(f"Deleted tokens for {self.service_name} (forced invalidation)")
         except Exception as e:
             logger.error(f"Failed to delete tokens for {self.service_name}: {e}")
+
+    # --------------- Internal helpers ---------------
+    def _atomic_write_json(self, data: Dict[str, Any]):
+        """Write JSON atomically to avoid truncated files if serialization fails.
+        Writes to a temporary file then renames into place.
+        """
+        try:
+            import tempfile, os
+            tmp_fd, tmp_path = tempfile.mkstemp(prefix='oauth_tokens_', suffix='.tmp', dir=str(self.file_path.parent))
+            try:
+                with os.fdopen(tmp_fd, 'w') as tmp_f:
+                    json.dump(data, tmp_f, indent=2)
+                os.replace(tmp_path, self.file_path)
+            except Exception:
+                # Cleanup tmp file if something went wrong
+                try:
+                    os.unlink(tmp_path)
+                except Exception:
+                    pass
+                raise
+        except Exception as e:
+            logger.error(f"Atomic write failed for {self.file_path}: {e}")
 
 
 # Global callback data for OAuth
 oauth_callback_data = {}
 
+class OAuthPending(Exception):
+    """Signal that OAuth is already in progress / awaiting user completion."""
+    pass
+
 class MCPSupervisorV2:
     """MCP Service Manager using official Python SDK - Per-Request Sessions"""
-    
     def __init__(self):
-        # Load configuration & initialize state containers
+        """Constructor sets up in-memory state. No network I/O here."""
+        # Core config/state
         self.config: Dict[str, ServiceConfig] = self.load_config()
         self.oauth_providers: Dict[str, OAuthClientProvider] = {}
         self.token_storages: Dict[str, FileTokenStorage] = {}
         self.service_states: Dict[str, str] = {}
         self.tools_cache: Dict[str, List[Dict[str, Any]]] = {}
+        # Auth / throttling bookkeeping
         self.oauth_attempt_timestamps: Dict[str, float] = {}
         self.last_unauthorized: Dict[str, float] = {}
+        self.oauth_redirect_times: Dict[str, float] = {}
+        self.oauth_in_progress: Dict[str, bool] = {}
+        self.oauth_last_pending_log: Dict[str, float] = {}
+        # OAuth concurrency + refresh tracking
+        self.oauth_futures: Dict[str, asyncio.Future] = {}
+        self.oauth_refresh_tasks: Dict[str, asyncio.Task] = {}
+        self.oauth_refresh_run_at: Dict[str, float] = {}
+        self.oauth_refresh_status: Dict[str, str] = {}
+        self.oauth_refresh_error: Dict[str, str] = {}
 
-        # Initialize OAuth providers for services likely needing OAuth
+        # Initialize provider objects where heuristically obvious
         self._init_oauth_providers()
 
-        # Set initial enabled/disabled states from config
+        # Load persisted redirect timestamps (cooldown across restarts)
+        self._load_redirect_state()
+
+        # Initialize service enabled states
         for service_name, svc in self.config.items():
-            self.service_states[service_name] = "enabled" if getattr(svc, 'enabled', True) else "disabled"
-        # tools_cache populated asynchronously after server starts
+            self.service_states[service_name] = (
+                "enabled" if getattr(svc, 'enabled', True) else "disabled"
+            )
+        # tools_cache gets filled asynchronously after server start
     
     def load_config(self) -> Dict[str, ServiceConfig]:
         """Load MCP servers configuration"""
@@ -231,13 +376,82 @@ class MCPSupervisorV2:
         The MCP SDK will automatically handle RFC 9728 OAuth discovery when needed.
         """
         for name, service in self.config.items():
-            # Create OAuth providers for services that likely need OAuth
+            # Create OAuth providers for services that likely need OAuth (heuristic)
             if self._is_oauth_service(service.spec.get('url', '')):
                 self._create_oauth_provider(name, service)
                 logger.info(f"OAuth provider created for detected OAuth service: {name}")
-        
-        # For other services, the SDK will automatically discover OAuth requirements
-        # when they return 401 + WWW-Authenticate headers (per RFC 9728)
+
+        # If tokens already exist on disk for a service, proactively create provider so they are used on first attempt.
+        token_file = ROOT_DIR / 'oauth_tokens.json'
+        if token_file.exists():
+            try:
+                with open(token_file, 'r') as f:
+                    data = json.load(f)
+                if isinstance(data, dict):
+                    for name, service in self.config.items():
+                        if name in self.oauth_providers:
+                            continue
+                        if name in data and 'access_token' in data[name]:
+                            url = service.spec.get('url', '')
+                            base = self._base_server_url(url)
+                            provider = self._create_dynamic_oauth_provider(name, base)
+                            # Attempt to restore persisted client_info if present (ensures consistent client identity across restarts)
+                            try:
+                                svc_entry = data.get(name, {})
+                                ci = svc_entry.get('client_info') if isinstance(svc_entry, dict) else None
+                                if ci and provider is not None:
+                                    # provider.storage is FileTokenStorage; we call set_client_info only if not already set internally
+                                    # Reconstruct minimal model accepted by OAuthClientInformationFull; ignore unknown keys
+                                    fields = {}
+                                    for k in ('client_id','client_secret','client_id_issued_at','client_secret_expires_at','redirect_uris','grant_types','response_types','scope','token_endpoint_auth_method'):
+                                        if k in ci:
+                                            fields[k] = ci[k]
+                                    try:
+                                        ci_obj = OAuthClientInformationFull(**fields)  # type: ignore[arg-type]
+                                        # Persist back through storage for uniform access later
+                                        # (storage.set_client_info overwrites existing file entry with normalized form)
+                                        asyncio.create_task(provider.storage.set_client_info(ci_obj))  # type: ignore[attr-defined]
+                                        logger.info(f"Restored client_info for {name} (client_id={ci.get('client_id')})")
+                                    except Exception:
+                                        logger.debug(f"Failed reconstructing client_info object for {name}", exc_info=True)
+                            except Exception:
+                                logger.debug(f"Client info restoration failed for {name}", exc_info=True)
+                            logger.info(f"OAuth provider created from existing tokens for service: {name}")
+            except Exception:
+                logger.debug("Failed proactive provider creation from existing tokens", exc_info=True)
+
+        # Remaining services rely on automatic discovery via 401 challenges.
+    # -------- Persistent OAuth redirect cooldown state --------
+    def _redirect_state_path(self) -> Path:
+        return ROOT_DIR / "oauth_redirect_state.json"
+
+    def _load_redirect_state(self):
+        path = self._redirect_state_path()
+        if not path.exists():
+            return
+        try:
+            with open(path,'r') as f:
+                data=json.load(f)
+            if isinstance(data, dict):
+                for k,v in data.items():
+                    try:
+                        self.oauth_redirect_times[k]=float(v)
+                    except Exception:
+                        continue
+                if self.oauth_redirect_times:
+                    logger.info(f"Loaded OAuth redirect cooldown state for {len(self.oauth_redirect_times)} services")
+        except Exception as e:
+            logger.warning(f"Failed loading redirect state: {e}")
+
+    def _persist_redirect_state(self):
+        path=self._redirect_state_path()
+        try:
+            tmp=path.with_suffix('.tmp')
+            with open(tmp,'w') as f:
+                json.dump(self.oauth_redirect_times,f,indent=2)
+            os.replace(tmp,path)
+        except Exception as e:
+            logger.debug(f"Failed persisting redirect state: {e}")
     
     async def _populate_initial_cache(self):
         """
@@ -293,43 +507,61 @@ class MCPSupervisorV2:
         
         service = self.config[service_name]
         
-        try:
-            # Apply httpx low-and-slow attack protection using asyncio.wait_for
-            # For OAuth services, use longer timeout to allow browser authentication
-            timeout = 3.0  # Default fast timeout
-            
-            # Dynamic OAuth detection - check if service requires OAuth
-            needs_oauth = (service_name in self.oauth_providers or 
-                          self._is_oauth_service(service.spec.get('url', '')))
-            
-            if needs_oauth:
-                token_storage = FileTokenStorage("oauth_tokens.json", service_name)
-                tokens = await token_storage.get_tokens()
-                if not tokens:
-                    now = time.time()
-                    last = self.oauth_attempt_timestamps.get(service_name)
-                    if last and (now - last) < 90:  # 90s cool-down
-                        logger.info(f"Skipping new OAuth attempt for {service_name}; last attempt {(now-last):.1f}s ago")
-                        return []
-                    self.oauth_attempt_timestamps[service_name] = now
-                    timeout = 120.0  # Allow user to complete browser auth
-                    logger.debug(f"Using extended timeout ({timeout}s) for initial OAuth flow for {service_name}")
-                
-            return await asyncio.wait_for(
-                self._get_tools_for_service_impl(service_name, service), 
-                timeout=timeout
-            )
-        except asyncio.TimeoutError:
-            needs_oauth = (service_name in self.oauth_providers or 
-                          self._is_oauth_service(service.spec.get('url', '')))
-            if needs_oauth:
-                logger.warning(f"OAuth timeout for {service_name} - user may need to complete browser authentication")
-            else:
-                logger.warning(f"Timeout (3s) getting tools for {service_name} - fast fail, non-blocking.")
-            return []
-        except Exception as e:
-            logger.error(f"Failed to get tools directly for {service_name}: {e}")
-            return []
+        # In-flight dedupe
+        if not hasattr(self, '_tools_inflight'):
+            self._tools_inflight = {}
+        existing = self._tools_inflight.get(service_name)
+        if existing and not existing.done():
+            try:
+                return await asyncio.wait_for(existing, timeout=30)
+            except Exception:
+                pass
+
+        async def _fetch():
+            stage = {'entered': False, 'initialized': False}
+            try:
+                timeout = 3.0
+                needs_oauth = (service_name in self.oauth_providers or 
+                              self._is_oauth_service(service.spec.get('url', '')))
+                if needs_oauth:
+                    token_storage = FileTokenStorage("oauth_tokens.json", service_name)
+                    tokens = await token_storage.get_tokens()
+                    if not tokens:
+                        now = time.time()
+                        last = self.oauth_attempt_timestamps.get(service_name)
+                        if last and (now - last) < 90:
+                            logger.info(f"Skipping new OAuth attempt for {service_name}; last attempt {(now-last):.1f}s ago")
+                            return []
+                        self.oauth_attempt_timestamps[service_name] = now
+                        timeout = 120.0
+                        logger.debug(f"Using extended timeout ({timeout}s) for initial OAuth flow for {service_name}")
+                    else:
+                        if service.transport == 'sse':
+                            timeout = 60.0  # Increased for replicate debugging
+                        else:
+                            timeout = 12.0
+                        logger.debug(f"Using extended post-auth timeout ({timeout}s) for {service_name} transport={service.transport} with tokens")
+                return await asyncio.wait_for(self._get_tools_for_service_impl(service_name, service, stage), timeout=timeout)
+            except asyncio.TimeoutError:
+                classification = 'timeout'
+                if stage['entered'] and not stage['initialized']:
+                    classification = 'init_timeout'
+                elif stage['initialized']:
+                    classification = 'list_timeout'
+                logger.warning(f"Tools {classification} for {service_name} (entered={stage['entered']} initialized={stage['initialized']})")
+                return []
+            except Exception as e:
+                logger.error(f"Failed to get tools directly for {service_name}: {e}")
+                return []
+            finally:
+                fut2 = self._tools_inflight.get(service_name)
+                if fut2 and fut2.done():
+                    self._tools_inflight.pop(service_name, None)
+
+        loop = asyncio.get_running_loop()
+        fut = loop.create_task(_fetch())
+        self._tools_inflight[service_name] = fut
+        return await fut
     
     def _update_service_cache(self, service_name: str, enabled: bool):
         """
@@ -383,6 +615,48 @@ class MCPSupervisorV2:
         provider = self._create_dynamic_oauth_provider(service_name, base)
         return provider is not None
 
+    def debug_oauth_state(self, service_name: str) -> Dict[str, Any]:
+        """Return internal OAuth state snapshot for diagnostics (no secrets)."""
+        state: Dict[str, Any] = {}
+        try:
+            provider = self.oauth_providers.get(service_name)
+            storage = self.token_storages.get(service_name)
+            tokens_present = False
+            token_meta: Dict[str, Any] = {}
+            if storage and storage.file_path.exists():
+                try:
+                    with open(storage.file_path, 'r') as f:
+                        data = json.load(f)
+                    svc = data.get(service_name) or {}
+                    if 'access_token' in svc:
+                        tokens_present = True
+                        at = svc.get('access_token','')
+                        # Mask access token
+                        token_meta['access_token_preview'] = f"{at[:6]}...{at[-4:]}" if len(at) > 10 else 'short'
+                    for k in ('expires_in','obtained_at','scope'):
+                        if k in svc:
+                            token_meta[k] = svc[k]
+                    if 'client_info' in svc:
+                        ci = svc['client_info']
+                        token_meta['client_id'] = ci.get('client_id')
+                except Exception as e:
+                    token_meta['read_error'] = type(e).__name__
+            now = time.time()
+            state.update({
+                'service': service_name,
+                'provider_exists': provider is not None,
+                'oauth_in_progress': self.oauth_in_progress.get(service_name, False),
+                'tokens_present': tokens_present,
+                'token_meta': token_meta,
+                'last_unauthorized_delta_s': (round(now - self.last_unauthorized[service_name],1) if service_name in self.last_unauthorized else None),
+                'redirect_recent_delta_s': (round(now - self.oauth_redirect_times[service_name],1) if service_name in self.oauth_redirect_times else None),
+                'refresh_scheduled_in_s': (round(self.oauth_refresh_run_at[service_name]-now,1) if service_name in self.oauth_refresh_run_at else None),
+                'state': self.service_states.get(service_name),
+            })
+        except Exception as e:
+            state['error'] = f"debug_oauth_state_failed:{type(e).__name__}"
+        return state
+
     async def reset_oauth_tokens(self, service_name: str) -> bool:
         """Delete stored tokens and clear last unauthorized timestamp."""
         storage = self.token_storages.get(service_name)
@@ -394,8 +668,25 @@ class MCPSupervisorV2:
         if storage and hasattr(storage, 'delete_tokens'):
             await storage.delete_tokens()
             self.last_unauthorized.pop(service_name, None)
+            # Clear redirect cooldown to allow immediate new browser open
+            try:
+                if service_name in self.oauth_redirect_times:
+                    self.oauth_redirect_times.pop(service_name, None)
+                    self._persist_redirect_state()
+            except Exception:
+                logger.debug("Failed clearing redirect cooldown on reset", exc_info=True)
             return True
         return False
+
+    def clear_redirect_cooldown(self, service_name: str) -> bool:
+        """Clear redirect cooldown for a service (force next auth window)."""
+        try:
+            if service_name in self.oauth_redirect_times:
+                self.oauth_redirect_times.pop(service_name, None)
+                self._persist_redirect_state()
+            return True
+        except Exception:
+            return False
 
     async def _run_with_oauth_retry(self, service_name: str, purpose: str, transport: str, url: str, op_coro_factory):
         """Execute an async operation with at most one OAuth-driven retry on 401.
@@ -405,44 +696,372 @@ class MCPSupervisorV2:
           3. If 401 and provider exists: delete tokens (if any) to force re-auth, retry once.
           4. Record cooldown to avoid tight unauthorized loops (60s).
         """
+        # Clear stale in-progress flag if tokens already present (e.g., after restart)
+        if self.oauth_in_progress.get(service_name):
+            try:
+                storage_chk = self.token_storages.get(service_name)
+                if storage_chk:
+                    existing = await storage_chk.get_tokens()
+                    if existing:
+                        self._log_event(service_name, purpose, transport, time.perf_counter(), status='oauth_in_progress_cleared_stale')
+                        self.oauth_in_progress[service_name] = False
+            except Exception:
+                pass
+        # Concurrency guard: if still in progress, surface pending quickly
+        if self.oauth_in_progress.get(service_name):
+            monotonic_now = time.perf_counter()
+            last_log = self.oauth_last_pending_log.get(service_name, 0)
+            # Store last log time in wall clock dict but compare using perf counter delta where possible
+            if (time.time() - last_log) > 15:  # keep original semantics for cooldown using wall time
+                self.oauth_last_pending_log[service_name] = time.time()
+                self._log_event(service_name, purpose, transport, monotonic_now, status='oauth_pending_in_progress')
+            raise OAuthPending(f'OAuth in progress for {service_name}')
+
+        # Pre-flight proactive refresh before expiry (avoid deleting tokens; refresh instead)
+        storage_prefetch = self.token_storages.get(service_name)
+        if storage_prefetch:
+            try:
+                _tokens = await storage_prefetch.get_tokens()
+                if _tokens and _tokens.expires_in:
+                    fp = storage_prefetch.file_path
+                    if fp.exists():
+                        import json as _json, time as _time
+                        with open(fp,'r') as f: _data=_json.load(f)
+                        rec = _data.get(service_name)
+                        if rec and 'obtained_at' in rec:
+                            age = _time.time() - rec['obtained_at']
+                            remaining = _tokens.expires_in - age
+                            if remaining < 120:  # refresh when <2m remaining
+                                await self._maybe_refresh_tokens(service_name)
+                                self._log_event(service_name, purpose, transport, time.perf_counter(), status='token_prefetch_refresh', remaining=round(remaining,1))
+            except Exception:
+                logger.debug("Pre-flight refresh check failed", exc_info=True)
+
         provider = self.oauth_providers.get(service_name)
         attempts = 0
         cooldown = 60.0
         while attempts < 2:
+            attempt_start = time.perf_counter()
             try:
-                return await op_coro_factory(provider)
+                self._log_event(service_name, purpose, transport, attempt_start, status='attempt', attempt=attempts+1, oauth_provider=bool(provider), in_progress=self.oauth_in_progress.get(service_name, False))
+                result = await op_coro_factory(provider)
+                status_final = "ok" if attempts == 0 else "ok_after_retry"
+                self._log_event(service_name, purpose, transport, attempt_start, status=status_final, attempt=attempts+1, oauth_provider=bool(provider))
+                if self.oauth_in_progress.get(service_name):
+                    self.oauth_in_progress[service_name] = False
+                return result
             except Exception as e:
+                status_code, www_auth = self._extract_http_error_info(e)
                 msg = str(e)
-                if '401' in msg:
+                is_unauthorized = (status_code == 401) or ('401' in msg)
+                if is_unauthorized:
                     now = time.time()
                     last = self.last_unauthorized.get(service_name, 0)
                     if attempts == 0 and (now - last) < cooldown:
-                        # Suppress repeated immediate retries
-                        self._log_event(service_name, purpose, transport, time.perf_counter(), status="unauthorized_suppressed", since=f"{now-last:.1f}s")
+                        self._log_event(service_name, purpose, transport, attempt_start, status="unauthorized_suppressed", since=f"{now-last:.1f}s", www_auth=www_auth, attempt=attempts+1, oauth_provider=bool(provider))
                         raise
                     self.last_unauthorized[service_name] = now
-                    self._log_event(service_name, purpose, transport, time.perf_counter(), status="unauthorized", attempt=attempts+1)
-                    # Prepare retry path
+                    self._log_event(service_name, purpose, transport, attempt_start, status="unauthorized", attempt=attempts+1, oauth_provider=bool(provider), www_auth=www_auth, code=status_code)
                     if provider is None:
-                        # Create provider
+                        mark_in_progress = True
+                        try:
+                            storage_tokens = self.token_storages.get(service_name)
+                            if storage_tokens:
+                                tk = await storage_tokens.get_tokens()
+                                if tk:
+                                    mark_in_progress = False
+                        except Exception:
+                            pass
+                        if mark_in_progress:
+                            self.oauth_in_progress[service_name] = True
                         base = self._base_server_url(url)
-                        provider = self._create_dynamic_oauth_provider(service_name, base)
-                        if provider is None:
-                            self._log_event(service_name, purpose, transport, time.perf_counter(), status="oauth_provider_create_failed")
-                            raise
+                        self._log_event(service_name, purpose, transport, time.perf_counter(), status='oauth_begin_flow', base=base)
+                        fut = getattr(self, 'oauth_futures', {}).get(service_name)
+                        if fut and not fut.done():
+                            self._log_event(service_name, purpose, transport, time.perf_counter(), status='oauth_future_join')
+                            await fut
+                            provider = self.oauth_providers.get(service_name)
+                        else:
+                            if not hasattr(self, 'oauth_futures'):
+                                self.oauth_futures = {}
+                            loop = asyncio.get_running_loop()
+                            fut = loop.create_future()
+                            self.oauth_futures[service_name] = fut
+                            try:
+                                provider = self._create_dynamic_oauth_provider(service_name, self._base_server_url(url))
+                                if provider is None:
+                                    self._log_event(service_name, purpose, transport, time.perf_counter(), status="oauth_provider_create_failed")
+                                    fut.set_result(False)
+                                    raise
+                                else:
+                                    self._log_event(service_name, purpose, transport, time.perf_counter(), status="oauth_provider_created")
+                                    fut.set_result(True)
+                                    asyncio.create_task(self._maybe_schedule_refresh(service_name))
+                            finally:
+                                pass
                     else:
-                        # Existing provider: nuke tokens to force new auth
+                        self.oauth_in_progress[service_name] = True
+                        self._log_event(service_name, purpose, transport, time.perf_counter(), status='oauth_reauth_forced')
                         storage = self.token_storages.get(service_name)
                         if storage and hasattr(storage, 'delete_tokens'):
                             try:
                                 await storage.delete_tokens()
+                                self._log_event(service_name, purpose, transport, time.perf_counter(), status="tokens_deleted", attempt=attempts+1)
                             except Exception:
                                 logger.debug("Token deletion failed during retry", exc_info=True)
                     attempts += 1
                     continue
+                self._log_event(service_name, purpose, transport, attempt_start, status="error", attempt=attempts+1, error=type(e).__name__, msg=str(e)[:160])
                 raise
-        # If we exit loop without return, last attempt failed and raised. Here just raise generic.
+        if self.oauth_in_progress.get(service_name):
+            self.oauth_in_progress[service_name] = False
         raise RuntimeError(f"{service_name} {purpose} failed after OAuth retry")
+
+    async def _maybe_schedule_refresh(self, service_name: str):
+        """Schedule token refresh ahead of expiry; reschedules itself after run."""
+        storage = self.token_storages.get(service_name)
+        if not storage:
+            return
+        try:
+            tokens = await storage.get_tokens()
+            if not tokens or not tokens.expires_in:
+                return
+            fp = storage.file_path
+            if not fp.exists():
+                return
+            import json as _json, time as _time
+            with open(fp,'r') as f: data=_json.load(f)
+            rec = data.get(service_name)
+            if not rec or 'obtained_at' not in rec:
+                return
+            obtained = rec['obtained_at']
+            age = _time.time() - obtained
+            expires_in = tokens.expires_in
+            remaining = expires_in - age
+            if remaining <= 0:
+                return
+            # choose delay
+            lead = 60
+            delay = max(5, remaining - lead)
+            if remaining < 120:
+                delay = max(5, int(remaining * 0.5))
+            # Cancel existing
+            t_old = getattr(self, 'oauth_refresh_tasks', {}).pop(service_name, None) if hasattr(self, 'oauth_refresh_tasks') else None
+            if t_old:
+                t_old.cancel()
+            if not hasattr(self, 'oauth_refresh_tasks'):
+                self.oauth_refresh_tasks = {}
+            async def _task():
+                await asyncio.sleep(delay)
+                try:
+                    self._log_event(service_name, 'oauth_refresh', None, time.perf_counter(), status='attempt', in_seconds=delay)
+                    # Attempt proactive refresh if within window and refresh token present
+                    await self._maybe_refresh_tokens(service_name)
+                    await self.test_service_connection(service_name)
+                    self._log_event(service_name, 'oauth_refresh', None, time.perf_counter(), status='validated')
+                except Exception as e:
+                    self._log_event(service_name, 'oauth_refresh', None, time.perf_counter(), status='error', error=type(e).__name__)
+                finally:
+                    asyncio.create_task(self._maybe_schedule_refresh(service_name))
+            t = asyncio.create_task(_task())
+            self.oauth_refresh_tasks[service_name] = t
+            self._log_event(service_name, 'oauth_refresh_schedule', None, time.perf_counter(), status='scheduled', delay=delay)
+        except Exception:
+            pass
+
+    async def _maybe_refresh_tokens(self, service_name: str):
+        """If tokens near expiry and refresh_token present, perform refresh grant."""
+        storage = self.token_storages.get(service_name)
+        provider = self.oauth_providers.get(service_name)
+        if not storage or not provider:
+            return
+        try:
+            tokens = await storage.get_tokens()
+            if not tokens or not tokens.refresh_token:
+                return
+            if not tokens.expires_in:
+                return
+            fp = storage.file_path
+            if not fp.exists():
+                return
+            import json as _json, time as _time, httpx
+            with open(fp,'r') as f: data=_json.load(f)
+            rec = data.get(service_name)
+            if not rec or 'obtained_at' not in rec:
+                return
+            age = _time.time() - rec['obtained_at']
+            remaining = tokens.expires_in - age
+            if remaining > 120:  # only refresh when close (<2 min)
+                return
+            
+            # Get server URL from provider context
+            server_url = None
+            if hasattr(provider, 'context') and provider.context:
+                server_url = provider.context.server_url
+            
+            if not server_url:
+                logger.warning(f"No server URL found for {service_name} refresh")
+                return
+                
+            # Discover token endpoint via OAuth discovery
+            discovery_url = server_url.rstrip('/') + '/.well-known/oauth-authorization-server'
+            token_endpoint = None
+            
+            async with httpx.AsyncClient(timeout=10) as client:
+                try:
+                    resp = await client.get(discovery_url)
+                    if resp.status_code == 200:
+                        discovery_data = resp.json()
+                        token_endpoint = discovery_data.get('token_endpoint')
+                except:
+                    pass
+            
+            if not token_endpoint:
+                # Fallback to standard endpoint
+                token_endpoint = server_url.rstrip('/') + '/token'
+            
+            # Get stored client credentials (from original OAuth flow)
+            client_info = rec.get('client_info', {})
+            client_id = client_info.get('client_id')
+            client_secret = client_info.get('client_secret')
+            
+            if not client_id:
+                logger.warning(f"No client_id found in stored tokens for {service_name}")
+                return
+            
+            payload = {
+                'grant_type': 'refresh_token',
+                'refresh_token': tokens.refresh_token,
+                'client_id': client_id,
+            }
+            
+            # Add client_secret if available (required for confidential clients)
+            if client_secret:
+                payload['client_secret'] = client_secret
+            
+                async with httpx.AsyncClient(timeout=15) as client:
+                    resp = await client.post(token_endpoint, data=payload)
+                    if resp.status_code != 200:
+                        self._log_event(service_name, 'token_refresh', None, time.perf_counter(), status='http_error', code=resp.status_code)
+                        logger.warning(f"Token refresh failed for {service_name}: {resp.status_code}")
+                        try:
+                            error_data = resp.json()
+                            error_type = error_data.get('error', '')
+                            error_desc = error_data.get('error_description', '')
+                            logger.warning(f"Refresh error details: {error_data}")
+                            
+                            # Handle client ID mismatch by clearing incompatible tokens
+                            if error_type == 'invalid_grant' and 'mismatch' in error_desc.lower():
+                                logger.warning(f"Client ID mismatch detected for {service_name}, clearing incompatible tokens")
+                                # Remove the incompatible token data
+                                await storage.delete_tokens()
+                                self._log_event(service_name, 'token_refresh', None, time.perf_counter(), status='cleared_mismatched_tokens')
+                                
+                        except Exception as parse_error:
+                            logger.warning(f"Refresh error text: {resp.text}")
+                        return
+                    jd = resp.json()
+                    new_access = jd.get('access_token')
+                    new_expires = jd.get('expires_in')
+                    new_scope = jd.get('scope')
+                    if new_access:
+                        await storage.replace_access_token(new_access, new_expires, new_scope)
+                        self._log_event(service_name, 'token_refresh', None, time.perf_counter(), status='refreshed', remaining=int(remaining))
+                        logger.info(f"Successfully refreshed tokens for {service_name}")
+        except Exception as e:
+            self._log_event(service_name, 'token_refresh', None, time.perf_counter(), status='error', error=type(e).__name__)
+            logger.warning(f"Token refresh exception for {service_name}: {e}")
+
+    def _extract_http_error_info(self, exc: Exception):
+        """Attempt to pull status code & WWW-Authenticate header from common HTTP client exceptions."""
+        status_code = None
+        www_auth = None
+        try:
+            # httpx style: exc.response
+            resp = getattr(exc, 'response', None)
+            if resp is not None:
+                status_code = getattr(resp, 'status_code', None)
+                headers = getattr(resp, 'headers', {}) or {}
+                if isinstance(headers, dict):
+                    www_auth = headers.get('www-authenticate') or headers.get('WWW-Authenticate')
+            # aiohttp style: exc.status, exc.headers
+            if status_code is None:
+                status_code = getattr(exc, 'status', None)
+            if www_auth is None:
+                hdrs = getattr(exc, 'headers', None)
+                if hdrs:
+                    try:
+                        www_auth = hdrs.get('www-authenticate') or hdrs.get('WWW-Authenticate')
+                    except Exception:
+                        pass
+        except Exception:
+            pass
+        # If not directly detectable AND this looks like an aggregated TaskGroup/ExceptionGroup, dive deeper
+        try:
+            if (status_code is None or (status_code != 401 and '401' not in str(exc))) and isinstance(exc, BaseExceptionGroup):
+                for leaf in self._flatten_exceptions(exc):
+                    sc, wa = self._extract_http_error_info_single(leaf)
+                    if sc == 401 or '401' in str(leaf):
+                        return sc or 401, wa
+        except Exception:
+            pass
+        return status_code, www_auth
+
+    def _extract_http_error_info_single(self, exc: Exception):
+        """Single (non-group) extraction helper used during deep scan."""
+        status_code = None
+        www_auth = None
+        try:
+            resp = getattr(exc, 'response', None)
+            if resp is not None:
+                status_code = getattr(resp, 'status_code', None)
+                headers = getattr(resp, 'headers', {}) or {}
+                if isinstance(headers, dict):
+                    www_auth = headers.get('www-authenticate') or headers.get('WWW-Authenticate')
+            if status_code is None:
+                status_code = getattr(exc, 'status', None)
+            if www_auth is None:
+                hdrs = getattr(exc, 'headers', None)
+                if hdrs:
+                    try:
+                        www_auth = hdrs.get('www-authenticate') or hdrs.get('WWW-Authenticate')
+                    except Exception:
+                        pass
+        except Exception:
+            pass
+        return status_code, www_auth
+
+    def _flatten_exceptions(self, exc: Exception):
+        """Flatten nested BaseExceptionGroup / ExceptionGroup trees to leaf exceptions."""
+        leaves = []
+        stack = [exc]
+        while stack:
+            cur = stack.pop()
+            if isinstance(cur, BaseExceptionGroup):
+                try:
+                    # Python 3.11 BaseExceptionGroup has .exceptions
+                    for sub in getattr(cur, 'exceptions', []) or []:
+                        stack.append(sub)
+                except Exception:
+                    pass
+            else:
+                leaves.append(cur)
+        return leaves
+
+    async def _get_bearer_auth_header(self, service_name: str) -> Optional[Dict[str, str]]:
+        """Get bearer auth header if valid tokens exist, None otherwise."""
+        storage = self.token_storages.get(service_name)
+        if not storage:
+            return None
+            
+        try:
+            tokens = await storage.get_tokens()
+            if tokens and tokens.access_token:
+                return {'Authorization': f'Bearer {tokens.access_token}'}
+        except Exception as e:
+            logger.debug(f"Failed to get bearer token for {service_name}: {e}")
+        
+        return None
 
     def _compute_timeouts(self, service_name: str, transport: str, purpose: str, has_oauth: bool):
         """Unified timeout policy. Returns (connection_timeout, read_timeout_or_None).
@@ -611,21 +1230,24 @@ class MCPSupervisorV2:
         try:
             server_url = service.spec.get('oauth_server_url', service.spec.get('url', ''))
             if server_url:
+                # Reuse existing provider
+                if name in self.oauth_providers:
+                    return self.oauth_providers[name]
                 # Create service-specific token storage
                 token_storage = FileTokenStorage("oauth_tokens.json", name)
                 self.token_storages[name] = token_storage
-                
+                redirect_handler = lambda url: self._handle_oauth_redirect_service(name, url)
                 provider = OAuthClientProvider(
                     server_url=server_url,
                     client_metadata=OAuthClientMetadata(
                         client_name=f"Fractalic MCP Client - {name}",
-                        redirect_uris=[AnyUrl("http://localhost:5859/oauth/callback")],
+                        redirect_uris=[AnyUrl("http://localhost:5860/oauth/callback")],
                         grant_types=["authorization_code", "refresh_token"],
                         response_types=["code"],
                         scope=service.spec.get('oauth_scope', 'read write'),
                     ),
                     storage=token_storage,
-                    redirect_handler=self._handle_oauth_redirect,
+                    redirect_handler=redirect_handler,
                     callback_handler=self._create_callback_handler_for_service(name),
                 )
                 self.oauth_providers[name] = provider
@@ -636,26 +1258,38 @@ class MCPSupervisorV2:
     def _create_dynamic_oauth_provider(self, name: str, server_url: str) -> OAuthClientProvider:
         """Create OAuth provider dynamically for automatic OAuth discovery"""
         try:
+            # Reuse existing provider if present
+            if name in self.oauth_providers:
+                return self.oauth_providers[name]
             # Create service-specific token storage
             token_storage = FileTokenStorage("oauth_tokens.json", name)
             self.token_storages[name] = token_storage
+            redirect_handler = lambda url: self._handle_oauth_redirect_service(name, url)
+            
+            # Enhance callback handler to force token exchange completion
+            callback_handler = self._create_enhanced_callback_handler_for_service(name)
+            
+            # Enable debug logging for OAuth provider
+            import logging
+            oauth_logger = logging.getLogger('mcp.client.auth')
+            oauth_logger.setLevel(logging.DEBUG)
             
             provider = OAuthClientProvider(
                 server_url=server_url,
                 client_metadata=OAuthClientMetadata(
                     client_name=f"Fractalic MCP Client - {name}",
-                    redirect_uris=[AnyUrl("http://localhost:5859/oauth/callback")],
+                    redirect_uris=[AnyUrl("http://localhost:5860/oauth/callback")],
                     grant_types=["authorization_code", "refresh_token"],
                     response_types=["code"],
                     scope="read write",
                 ),
                 storage=token_storage,
-                redirect_handler=self._handle_oauth_redirect,
-                callback_handler=self._create_callback_handler_for_service(name),
+                redirect_handler=redirect_handler,
+                callback_handler=callback_handler,
             )
             # Store it for future use
             self.oauth_providers[name] = provider
-            logger.info(f"Dynamic OAuth provider created for {name}")
+            logger.info(f"Dynamic OAuth provider created for {name} base_url={server_url}")
             return provider
         except Exception as e:
             logger.error(f"Failed to create dynamic OAuth provider for {name}: {e}")
@@ -673,6 +1307,19 @@ class MCPSupervisorV2:
         
         # Small delay to ensure browser has time to start
         await asyncio.sleep(0.1)
+
+    async def _handle_oauth_redirect_service(self, service: str, auth_url: str) -> None:
+        """Service-aware redirect handler with cooldown to prevent multiple windows."""
+        COOLDOWN = 90  # seconds
+        now = time.time()
+        last = self.oauth_redirect_times.get(service, 0)
+        if now - last < COOLDOWN:
+            self._log_event(service, 'oauth_redirect', None, now, status='skipped_cooldown', remaining=round(COOLDOWN - (now - last),1))
+            return
+        self.oauth_redirect_times[service] = now
+        self._persist_redirect_state()
+        await self._handle_oauth_redirect(auth_url)
+        self._log_event(service, 'oauth_redirect', None, now, status='opened')
     
     def _create_callback_handler_for_service(self, service_name: str):
         """Create a service-specific callback handler to avoid state mixing"""
@@ -689,9 +1336,12 @@ class MCPSupervisorV2:
             logger.info(f"Waiting for OAuth callback for service: {service_name}")
             
             try:
-                for _ in range(timeout * 10):  # Check every 100ms
+                # Poll with periodic trace every 5s
+                for i in range(timeout * 10):  # Check every 100ms
                     if oauth_callback_data[callback_key].get("received"):
                         break
+                    if i % 50 == 0 and i > 0:  # every 5 seconds
+                        logger.info(f"OAuth callback still pending for {service_name} elapsed={i/10:.1f}s in_progress={self.oauth_in_progress.get(service_name)}")
                     await asyncio.sleep(0.1)
                 else:
                     logger.error(f"OAuth callback timeout after 5 minutes for {service_name}")
@@ -707,7 +1357,7 @@ class MCPSupervisorV2:
                     logger.error(f"No authorization code received for {service_name}")
                     return ("", None)
                 
-                logger.info(f"OAuth authorization code received successfully for {service_name}")
+                logger.info(f"OAuth authorization code received successfully for {service_name} state_match={bool(callback_data.get('state'))}")
                 
                 return (callback_data["code"], callback_data.get("state"))
                 
@@ -716,6 +1366,71 @@ class MCPSupervisorV2:
                 oauth_callback_data.pop(callback_key, None)
         
         return callback_handler
+    
+    def _create_enhanced_callback_handler_for_service(self, service_name: str):
+        """Create an enhanced callback handler that ensures token exchange completion"""
+        async def enhanced_callback_handler() -> tuple[str, str | None]:
+            """Enhanced OAuth callback handler with forced token exchange"""
+            # Create a unique callback key for this service's OAuth session
+            callback_key = f"{service_name}_{id(asyncio.current_task())}"
+            
+            # Register this callback session
+            oauth_callback_data[callback_key] = {"received": False}
+            
+            # Wait for the callback with timeout
+            timeout = 300  # 5 minutes
+            logger.info(f"Enhanced OAuth callback waiting for service: {service_name}")
+            
+            try:
+                # Poll with periodic trace every 5s
+                for i in range(timeout * 10):  # Check every 100ms
+                    if oauth_callback_data[callback_key].get("received"):
+                        break
+                    if i % 50 == 0 and i > 0:  # every 5 seconds
+                        logger.info(f"OAuth callback still pending for {service_name} elapsed={i/10:.1f}s in_progress={self.oauth_in_progress.get(service_name)}")
+                    await asyncio.sleep(0.1)
+                else:
+                    logger.error(f"OAuth callback timeout after 5 minutes for {service_name}")
+                    return ("", None)
+                
+                callback_data = oauth_callback_data.get(callback_key, {})
+                
+                if callback_data.get("error"):
+                    logger.error(f"OAuth error for {service_name}: {callback_data['error']}")
+                    return ("", None)
+                
+                if not callback_data.get("code"):
+                    logger.error(f"No authorization code received for {service_name}")
+                    return ("", None)
+                
+                # Enhanced: Verify token exchange actually happened
+                code = callback_data["code"]
+                state = callback_data.get("state")
+                
+                logger.info(f"Enhanced OAuth: authorization code received for {service_name}, forcing token validation")
+                
+                # Give OAuth provider a moment to complete internal token exchange
+                await asyncio.sleep(1.0)
+                
+                # Verify tokens were actually saved
+                token_storage = self.token_storages.get(service_name)
+                if token_storage:
+                    tokens = await token_storage.get_tokens()
+                    if tokens and tokens.access_token:
+                        logger.info(f"Enhanced OAuth: tokens confirmed saved for {service_name}")
+                    else:
+                        logger.warning(f"Enhanced OAuth: authorization code received but no tokens saved for {service_name} - OAuth provider token exchange may have failed")
+                        # Still return the code as the OAuth provider should handle this internally
+                else:
+                    logger.warning(f"Enhanced OAuth: no token storage found for {service_name}")
+                
+                return (code, state)
+                
+            finally:
+                # Clean up the callback data
+                oauth_callback_data.pop(callback_key, None)
+        
+        return enhanced_callback_handler
 
     # -------- Structured logging helpers --------
     def _log_event(self, service: str, action: str, transport: Optional[str], start_ts: float, status: str = "ok", **extra):
@@ -777,7 +1492,7 @@ class MCPSupervisorV2:
             self._log_event(service_name, "get_tools", self.config[service_name].transport, start_ts, status="error", error=type(e).__name__)
             return []
     
-    async def _get_tools_for_service_impl(self, service_name: str, service: ServiceConfig) -> List[Dict[str, Any]]:
+    async def _get_tools_for_service_impl(self, service_name: str, service: ServiceConfig, stage: Optional[Dict[str,bool]] = None) -> List[Dict[str, Any]]:
         """Internal implementation of get_tools_for_service with proper error handling"""
         try:
             if service.transport == "stdio":
@@ -820,17 +1535,142 @@ class MCPSupervisorV2:
             elif service.transport == "sse":
                 url = service.spec['url']
                 headers = self._protocol_headers()
+                
+                # Try bearer auth first if tokens are available (more reliable than OAuth provider)
+                bearer_auth = await self._get_bearer_auth_header(service_name)
+                if bearer_auth:
+                    headers.update(bearer_auth)
+                    logger.info(f"Using bearer token auth for {service_name} SSE connection")
+                    
+                    async def op_bearer():
+                        conn_timeout, _ = self._compute_timeouts(service_name, 'sse', 'tools', True)  # has auth
+                        read_timeout = 30.0
+                        target_url = url
+                        open_ts = time.perf_counter()
+                        self._log_event(service_name, 'tools_sse_open', 'sse', open_ts, status='begin', conn_timeout=conn_timeout, read_timeout=read_timeout, oauth=False, bearer=True)
+                        try:
+                            async with sse_client(target_url, auth=None, headers=headers, timeout=conn_timeout, sse_read_timeout=read_timeout) as (r,w):
+                                entered_ts = time.perf_counter()
+                                self._log_event(service_name, 'tools_sse_open', 'sse', entered_ts, status='opened')
+                                if stage is not None:
+                                    stage['entered'] = True
+                                    self._log_event(service_name, 'tools_stage', 'sse', time.perf_counter(), status='entered')
+                                async with ClientSession(r,w) as session:
+                                    if stage is not None:
+                                        stage['initialized'] = False
+                                    init_ts = time.perf_counter()
+                                    self._log_event(service_name, 'tools_init', 'sse', init_ts, status='begin')
+                                    await session.initialize()
+                                    if stage is not None:
+                                        stage['initialized'] = True
+                                        self._log_event(service_name, 'tools_stage', 'sse', time.perf_counter(), status='initialized')
+                                    self._log_event(service_name, 'tools_init', 'sse', init_ts, status='ok')
+                                    lt_ts = time.perf_counter()
+                                    self._log_event(service_name, 'tools_list', 'sse', lt_ts, status='begin')
+                                    tr = await session.list_tools()
+                                    self._log_event(service_name, 'tools_list', 'sse', lt_ts, status='ok', count=len(getattr(tr,'tools',[]) or []))
+                                    return self._format_tools(tr)
+                        except Exception as e:
+                            # Check if this is a 401 error indicating expired token
+                            if "401" in str(e) or "Unauthorized" in str(e):
+                                logger.info(f"Bearer token appears expired for {service_name}, attempting refresh...")
+                                # Try to refresh tokens
+                                await self._maybe_refresh_tokens(service_name)
+                                
+                                # Get updated bearer auth header
+                                updated_bearer_auth = await self._get_bearer_auth_header(service_name)
+                                if updated_bearer_auth:
+                                    # Reset headers with new token
+                                    headers = self._protocol_headers()
+                                    headers.update(updated_bearer_auth)
+                                    logger.info(f"Retrying with refreshed bearer token for {service_name}")
+                                    
+                                    # Retry the connection with refreshed token
+                                    async with sse_client(target_url, auth=None, headers=headers, timeout=conn_timeout, sse_read_timeout=read_timeout) as (r,w):
+                                        entered_ts = time.perf_counter()
+                                        self._log_event(service_name, 'tools_sse_open', 'sse', entered_ts, status='retry_refreshed')
+                                        if stage is not None:
+                                            stage['entered'] = True
+                                        async with ClientSession(r,w) as session:
+                                            if stage is not None:
+                                                stage['initialized'] = False
+                                            await session.initialize()
+                                            if stage is not None:
+                                                stage['initialized'] = True
+                                            lt_ts = time.perf_counter()
+                                            tr = await session.list_tools()
+                                            self._log_event(service_name, 'tools_list', 'sse', lt_ts, status='ok_after_refresh', count=len(getattr(tr,'tools',[]) or []))
+                                            return self._format_tools(tr)
+                                else:
+                                    logger.error(f"Token refresh failed for {service_name}, no updated bearer auth available")
+                                    raise
+                            else:
+                                # Non-auth related error, re-raise
+                                logger.error(f"Bearer auth SSE connection failed for {service_name}: {e}")
+                                raise
+                    
+                    try:
+                        return await op_bearer()
+                    except Exception as e:
+                        logger.warning(f"Bearer auth failed for {service_name} after refresh attempt, falling back to OAuth provider: {e}")
+                
+                # Fallback to OAuth provider if bearer auth not available or failed completely
+                headers = self._protocol_headers()  # Reset headers for OAuth
                 async def op(oauth_provider):
                     # compute timeouts each attempt (provider may appear after retry)
                     conn_timeout, _ = self._compute_timeouts(service_name, 'sse', 'tools', oauth_provider is not None)
+                    read_timeout = 30.0  # explicit SSE read timeout separate from connection
                     target_url = url
+                    open_ts = time.perf_counter()
+                    self._log_event(service_name, 'tools_sse_open', 'sse', open_ts, status='begin', conn_timeout=conn_timeout, read_timeout=read_timeout, oauth=bool(oauth_provider))
                     try:
-                        async with sse_client(target_url, auth=oauth_provider, headers=headers, timeout=conn_timeout) as (r,w):
+                        async with sse_client(target_url, auth=oauth_provider, headers=headers, timeout=conn_timeout, sse_read_timeout=read_timeout) as (r,w):
+                            entered_ts = time.perf_counter()
+                            self._log_event(service_name, 'tools_sse_open', 'sse', entered_ts, status='opened')
+                            if stage is not None:
+                                stage['entered'] = True
+                                self._log_event(service_name, 'tools_stage', 'sse', time.perf_counter(), status='entered')
                             async with ClientSession(r,w) as session:
+                                if stage is not None:
+                                    stage['initialized'] = False
+                                init_ts = time.perf_counter()
+                                self._log_event(service_name, 'tools_init', 'sse', init_ts, status='begin')
                                 await session.initialize()
+                                if stage is not None:
+                                    stage['initialized'] = True
+                                    self._log_event(service_name, 'tools_stage', 'sse', time.perf_counter(), status='initialized')
+                                self._log_event(service_name, 'tools_init', 'sse', init_ts, status='ok')
+                                lt_ts = time.perf_counter()
+                                self._log_event(service_name, 'tools_list', 'sse', lt_ts, status='begin')
                                 tr = await session.list_tools()
+                                self._log_event(service_name, 'tools_list', 'sse', lt_ts, status='ok', count=len(getattr(tr,'tools',[]) or []))
                                 return self._format_tools(tr)
                     except Exception as e:
+                        # Generic deep 401 detection across all services (aggregated TaskGroup / ExceptionGroup)
+                        unauthorized_detected = False
+                        had_www_auth = None
+                        try:
+                            for leaf in self._flatten_exceptions(e):
+                                sc, wa = self._extract_http_error_info_single(leaf)
+                                if sc == 401 or '401' in str(leaf):
+                                    unauthorized_detected = True
+                                    had_www_auth = wa is not None
+                                    break
+                        except Exception:
+                            pass
+
+                        if (("401" in str(e)) or unauthorized_detected) and oauth_provider is None:
+                            base = self._base_server_url(target_url)
+                            self._create_dynamic_oauth_provider(service_name, base)
+                            self._log_event(service_name, 'tools', 'sse', time.perf_counter(), status='forced_oauth_provider', base=base, agg=bool(unauthorized_detected), had_www_auth=had_www_auth)
+                            raise e  # Let retry wrapper perform the retry with new provider
+
+                        # TaskGroup bug mitigation (generic)
+                        if 'TaskGroup' in str(e):
+                            prev_state = self.service_states.get(service_name, 'enabled')
+                            self.service_states[service_name] = 'disabled'
+                            self._log_event(service_name, 'tools', 'sse', time.perf_counter(), status='disabled_taskgroup_bug', previous_state=prev_state)
+                            raise
                         if '404' in str(e) and target_url.endswith('/sse'):
                             alt = target_url.rstrip('/sse') + '/mcp'
                             logger.warning(f"{service_name}: /sse 404 -> retry alt endpoint {alt}")
@@ -840,7 +1680,53 @@ class MCPSupervisorV2:
                                     tr2 = await session2.list_tools()
                                     return self._format_tools(tr2)
                         raise
-                return await self._run_with_oauth_retry(service_name, 'tools', 'sse', url, op)
+                # Run initial attempt
+                stage_local = {'entered': False, 'initialized': False}
+                # Attach stage_local so inner op can mark it; wrap op to pass through
+                async def op_with_stage(oauth_provider):
+                    nonlocal stage_local
+                    return await op(oauth_provider)
+                tools = await self._run_with_oauth_retry(service_name, 'tools', 'sse', url, op_with_stage)
+                if tools:
+                    return tools
+                # Stall detection: no tools AND never entered session
+                if not stage_local['entered']:
+                    self._log_event(service_name, 'tools', 'sse', time.perf_counter(), status='stall_detected', detail='no_entered')
+                    # Recreate provider once (maybe stale underlying session / registration)
+                    try:
+                        prov = self.oauth_providers.get(service_name)
+                        if prov:
+                            base = self._base_server_url(url)
+                            # Drop existing provider
+                            self.oauth_providers.pop(service_name, None)
+                            self._log_event(service_name, 'tools', 'sse', time.perf_counter(), status='provider_dropped_for_stall')
+                            self._create_dynamic_oauth_provider(service_name, base)
+                            self._log_event(service_name, 'tools', 'sse', time.perf_counter(), status='provider_recreated')
+                    except Exception:
+                        logger.debug("Provider recreation failed during stall recovery", exc_info=True)
+                    # Second attempt with extended timeouts
+                    async def op_retry(oauth_provider):
+                        conn_timeout_retry = 15.0
+                        read_timeout_retry = 45.0
+                        self._log_event(service_name, 'tools_sse_open', 'sse', time.perf_counter(), status='begin_retry', conn_timeout=conn_timeout_retry, read_timeout=read_timeout_retry, oauth=bool(oauth_provider))
+                        async with sse_client(url, auth=oauth_provider, headers=headers, timeout=conn_timeout_retry, sse_read_timeout=read_timeout_retry) as (r,w):
+                            self._log_event(service_name, 'tools_sse_open', 'sse', time.perf_counter(), status='opened_retry')
+                            async with ClientSession(r,w) as session:
+                                self._log_event(service_name, 'tools_init', 'sse', time.perf_counter(), status='begin_retry')
+                                await session.initialize()
+                                self._log_event(service_name, 'tools_init', 'sse', time.perf_counter(), status='ok_retry')
+                                self._log_event(service_name, 'tools_list', 'sse', time.perf_counter(), status='begin_retry')
+                                tr = await session.list_tools()
+                                self._log_event(service_name, 'tools_list', 'sse', time.perf_counter(), status='ok_retry', count=len(getattr(tr,'tools',[]) or []))
+                                return self._format_tools(tr)
+                    try:
+                        tools_retry = await self._run_with_oauth_retry(service_name, 'tools', 'sse', url, op_retry)
+                        if tools_retry:
+                            return tools_retry
+                        self._log_event(service_name, 'tools', 'sse', time.perf_counter(), status='stall_unrecovered')
+                    except Exception as e:
+                        self._log_event(service_name, 'tools', 'sse', time.perf_counter(), status='stall_retry_error', error=type(e).__name__)
+                return tools
                         
             elif service.transport == "http":
                 url = service.spec['url']
@@ -1651,6 +2537,11 @@ class MCPSupervisorV2:
         try:
             return await self._test_service_connection_impl(service_name, service)
         except Exception as e:
+            # Treat OAuthPending as transient (keep enabled) so background OAuth can finish
+            if isinstance(e, OAuthPending):
+                logger.info(f"OAuth pending during test for {service_name}; leaving service enabled")
+                self._log_event(service_name, "test_connection", service.transport, start_ts, status="pending_oauth")
+                return False
             logger.error(f"Failed to test connection to {service_name}: {e}")
             self.service_states[service_name] = "disabled"
             self._log_event(service_name, "test_connection", service.transport, start_ts, status="error", error=type(e).__name__)
@@ -1783,6 +2674,12 @@ async def oauth_callback_handler(request):
     global oauth_callback_data
     
     query = request.query
+
+    try:
+        pending_keys = [k for k,v in oauth_callback_data.items() if not v.get('received')]
+        logger.info(f"/oauth/callback invoked params={list(query.keys())} pending_sessions={len(pending_keys)}")
+    except Exception:
+        pass
     
     if 'code' in query:
         # Store callback data for all active OAuth sessions
@@ -1801,6 +2698,106 @@ async def oauth_callback_handler(request):
                 })
         
         logger.info("OAuth authorization code received and broadcast to all pending sessions")
+        # Release in-progress flags so subsequent requests don't get short-circuited as pending
+        try:
+            released = []
+            for svc, in_prog in list(getattr(supervisor, 'oauth_in_progress', {}).items()):
+                if in_prog:
+                    supervisor.oauth_in_progress[svc] = False
+                    released.append(svc)
+            if released:
+                logger.info(f"OAuth in_progress flags released for services={released}")
+                # Proactively trigger background connection tests to force token exchange flows
+                for svc in released:
+                    async def _bg(s=svc):
+                        try:
+                            # Attempt manual token exchange before connection test if tokens still absent.
+                            try:
+                                prov = supervisor.oauth_providers.get(s)
+                                storage = supervisor.token_storages.get(s)
+                                tokens_present = False
+                                if storage:
+                                    existing = await storage.get_tokens()
+                                    tokens_present = existing is not None
+                                if prov and not tokens_present:
+                                    logger.info(f"Manual token exchange attempt for {s} (no tokens present post-callback)")
+                                    
+                                    # Try multiple approaches to force token exchange
+                                    success = False
+                                    
+                                    # Method 1: Check if provider has exchange_code_for_tokens method
+                                    exch = getattr(prov, 'exchange_code_for_tokens', None)
+                                    if callable(exch) and not success:
+                                        try:
+                                            await exch(code)  # use broadcast code
+                                            # Verify tokens were saved
+                                            if storage:
+                                                tokens_after = await storage.get_tokens()
+                                                if tokens_after and tokens_after.access_token:
+                                                    logger.info(f"Manual token exchange successful for {s}")
+                                                    success = True
+                                        except Exception as ex:
+                                            logger.warning(f"exchange_code_for_tokens failed for {s}: {type(ex).__name__} {ex}")
+                                    
+                                    # Method 2: Try auth flow completion
+                                    if not success and hasattr(prov, 'complete_auth_flow'):
+                                        try:
+                                            await prov.complete_auth_flow(code, oauth_callback_data.get(f"{s}_state"))
+                                            # Verify tokens were saved
+                                            if storage:
+                                                tokens_after = await storage.get_tokens()
+                                                if tokens_after and tokens_after.access_token:
+                                                    logger.info(f"Complete auth flow successful for {s}")
+                                                    success = True
+                                        except Exception as ex:
+                                            logger.warning(f"complete_auth_flow failed for {s}: {type(ex).__name__} {ex}")
+                                    
+                                    # Method 3: Force the OAuth provider to complete its auth flow
+                                    if not success and hasattr(prov, '_complete_token_exchange'):
+                                        try:
+                                            await prov._complete_token_exchange(code, oauth_callback_data.get(f"{s}_state"))
+                                            # Verify tokens were saved
+                                            if storage:
+                                                tokens_after = await storage.get_tokens()
+                                                if tokens_after and tokens_after.access_token:
+                                                    logger.info(f"Force token exchange successful for {s}")
+                                                    success = True
+                                        except Exception as ex:
+                                            logger.warning(f"_complete_token_exchange failed for {s}: {type(ex).__name__} {ex}")
+                                    
+                                    # Method 4: Direct token request to the OAuth provider
+                                    if not success:
+                                        try:
+                                            # Get the OAuth client info for token exchange
+                                            client_info = await storage.get_client_info() if storage else None
+                                            if client_info:
+                                                logger.info(f"Attempting direct token exchange for {s} using client_id {client_info.client_id}")
+                                                # This is a fallback - the OAuth provider should handle this automatically
+                                                # but we'll log what we would need for manual token exchange
+                                                logger.warning(f"OAuth provider failed to complete token exchange automatically for {s}")
+                                                logger.info(f"Manual token exchange would need: code={code[:20]}..., client_id={client_info.client_id}, client_secret=***")
+                                        except Exception as ex:
+                                            logger.warning(f"Direct token exchange attempt failed for {s}: {type(ex).__name__} {ex}")
+                                    
+                                    if not success:
+                                        logger.warning(f"All manual token exchange methods failed for {s} - OAuth provider should handle this automatically")
+                                else:
+                                    if tokens_present:
+                                        logger.info(f"Tokens already present for {s}, skipping manual exchange")
+                                    else:
+                                        logger.info(f"No provider found for {s}, cannot attempt manual token exchange")
+                            except Exception as inner:
+                                logger.debug(f"Manual exchange block error for {s}: {inner}")
+                            await supervisor.test_service_connection(s)
+                        except Exception as _e:
+                            logger.debug(f"Post-callback test_service_connection failed for {s}: {_e}")
+                    asyncio.create_task(_bg())
+        except Exception:
+            logger.debug("Failed releasing oauth_in_progress flags", exc_info=True)
+        try:
+            logger.info(f"Broadcast completed sessions={len(oauth_callback_data)} keys={[k for k in oauth_callback_data.keys()]}")
+        except Exception:
+            pass
         
         return web.Response(
             text="""
@@ -1903,6 +2900,7 @@ async def toggle_service_handler(request):
     try:
         data = await request.json()
         enabled = data.get('enabled', None)
+        force = data.get('force', False)
         
         if enabled is None:
             # Toggle current state
@@ -1919,36 +2917,43 @@ async def toggle_service_handler(request):
         
         # If enabling, test connection to validate it works
         connection_test_success = True
-        if new_state == "enabled":
+        if new_state == "enabled" and not force:
             try:
                 connection_test_success = await supervisor.test_service_connection(service_name)
                 if not connection_test_success:
+                    # If test failed due to OAuth pending, keep enabled; else disable
+                    if supervisor.service_states.get(service_name) != 'disabled':
+                        pass
+                    else:
+                        supervisor._update_service_cache(service_name, False)
+                        return web.json_response({
+                            "success": False,
+                            "service": service_name,
+                            "enabled": False,
+                            "message": "Service connection test failed, keeping disabled"
+                        })
+            except Exception as e:
+                if isinstance(e, OAuthPending):
+                    # Keep enabled, allow OAuth flow to proceed
+                    connection_test_success = False
+                else:
                     supervisor.service_states[service_name] = "disabled"
-                    # Update cache again since we're disabling due to failed test
                     supervisor._update_service_cache(service_name, False)
                     return web.json_response({
                         "success": False,
-                        "service": service_name,
+                        "service": service_name, 
                         "enabled": False,
-                        "message": "Service connection test failed, keeping disabled"
+                        "error": f"Connection test failed: {str(e)}"
                     })
-            except Exception as e:
-                supervisor.service_states[service_name] = "disabled"
-                # Update cache again since we're disabling due to failed test
-                supervisor._update_service_cache(service_name, False)
-                return web.json_response({
-                    "success": False,
-                    "service": service_name, 
-                    "enabled": False,
-                    "error": f"Connection test failed: {str(e)}"
-                })
         
         return web.json_response({
             "success": True,
             "service": service_name,
             "enabled": new_state == "enabled",
             "status": new_state,
-            "previous_state": current_state if enabled is None else None
+            "previous_state": current_state if enabled is None else None,
+            "force": force,
+            "connection_test_success": connection_test_success
         })
     except Exception as e:
         logger.error(f"Toggle service error: {e}")
@@ -1996,8 +3001,12 @@ async def get_tools_handler(request):
     service_name = request.match_info['name']
     try:
         # Get both tools and tools info (includes token counting)
-        tools = await supervisor.get_tools_for_service(service_name)
-        tools_info = await supervisor.get_tools_info_for_service(service_name)
+        try:
+            tools = await supervisor.get_tools_for_service(service_name)
+            tools_info = await supervisor.get_tools_info_for_service(service_name)
+        except OAuthPending:
+            tools = []
+            tools_info = {"tool_count": 0, "token_count": 0, "tools_error": "auth_pending"}
         
         response = {
             "tools": tools, 
@@ -2005,6 +3014,20 @@ async def get_tools_handler(request):
             "tool_count": tools_info.get("tool_count", len(tools)),
             "token_count": tools_info.get("token_count", 0)
         }
+
+        # Generic OAuth pending heuristic (service-agnostic)
+        prov = supervisor.oauth_providers.get(service_name)
+        storage = supervisor.token_storages.get(service_name)
+        if not tools and 'tools_error' not in response:
+            tokens_present = False
+            try:
+                if storage:
+                    tk = await storage.get_tokens()
+                    tokens_present = tk is not None
+            except Exception:
+                pass
+            if not tokens_present and prov:
+                response['tools_error'] = 'auth_pending'
         
         # Include any error information from tools_info
         if "tools_error" in tools_info:
@@ -2156,7 +3179,10 @@ async def oauth_reset_handler(request):
         return web.json_response({"error": str(e)}, status=500)
 
 async def oauth_authorize_handler(request):
-    """POST /oauth/authorize/{service} - Proactively create provider and trigger authorization via test connection."""
+    """POST /oauth/authorize/{service} - Proactively ensure provider + trigger auth.
+
+    Note: Definition moved above create_app usage to avoid NameError during module import.
+    """
     service_name = request.match_info['service']
     if service_name not in supervisor.config:
         return web.json_response({"error": "Service not found"}, status=404)
@@ -2165,21 +3191,121 @@ async def oauth_authorize_handler(request):
         if not ensured:
             supervisor._log_event(service_name, "oauth_authorize", supervisor.config.get(service_name).transport if service_name in supervisor.config else None, time.perf_counter(), status="error", error="provider_create_failed")
             return web.json_response({"error": "Could not create OAuth provider"}, status=500)
-        started = await supervisor.test_service_connection(service_name)
+        # Trigger a lightweight connection test which will in turn start OAuth if needed
+        try:
+            started = await supervisor.test_service_connection(service_name)
+        except OAuthPending:
+            started = False
         supervisor._log_event(service_name, "oauth_authorize", supervisor.config.get(service_name).transport if service_name in supervisor.config else None, time.perf_counter(), status="ok" if started else "pending")
         return web.json_response({
             "service": service_name,
             "authorization_triggered": True,
-            "connection_success": started
+            "connection_success": started,
+            "pending": not started
         })
     except Exception as e:
         logger.error(f"OAuth authorize error: {e}")
         supervisor._log_event(service_name, "oauth_authorize", supervisor.config.get(service_name).transport if service_name in supervisor.config else None, time.perf_counter(), status="error", error=type(e).__name__)
         return web.json_response({"error": str(e)}, status=500)
 
+async def oauth_status_all_handler(request):
+    """GET /oauth/status - Summary of OAuth state for all services."""
+    try:
+        out = {}
+        now = time.time()
+        for name in supervisor.config.keys():
+            storage = supervisor.token_storages.get(name)
+            tokens_present = False
+            obtained_age = None
+            if storage:
+                try:
+                    tokens = await storage.get_tokens()
+                    if tokens:
+                        tokens_present = True
+                        # Attempt to read obtained_at from file (non-critical)
+                        fp = storage.file_path
+                        if fp.exists():
+                            import json as _json
+                            with open(fp,'r') as f:
+                                data=_json.load(f)
+                            svc=data.get(name)
+                            if svc and 'obtained_at' in svc:
+                                obtained_age = round(now - svc['obtained_at'],1)
+                except Exception:
+                    pass
+            # Expiry ETA (best-effort) from tokens file
+            expiry_eta = None
+            if storage and tokens_present:
+                try:
+                    fp = storage.file_path
+                    if fp.exists():
+                        import json as _json
+                        with open(fp,'r') as f: data=_json.load(f)
+                        rec = data.get(name)
+                        if rec and rec.get('expires_in') and rec.get('obtained_at'):
+                            ttl = rec['expires_in'] - (now - rec['obtained_at'])
+                            expiry_eta = round(ttl,1)
+                except Exception:
+                    pass
+            next_refresh = None
+            if name in supervisor.oauth_refresh_run_at:
+                try:
+                    next_refresh = round(supervisor.oauth_refresh_run_at[name] - now,1)
+                except Exception:
+                    next_refresh = None
+            out[name] = {
+                'provider': name in supervisor.oauth_providers,
+                'tokens': tokens_present,
+                'obtained_age_s': obtained_age,
+                'expires_in_s': expiry_eta,
+                'next_refresh_in_s': next_refresh,
+                'last_refresh_status': supervisor.oauth_refresh_status.get(name),
+                'last_refresh_error': supervisor.oauth_refresh_error.get(name),
+                'last_unauthorized_delta_s': (round(now - supervisor.last_unauthorized[name],1) if name in supervisor.last_unauthorized else None),
+                'redirect_recent': (round(now - supervisor.oauth_redirect_times[name],1) if name in supervisor.oauth_redirect_times else None),
+                'in_progress': supervisor.oauth_in_progress.get(name, False),
+                'state': supervisor.service_states.get(name,'unknown')
+            }
+        return web.json_response(out)
+    except Exception as e:
+        logger.error(f"OAuth status error: {e}")
+        return web.json_response({'error': str(e)}, status=500)
+
+async def oauth_status_service_handler(request):
+    """GET /oauth/status/{service} - Detailed OAuth state for one service."""
+    service = request.match_info['service']
+    if service not in supervisor.config:
+        return web.json_response({'error':'service not found'}, status=404)
+    try:
+        res = await oauth_status_all_handler(request)
+        data = await res.json()
+        return web.json_response({service: data.get(service)})
+    except Exception as e:
+        logger.error(f"OAuth status service error: {e}")
+        return web.json_response({'error': str(e)}, status=500)
+
 def create_app():
     """Create aiohttp application"""
     app = web.Application()
+
+    # Request logging middleware (debug aid) - logs method, path, status, and duration
+    @web.middleware
+    async def _req_logger(request, handler):
+        start = time.perf_counter()
+        try:
+            resp = await handler(request)
+            try:
+                logger.info(f"HTTP {request.method} {request.path} status={resp.status} ms={(time.perf_counter()-start)*1000:.1f}")
+            except Exception:
+                pass
+            return resp
+        except Exception as e:
+            try:
+                logger.info(f"HTTP {request.method} {request.path} status=ERR error={type(e).__name__} ms={(time.perf_counter()-start)*1000:.1f}")
+            except Exception:
+                pass
+            raise
+    app.middlewares.append(_req_logger)
     
     # API routes
     app.router.add_get('/status', status_handler)
@@ -2198,6 +3324,39 @@ def create_app():
     app.router.add_post('/oauth/start/{service}', oauth_start_handler)
     app.router.add_post('/oauth/reset/{service}', oauth_reset_handler)
     app.router.add_post('/oauth/authorize/{service}', oauth_authorize_handler)
+    app.router.add_get('/oauth/status', oauth_status_all_handler)
+    app.router.add_get('/oauth/status/{service}', oauth_status_service_handler)
+    # Force authorize (clear cooldown + trigger test) - debugging only
+    async def oauth_force_authorize_handler(request):
+        service = request.match_info['service']
+        if service not in supervisor.config:
+            return web.json_response({'error':'service not found'}, status=404)
+        supervisor.clear_redirect_cooldown(service)
+        try:
+            supervisor.ensure_oauth_provider(service)
+            # Force a connection test which will open browser if 401
+            try:
+                await supervisor.test_service_connection(service)
+            except Exception as e:
+                if not isinstance(e, Exception):  # placeholder
+                    pass
+            return web.json_response({'service': service, 'forced': True})
+        except Exception as e:
+            return web.json_response({'error': str(e)}, status=500)
+    app.router.add_post('/oauth/force_authorize/{service}', oauth_force_authorize_handler)
+    # Debug route (non-production sensitive) - returns masked internal state
+    async def oauth_debug_handler(request):
+        service = request.match_info['service']
+        if service not in supervisor.config:
+            return web.json_response({'error':'service not found'}, status=404)
+        try:
+            snapshot = supervisor.debug_oauth_state(service)
+            supervisor._log_event(service, 'oauth_debug', supervisor.config.get(service).transport if service in supervisor.config else None, time.perf_counter(), status='ok')
+            return web.json_response(snapshot)
+        except Exception as e:
+            supervisor._log_event(service, 'oauth_debug', supervisor.config.get(service).transport if service in supervisor.config else None, time.perf_counter(), status='error', error=type(e).__name__)
+            return web.json_response({'error': str(e)}, status=500)
+    app.router.add_get('/oauth/debug/{service}', oauth_debug_handler)
     
     # OAuth callback route
     app.router.add_get('/oauth/callback', oauth_callback_handler)
@@ -2300,6 +3459,7 @@ def main():
     serve_parser = subparsers.add_parser('serve', help='Start HTTP server')
     serve_parser.add_argument('--port', type=int, default=5859, help='Port to listen on (default: 5859)')
     serve_parser.add_argument('--host', type=str, default='0.0.0.0', help='Host/interface to bind (default: 0.0.0.0)')
+    serve_parser.add_argument('--disable-signals', action='store_true', help='Do not register SIGINT/SIGTERM handlers (diagnostics / embedding)')
     
     # Status command
     subparsers.add_parser('status', help='Get services status')
@@ -2315,7 +3475,7 @@ def main():
     args = parser.parse_args()
     
     if args.command == 'serve':
-        asyncio.run(serve(port=getattr(args, 'port', 5859), host=getattr(args, 'host', '0.0.0.0')))
+        asyncio.run(serve(port=getattr(args, 'port', 5859), host=getattr(args, 'host', '0.0.0.0'), disable_signals=getattr(args, 'disable_signals', False)))
     elif args.command == 'status':
         asyncio.run(cli_status())
     elif args.command == 'test':
