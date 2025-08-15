@@ -187,10 +187,10 @@ class SimpleOAuthClient:
         runner = web.AppRunner(app)
         await runner.setup()
         
-        site = web.TCPSite(runner, '127.0.0.1', self.callback_port)
+        site = web.TCPSite(runner, 'localhost', self.callback_port)
         await site.start()
         
-        logger.info(f"OAuth callback server started on http://127.0.0.1:{self.callback_port}")
+        logger.info(f"OAuth callback server started on http://localhost:{self.callback_port}")
         return runner
     
     async def get_access_token(self) -> Optional[str]:
