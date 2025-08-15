@@ -1,10 +1,16 @@
 #!/usr/bin/env python3
 """
-Test seamless OAuth with existing tokens
+Test existing tokens functionality
 """
 
 import asyncio
 import logging
+import sys
+import os
+
+# Add parent directories to path for imports
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../..'))
+
 from seamless_oauth_manager import SeamlessOAuthManager
 
 logging.basicConfig(level=logging.INFO)
