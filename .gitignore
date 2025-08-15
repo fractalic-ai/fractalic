@@ -1,6 +1,15 @@
 # fractalic: excluding settings.toml file
 settings.toml
 
+# OAuth tokens and sensitive authentication data
+oauth_tokens.json
+oauth_tokens_simple.json
+oauth_tokens.json.backup
+oauth_tokens.json.fixed
+oauth_tokens.json.repair
+oauth_redirect_state.json
+*.oauth_tokens.json
+
 # Tutorials and examples (user-generated content)
 # tutorials/
 *.ctx
