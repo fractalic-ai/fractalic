@@ -2647,7 +2647,7 @@ class MCPSupervisorV2:
                 "status": service_status,
                 "enabled": service_status == "enabled",  # Flag for LLM response schema building
                 "connected": False,  # Per-request pattern - no persistent connections
-                "has_oauth": name in self.oauth_providers or self._is_oauth_service(service.spec.get('url', '')),
+                "has_oauth": name in self.oauth_providers,  # Only report OAuth if we actually have a provider (RFC 9728 compliant)
                 "transport": service.transport,
                 "url": service.spec.get('url', None),
                 "command": service.spec.get('command', None)
