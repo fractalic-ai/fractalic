@@ -939,35 +939,35 @@ class MCPSupervisorV2:
             if client_secret:
                 payload['client_secret'] = client_secret
             
-                async with httpx.AsyncClient(timeout=15) as client:
-                    resp = await client.post(token_endpoint, data=payload)
-                    if resp.status_code != 200:
-                        self._log_event(service_name, 'token_refresh', None, time.perf_counter(), status='http_error', code=resp.status_code)
-                        logger.warning(f"Token refresh failed for {service_name}: {resp.status_code}")
-                        try:
-                            error_data = resp.json()
-                            error_type = error_data.get('error', '')
-                            error_desc = error_data.get('error_description', '')
-                            logger.warning(f"Refresh error details: {error_data}")
+            async with httpx.AsyncClient(timeout=15) as client:
+                resp = await client.post(token_endpoint, data=payload)
+                if resp.status_code != 200:
+                    self._log_event(service_name, 'token_refresh', None, time.perf_counter(), status='http_error', code=resp.status_code)
+                    logger.warning(f"Token refresh failed for {service_name}: {resp.status_code}")
+                    try:
+                        error_data = resp.json()
+                        error_type = error_data.get('error', '')
+                        error_desc = error_data.get('error_description', '')
+                        logger.warning(f"Refresh error details: {error_data}")
+                        
+                        # Handle client ID mismatch by clearing incompatible tokens
+                        if error_type == 'invalid_grant' and 'mismatch' in error_desc.lower():
+                            logger.warning(f"Client ID mismatch detected for {service_name}, clearing incompatible tokens")
+                            # Remove the incompatible token data
+                            await storage.delete_tokens()
+                            self._log_event(service_name, 'token_refresh', None, time.perf_counter(), status='cleared_mismatched_tokens')
                             
-                            # Handle client ID mismatch by clearing incompatible tokens
-                            if error_type == 'invalid_grant' and 'mismatch' in error_desc.lower():
-                                logger.warning(f"Client ID mismatch detected for {service_name}, clearing incompatible tokens")
-                                # Remove the incompatible token data
-                                await storage.delete_tokens()
-                                self._log_event(service_name, 'token_refresh', None, time.perf_counter(), status='cleared_mismatched_tokens')
-                                
-                        except Exception as parse_error:
-                            logger.warning(f"Refresh error text: {resp.text}")
-                        return
-                    jd = resp.json()
-                    new_access = jd.get('access_token')
-                    new_expires = jd.get('expires_in')
-                    new_scope = jd.get('scope')
-                    if new_access:
-                        await storage.replace_access_token(new_access, new_expires, new_scope)
-                        self._log_event(service_name, 'token_refresh', None, time.perf_counter(), status='refreshed', remaining=int(remaining))
-                        logger.info(f"Successfully refreshed tokens for {service_name}")
+                    except Exception as parse_error:
+                        logger.warning(f"Refresh error text: {resp.text}")
+                    return
+                jd = resp.json()
+                new_access = jd.get('access_token')
+                new_expires = jd.get('expires_in')
+                new_scope = jd.get('scope')
+                if new_access:
+                    await storage.replace_access_token(new_access, new_expires, new_scope)
+                    self._log_event(service_name, 'token_refresh', None, time.perf_counter(), status='refreshed', remaining=int(remaining))
+                    logger.info(f"Successfully refreshed tokens for {service_name}")
         except Exception as e:
             self._log_event(service_name, 'token_refresh', None, time.perf_counter(), status='error', error=type(e).__name__)
             logger.warning(f"Token refresh exception for {service_name}: {e}")
@@ -1098,7 +1098,25 @@ class MCPSupervisorV2:
             if hasattr(tool, 'title') and tool.title:
                 tool_dict["title"] = tool.title
             if hasattr(tool, 'annotations') and tool.annotations:
-                tool_dict["annotations"] = tool.annotations
+                # Convert ToolAnnotations to dict for JSON serialization
+                try:
+                    if hasattr(tool.annotations, 'model_dump'):
+                        tool_dict["annotations"] = tool.annotations.model_dump()
+                    elif hasattr(tool.annotations, 'dict'):
+                        tool_dict["annotations"] = tool.annotations.dict()
+                    else:
+                        # Manual serialization for complex objects
+                        annotations_dict = {}
+                        for attr in dir(tool.annotations):
+                            if not attr.startswith('_') and hasattr(tool.annotations, attr):
+                                value = getattr(tool.annotations, attr)
+                                if not callable(value):
+                                    annotations_dict[attr] = value
+                        tool_dict["annotations"] = annotations_dict
+                except Exception as e:
+                    logger.warning(f"Failed to serialize annotations for tool {tool.name}: {e}")
+                    # Skip annotations if serialization fails
+                    pass
             tools.append(tool_dict)
         return tools
 
@@ -1546,10 +1564,15 @@ class MCPSupervisorV2:
                         conn_timeout, _ = self._compute_timeouts(service_name, 'sse', 'tools', True)  # has auth
                         read_timeout = 30.0
                         target_url = url
+                        # Create local headers with bearer auth
+                        bearer_headers = self._protocol_headers()
+                        bearer_auth_local = await self._get_bearer_auth_header(service_name)
+                        if bearer_auth_local:
+                            bearer_headers.update(bearer_auth_local)
                         open_ts = time.perf_counter()
                         self._log_event(service_name, 'tools_sse_open', 'sse', open_ts, status='begin', conn_timeout=conn_timeout, read_timeout=read_timeout, oauth=False, bearer=True)
                         try:
-                            async with sse_client(target_url, auth=None, headers=headers, timeout=conn_timeout, sse_read_timeout=read_timeout) as (r,w):
+                            async with sse_client(target_url, auth=None, headers=bearer_headers, timeout=conn_timeout, sse_read_timeout=read_timeout) as (r,w):
                                 entered_ts = time.perf_counter()
                                 self._log_event(service_name, 'tools_sse_open', 'sse', entered_ts, status='opened')
                                 if stage is not None:
@@ -1615,16 +1638,17 @@ class MCPSupervisorV2:
                         logger.warning(f"Bearer auth failed for {service_name} after refresh attempt, falling back to OAuth provider: {e}")
                 
                 # Fallback to OAuth provider if bearer auth not available or failed completely
-                headers = self._protocol_headers()  # Reset headers for OAuth
                 async def op(oauth_provider):
                     # compute timeouts each attempt (provider may appear after retry)
                     conn_timeout, _ = self._compute_timeouts(service_name, 'sse', 'tools', oauth_provider is not None)
                     read_timeout = 30.0  # explicit SSE read timeout separate from connection
                     target_url = url
                     open_ts = time.perf_counter()
+                    # Reset headers for OAuth within the function scope
+                    oauth_headers = self._protocol_headers()
                     self._log_event(service_name, 'tools_sse_open', 'sse', open_ts, status='begin', conn_timeout=conn_timeout, read_timeout=read_timeout, oauth=bool(oauth_provider))
                     try:
-                        async with sse_client(target_url, auth=oauth_provider, headers=headers, timeout=conn_timeout, sse_read_timeout=read_timeout) as (r,w):
+                        async with sse_client(target_url, auth=oauth_provider, headers=oauth_headers, timeout=conn_timeout, sse_read_timeout=read_timeout) as (r,w):
                             entered_ts = time.perf_counter()
                             self._log_event(service_name, 'tools_sse_open', 'sse', entered_ts, status='opened')
                             if stage is not None:
@@ -2963,13 +2987,28 @@ async def list_tools_handler(request):
     """GET /list_tools - Get all tools from all enabled services (Fractalic compatibility endpoint)
     Optimized to avoid duplicate tool retrieval + duplicate logging by passing tools into tools_info.
     """
+    logger.info("list_tools_handler: Request received")
     try:
+        # Get supervisor from app context instead of global variable
+        supervisor = request.app['supervisor']
+        logger.info(f"list_tools_handler: supervisor retrieved from app context, type = {type(supervisor)}")
+        
+        try:
+            service_states = supervisor.service_states
+            logger.info(f"list_tools_handler: service_states accessed, type = {type(service_states)}")
+        except Exception as e:
+            logger.error(f"list_tools_handler: Error accessing service_states: {e}")
+            return web.json_response({'error': f'supervisor.service_states error: {str(e)}'}, status=500)
+        
+        # Now get actual tools since basic functionality is working
         all_tools = []
         total_token_count = 0
         enabled_services = [name for name, state in supervisor.service_states.items() if state == 'enabled']
+        logger.info(f"list_tools_handler: Processing {len(enabled_services)} enabled services")
 
         for service_name in enabled_services:
             try:
+                logger.debug(f"list_tools_handler: Getting tools for {service_name}")
                 tools = await supervisor.get_tools_for_service(service_name)
                 if not tools:
                     continue
@@ -2986,12 +3025,32 @@ async def list_tools_handler(request):
             except Exception as e:
                 logger.warning(f"Failed to get tools for {service_name}: {e}")
 
-        return web.json_response({
+        logger.info(f"list_tools_handler: Collected {len(all_tools)} tools total")
+        
+        # Test JSON serialization before returning to catch errors early
+        response_data = {
             'tools': all_tools,
             'count': len(all_tools),
             'total_token_count': total_token_count,
             'services_count': len(enabled_services)
-        })
+        }
+        
+        logger.info("list_tools_handler: Testing JSON serialization...")
+        try:
+            # Test serialization to catch errors before web.json_response
+            import json
+            json.dumps(response_data)
+            logger.info("list_tools_handler: JSON serialization successful")
+        except (TypeError, ValueError) as e:
+            logger.error(f"JSON serialization error in list_tools: {e}")
+            logger.error(f"Problematic data types: {[(k, type(v)) for k, v in response_data.items() if k != 'tools']}")
+            if all_tools:
+                logger.error(f"First tool data types: {[(k, type(v)) for k, v in all_tools[0].items()]}")
+            return web.json_response({'error': f'JSON serialization error: {str(e)}'}, status=500)
+        
+        logger.info("list_tools_handler: Returning JSON response")
+        return web.json_response(response_data)
+        
     except Exception as e:
         logger.error(f"List tools error: {e}")
         return web.json_response({'error': str(e)}, status=500)
@@ -3306,6 +3365,9 @@ def create_app():
                 pass
             raise
     app.middlewares.append(_req_logger)
+    
+    # Store supervisor reference in app context to avoid global variable issues
+    app['supervisor'] = supervisor
     
     # API routes
     app.router.add_get('/status', status_handler)

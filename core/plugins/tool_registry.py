@@ -262,19 +262,19 @@ class ToolRegistry(dict):
         # Track connection attempts for consolidated error reporting
         failed_connections = {}
         
-        # print(f"[ToolRegistry] MCP servers to load: {self.mcp_servers}")
+        print(f"[ToolRegistry] MCP servers to load: {self.mcp_servers}")
         for srv in self.mcp_servers:
             try:
                 # Initialize attempt counter if not exists
                 if srv not in failed_connections:
                     failed_connections[srv] = 0
                 
-                # print(f"[ToolRegistry] Attempting to load tools from {srv}")
+                print(f"[ToolRegistry] Attempting to load tools from {srv}")
                 response = mcp_list(srv)
-                # print(f"[ToolRegistry] MCP {srv} raw response: {response}")
+                print(f"[ToolRegistry] MCP {srv} raw response: {response}")
                 
                 if not response:
-                    # print(f"[ToolRegistry] MCP {srv} returned empty or None response.")
+                    print(f"[ToolRegistry] MCP {srv} returned empty or None response.")
                     continue
                 
                 # Check if all services have errors (handle both old and new formats)
@@ -445,7 +445,9 @@ class ToolRegistry(dict):
                     print(f"[ToolRegistry] MCP Manager: No connection after {attempts} attempts to {srv}", file=sys.stderr)
 
             # Fallback: auto-start local MCP manager if 127.0.0.1 endpoint unreachable
-            local_entries = [srv for srv, _ in connection_failed if srv.startswith("http://127.0.0.1:5859")]
+            # DISABLED: fractalic should never auto-start MCP manager - it should be run separately
+            # local_entries = [srv for srv, _ in connection_failed if srv.startswith("http://127.0.0.1:5859")]
+            local_entries = []  # Disable auto-start completely
             if local_entries:
                 try:
                     mgr_script = None
@@ -460,16 +462,32 @@ class ToolRegistry(dict):
                             mgr_script = candidate
                             break
                     if mgr_script:
-                        import subprocess, time
-                        print(f"[ToolRegistry] Attempting auto-start of MCP manager via {mgr_script} …")
-                        subprocess.Popen(["python3", str(mgr_script), "serve", "--port", "5859"])  # nosec
-                        time.sleep(4)
-                        # Retry once after startup
+                        import subprocess, time, socket
+                        
+                        # Check if port 5859 is already in use
+                        def is_port_in_use(port):
+                            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                                try:
+                                    s.settimeout(1)
+                                    result = s.connect_ex(('127.0.0.1', port))
+                                    return result == 0
+                                except:
+                                    return False
+                        
+                        if is_port_in_use(5859):
+                            print(f"[ToolRegistry] MCP manager already running on port 5859, retrying connection...")
+                            time.sleep(2)  # Give existing server time to fully initialize
+                        else:
+                            print(f"[ToolRegistry] Attempting auto-start of MCP manager via {mgr_script} …")
+                            subprocess.Popen(["python3", str(mgr_script), "serve", "--port", "5859"])  # nosec
+                            time.sleep(4)
+                        
+                        # Retry connection after waiting
                         try:
                             for srv in local_entries:
                                 resp = mcp_list(srv)
                                 if resp:
-                                    print("[ToolRegistry] MCP manager auto-start success")
+                                    print("[ToolRegistry] MCP manager connection successful")
                                     break
                         except Exception:
                             pass
