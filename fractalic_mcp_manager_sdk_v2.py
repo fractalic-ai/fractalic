@@ -3343,6 +3343,164 @@ async def oauth_status_service_handler(request):
         logger.error(f"OAuth status service error: {e}")
         return web.json_response({'error': str(e)}, status=500)
 
+# Legacy compatibility endpoints
+async def add_server_handler(request):
+    """POST /add_server - Add server configuration (legacy compatibility)"""
+    try:
+        body = await request.json()
+        supervisor = request.app['supervisor']
+        
+        # Handle different JSON formats from frontend (legacy compatibility)
+        if "jsonConfig" in body and isinstance(body["jsonConfig"], str):
+            try:
+                body = json.loads(body["jsonConfig"])
+            except json.JSONDecodeError as e:
+                return web.json_response(
+                    {"success": False, "error": "Invalid JSON in jsonConfig field"}, 
+                    status=400
+                )
+        
+        # Extract server configuration
+        name = None
+        server_config = {}
+        
+        if "mcpServers" in body and isinstance(body["mcpServers"], dict):
+            # Format: {"mcpServers": {"server-name": {...}}}
+            servers = body["mcpServers"]
+            if len(servers) != 1:
+                return web.json_response(
+                    {"success": False, "error": "Exactly one server must be provided"}, 
+                    status=400
+                )
+            name, server_config = next(iter(servers.items()))
+        else:
+            # Standard format
+            name = body.get("name")
+            url = body.get("url")
+            config = body.get("config", {})
+            
+            if not name:
+                return web.json_response(
+                    {"success": False, "error": "Server name is required"}, 
+                    status=400
+                )
+            
+            # Build server config based on URL or command
+            if url:
+                server_config = {"url": url, **config}
+            elif "command" in config:
+                server_config = config
+            else:
+                return web.json_response(
+                    {"success": False, "error": "Server URL or command is required"}, 
+                    status=400
+                )
+        
+        # Add to mcp_servers.json configuration
+        config_path = ROOT_DIR / "mcp_servers.json"
+        try:
+            if config_path.exists():
+                current_config = json.loads(config_path.read_text())
+            else:
+                current_config = {"mcpServers": {}}
+            
+            # Add the new server
+            current_config["mcpServers"][name] = server_config
+            
+            # Write back to config
+            config_path.write_text(json.dumps(current_config, indent=2))
+            
+            # Add to supervisor's runtime config
+            supervisor.config[name] = ServiceConfig.from_dict(name, server_config)
+            
+            return web.json_response({"success": True, "message": f"Server '{name}' added successfully"})
+            
+        except Exception as e:
+            return web.json_response(
+                {"success": False, "error": f"Failed to add server: {str(e)}"}, 
+                status=500
+            )
+            
+    except Exception as e:
+        logger.error(f"Add server error: {e}")
+        return web.json_response({"success": False, "error": str(e)}, status=500)
+
+async def delete_server_handler(request):
+    """POST /delete_server - Remove server (legacy compatibility)"""
+    try:
+        body = await request.json()
+        supervisor = request.app['supervisor']
+        name = body.get("name")
+        
+        if not name:
+            return web.json_response(
+                {"success": False, "error": "Server name is required"}, 
+                status=400
+            )
+        
+        # Remove from mcp_servers.json configuration
+        config_path = ROOT_DIR / "mcp_servers.json"
+        try:
+            if config_path.exists():
+                current_config = json.loads(config_path.read_text())
+            else:
+                return web.json_response(
+                    {"success": False, "error": f"Server '{name}' not found"}, 
+                    status=404
+                )
+            
+            # Check if server exists
+            if name not in current_config.get("mcpServers", {}):
+                return web.json_response(
+                    {"success": False, "error": f"Server '{name}' not found"}, 
+                    status=404
+                )
+            
+            # Remove from config
+            del current_config["mcpServers"][name]
+            
+            # Write back to config
+            config_path.write_text(json.dumps(current_config, indent=2))
+            
+            # Remove from supervisor's runtime config
+            if name in supervisor.config:
+                del supervisor.config[name]
+            
+            return web.json_response({"success": True, "message": f"Server '{name}' deleted successfully"})
+            
+        except Exception as e:
+            return web.json_response(
+                {"success": False, "error": f"Failed to delete server: {str(e)}"}, 
+                status=500
+            )
+            
+    except Exception as e:
+        logger.error(f"Delete server error: {e}")
+        return web.json_response({"success": False, "error": str(e)}, status=500)
+
+async def kill_handler(request):
+    """POST /kill - Kill manager process (legacy compatibility)"""
+    try:
+        # Respond immediately, then trigger shutdown
+        async def delayed_shutdown():
+            await asyncio.sleep(0.1)  # Allow response to be sent
+            # Set global shutdown event if available
+            if hasattr(request.app, '_shutdown_event'):
+                request.app._shutdown_event.set()
+            else:
+                # Fallback: use system exit after cleanup
+                import os
+                os._exit(0)
+        
+        # Start shutdown in background
+        asyncio.create_task(delayed_shutdown())
+        
+        return web.json_response({"status": "shutting down"})
+        
+    except Exception as e:
+        logger.error(f"Kill handler error: {e}")
+        return web.json_response({"error": str(e)}, status=500)
+
 def create_app():
     """Create aiohttp application"""
     app = web.Application()
@@ -3422,6 +3580,11 @@ def create_app():
     
     # OAuth callback route
     app.router.add_get('/oauth/callback', oauth_callback_handler)
+    
+    # Legacy compatibility endpoints
+    app.router.add_post('/add_server', add_server_handler)
+    app.router.add_post('/delete_server', delete_server_handler)
+    app.router.add_post('/kill', kill_handler)
     
     return app
 
