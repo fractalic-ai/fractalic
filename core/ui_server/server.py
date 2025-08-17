@@ -76,9 +76,9 @@ async def start_mcp_manager():
         
         if not mcp_manager_script.exists():
             raise HTTPException(status_code=500, detail=f"MCP manager script not found at {mcp_manager_script}")
-          # Start the MCP manager process
+        # Start the MCP manager process
         mcp_manager_process = subprocess.Popen(
-            [sys.executable, str(mcp_manager_script), "--port", str(mcp_manager_port), "serve"],
+            [sys.executable, str(mcp_manager_script), "serve", "--port", str(mcp_manager_port)],
             cwd=project_root,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
@@ -149,54 +149,92 @@ async def get_mcp_manager_status():
     """Get the status of the MCP manager process"""
     global mcp_manager_process
     
-    if not mcp_manager_process:
-        return {"status": "not_started", "running": False, "api_responsive": False}
+    # First, try to connect to the MCP manager API regardless of how it was started
+    api_status = None
+    mcp_data = None
     
-    poll_result = mcp_manager_process.poll()
-    if poll_result is not None:
-        # Process has terminated
-        pid = mcp_manager_process.pid if mcp_manager_process else None
-        mcp_manager_process = None
-        return {
-            "status": "terminated", 
-            "running": False, 
-            "api_responsive": False,
-            "exit_code": poll_result,
-            "last_pid": pid
-        }
-    
-    # Process is running, try to connect to API
     try:
         async with aiohttp.ClientSession() as session:
             async with session.get(f"{mcp_manager_url}/status", timeout=5) as response:
                 if response.status == 200:
-                    data = await response.json()
-                    return {
-                        "status": "running",
-                        "running": True,
-                        "pid": mcp_manager_process.pid,
-                        "port": mcp_manager_port,
-                        "api_responsive": True,
-                        "servers": data
-                    }
+                    mcp_data = await response.json()
+                    api_status = "responsive"
                 else:
-                    return {
-                        "status": "running_not_responsive",
-                        "running": True,
-                        "pid": mcp_manager_process.pid,
-                        "port": mcp_manager_port,
-                        "api_responsive": False,
-                        "http_status": response.status
-                    }
+                    api_status = f"not_responsive_http_{response.status}"
     except Exception as e:
-        return {
-            "status": "running_not_responsive",
-            "running": True,
-            "pid": mcp_manager_process.pid,
-            "port": mcp_manager_port,
-            "api_responsive": False,
-            "connection_error": str(e)
-        }
+        api_status = f"not_responsive: {str(e)}"
+    
+    # Check if we have a process we started
+    if mcp_manager_process:
+        poll_result = mcp_manager_process.poll()
+        if poll_result is not None:
+            # Our process has terminated
+            pid = mcp_manager_process.pid if mcp_manager_process else None
+            mcp_manager_process = None
+            
+            # But check if API is still responsive (maybe manually started)
+            if api_status == "responsive":
+                return {
+                    "status": "running_external",
+                    "running": True,
+                    "api_responsive": True,
+                    "port": mcp_manager_port,
+                    "managed_process": False,
+                    "note": "MCP manager is running but not managed by UI server",
+                    "servers": mcp_data,
+                    "last_managed_pid": pid,
+                    "exit_code": poll_result
+                }
+            else:
+                return {
+                    "status": "terminated",
+                    "running": False,
+                    "api_responsive": False,
+                    "exit_code": poll_result,
+                    "last_pid": pid
+                }
+        else:
+            # Our process is still running
+            if api_status == "responsive":
+                return {
+                    "status": "running",
+                    "running": True,
+                    "pid": mcp_manager_process.pid,
+                    "port": mcp_manager_port,
+                    "api_responsive": True,
+                    "managed_process": True,
+                    "servers": mcp_data
+                }
+            else:
+                return {
+                    "status": "running_not_responsive",
+                    "running": True,
+                    "pid": mcp_manager_process.pid,
+                    "port": mcp_manager_port,
+                    "api_responsive": False,
+                    "managed_process": True,
+                    "api_error": api_status
+                }
+    else:
+        # No managed process, but check if API is responsive
+        if api_status == "responsive":
+            return {
+                "status": "running_external",
+                "running": True,
+                "api_responsive": True,
+                "port": mcp_manager_port,
+                "managed_process": False,
+                "note": "MCP manager is running but not managed by UI server",
+                "servers": mcp_data
+            }
+        else:
+            return {
+                "status": "not_started",
+                "running": False,
+                "api_responsive": False,
+                "managed_process": False,
+                "api_error": api_status
+            }
 
 # Cleanup function for graceful shutdown
 async def cleanup_mcp_manager():
