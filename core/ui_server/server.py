@@ -17,6 +17,10 @@ import signal
 import aiohttp
 import time
 from typing import Optional, Dict, Any, List
+from collections import deque
+import threading
+from datetime import datetime
+import pathlib
 
 # --- Robust import for ToolRegistry regardless of working directory ---
 import sys
@@ -36,6 +40,17 @@ current_repo_path = ""
 
 # MCP Manager process management
 mcp_manager_process: Optional[subprocess.Popen] = None
+# Trace log (ring buffer) capturing lifecycle, stdout/stderr lines, API interactions
+TRACE_MAX_ENTRIES = 10000
+_trace_buffer = deque(maxlen=TRACE_MAX_ENTRIES)
+_trace_lock = threading.Lock()
+_trace_log_path: Optional[Path] = None
+_trace_log_max_bytes = 2_000_000  # 2 MB
+_trace_log_backups = 3
+_stdout_thread: Optional[threading.Thread] = None
+_stderr_thread: Optional[threading.Thread] = None
+_process_monitor_task: Optional[asyncio.Task] = None
+_mcp_state: Dict[str, Any] = {"phase": "idle", "last_exit_code": None, "last_error": None, "start_time": None}
 mcp_manager_port = 5859
 mcp_manager_url = f"http://localhost:{mcp_manager_port}"
 
@@ -63,48 +78,239 @@ def set_repo_path(path: str):
     current_repo_path = path
 
 # MCP Manager process management functions
-async def start_mcp_manager():
-    """Start the MCP manager process"""
+async def _cleanup_port_conflicts(port: int):
+    """Find and terminate processes using the specified port"""
+    try:
+        # Use lsof to find processes using the port
+        result = subprocess.run(
+            ['lsof', '-ti', f':{port}'],
+            capture_output=True,
+            text=True,
+            timeout=10
+        )
+        
+        if result.returncode == 0 and result.stdout.strip():
+            pids = [pid.strip() for pid in result.stdout.strip().split('\n') if pid.strip()]
+            logging.info(f"Found {len(pids)} process(es) using port {port}: {pids}")
+            
+            for pid in pids:
+                try:
+                    # Try graceful termination first
+                    subprocess.run(['kill', pid], timeout=5)
+                    await asyncio.sleep(1)
+                    
+                    # Check if still running, force kill if needed
+                    check_result = subprocess.run(['kill', '-0', pid], capture_output=True, timeout=2)
+                    if check_result.returncode == 0:
+                        subprocess.run(['kill', '-9', pid], timeout=5)
+                        logging.info(f"Force killed process {pid} on port {port}")
+                    else:
+                        logging.info(f"Gracefully terminated process {pid} on port {port}")
+                        
+                except subprocess.TimeoutExpired:
+                    logging.warning(f"Timeout while trying to kill process {pid}")
+                except Exception as e:
+                    logging.warning(f"Failed to kill process {pid}: {e}")
+            
+            # Wait a moment for port to be freed
+            await asyncio.sleep(2)
+            
+    except subprocess.TimeoutExpired:
+        logging.warning(f"Timeout while checking for port conflicts on {port}")
+    except FileNotFoundError:
+        # lsof not available, skip port cleanup
+        logging.debug("lsof command not available, skipping port cleanup")
+    except Exception as e:
+        logging.warning(f"Error during port cleanup for {port}: {e}")
+
+# ---------------- Trace / Monitoring Utilities (top-level) ----------------
+def _record_trace(event_type: str, message: str = "", **fields):
+    record = {
+        "ts": datetime.utcnow().isoformat(timespec='milliseconds') + 'Z',
+        "type": event_type,
+        "message": message,
+        **fields
+    }
+    with _trace_lock:
+        _trace_buffer.append(record)
+        if _trace_log_path:
+            try:
+                _write_trace_line(record)
+            except Exception:
+                pass
+
+def _init_trace_log(base_dir: Optional[str] = None):
+    """Initialize on-disk trace log location (idempotent)."""
+    global _trace_log_path
+    if _trace_log_path is not None:
+        return
+    base = Path(base_dir or project_root) / 'logs'
+    base.mkdir(parents=True, exist_ok=True)
+    _trace_log_path = base / 'mcp_trace.log'
+    _record_trace('trace', message='trace file initialized', path=str(_trace_log_path))
+
+def _write_trace_line(record: Dict[str, Any]):
+    if not _trace_log_path:
+        return
+    path = _trace_log_path
+    line = json.dumps(record, ensure_ascii=False)
+    rotate = False
+    try:
+        if path.exists() and path.stat().st_size + len(line) > _trace_log_max_bytes:
+            rotate = True
+    except Exception:
+        rotate = False
+    if rotate:
+        # Rotate backups
+        for i in range(_trace_log_backups, 0, -1):
+            src = path.with_suffix(path.suffix + f'.{i}')
+            if src.exists():
+                if i == _trace_log_backups:
+                    try:
+                        src.unlink()
+                    except Exception:
+                        pass
+                else:
+                    try:
+                        src.rename(path.with_suffix(path.suffix + f'.{i+1}'))
+                    except Exception:
+                        pass
+        try:
+            path.rename(path.with_suffix(path.suffix + '.1'))
+        except Exception:
+            pass
+    try:
+        with path.open('a', encoding='utf-8') as f:
+            f.write(line + '\n')
+    except Exception:
+        pass
+
+def _stream_pipe_to_trace(pipe, stream_name: str, pid: int):
+    try:
+        for line in iter(pipe.readline, ''):
+            if not line:
+                break
+            _record_trace(stream_name, line=line.rstrip('\n'), pid=pid)
+    except Exception as e:
+        _record_trace("error", message=f"stream reader failed ({stream_name})", error=str(e))
+    finally:
+        try:
+            pipe.close()
+        except Exception:
+            pass
+
+async def _monitor_mcp_process():
     global mcp_manager_process
+    try:
+        while mcp_manager_process and mcp_manager_process.poll() is None:
+            await asyncio.sleep(1)
+        if mcp_manager_process:
+            exit_code = mcp_manager_process.poll()
+            _mcp_state["last_exit_code"] = exit_code
+            _mcp_state["phase"] = "exited"
+            _record_trace("lifecycle", message="process exited", exit_code=exit_code)
+    except asyncio.CancelledError:
+        _record_trace("monitor", message="process monitor cancelled")
+    except Exception as e:
+        _record_trace("error", message="process monitor error", error=str(e))
+
+@app.get("/mcp/trace")
+async def get_mcp_trace(tail: int = Query(200, ge=1, le=5000)):
+    with _trace_lock:
+        data = list(_trace_buffer)[-tail:]
+    return {"tail": tail, "size": len(_trace_buffer), "entries": data}
+
+@app.post("/mcp/trace/clear")
+async def clear_mcp_trace():
+    with _trace_lock:
+        _trace_buffer.clear()
+    _record_trace("trace", message="trace cleared")
+    return {"status": "cleared"}
+
+async def _verify_mcp_api_ready(timeout: int = 10) -> bool:
+    """Verify that the MCP manager API is responding"""
+    start_time = time.time()
+    
+    while (time.time() - start_time) < timeout:
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(f"{mcp_manager_url}/status", timeout=2) as response:
+                    if response.status == 200:
+                        data = await response.json()
+                        # Verify it's actually a valid MCP status response
+                        if 'services' in data:
+                            return True
+        except Exception as e:
+            logging.debug(f"API check attempt failed: {e}")
+        
+        await asyncio.sleep(1)
+    
+    return False
+
+async def start_mcp_manager():
+    """Start the MCP manager process with proper port management"""
+    global mcp_manager_process
+    global _stdout_thread, _stderr_thread, _process_monitor_task
     
     if mcp_manager_process and mcp_manager_process.poll() is None:
+        _record_trace("lifecycle", message="start requested while already running", pid=mcp_manager_process.pid)
         return {"status": "already_running", "pid": mcp_manager_process.pid}
-    
     try:
-        # Path to the MCP manager script
+        _mcp_state.update({"phase": "starting", "start_time": time.time(), "last_exit_code": None, "last_error": None})
+        _init_trace_log()
+        _record_trace("lifecycle", message="starting mcp manager")
         mcp_manager_script = Path(project_root) / "fractalic_mcp_manager.py"
-        
         if not mcp_manager_script.exists():
             raise HTTPException(status_code=500, detail=f"MCP manager script not found at {mcp_manager_script}")
-        # Start the MCP manager process
+        await _cleanup_port_conflicts(mcp_manager_port)
+        env = os.environ.copy()
+        env.update({'PYTHONIOENCODING': 'utf-8','LC_ALL': 'en_US.UTF-8','LANG': 'en_US.UTF-8','PYTHONUNBUFFERED': '1'})
         mcp_manager_process = subprocess.Popen(
             [sys.executable, str(mcp_manager_script), "serve", "--port", str(mcp_manager_port)],
             cwd=project_root,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
-            text=True
+            text=True,
+            bufsize=1,
+            env=env
         )
-        
-        # Give it a moment to start
-        await asyncio.sleep(2)
-        
-        # Check if process is still running
+        _record_trace("lifecycle", message="process spawned", pid=mcp_manager_process.pid)
+        if mcp_manager_process.stdout:
+            _stdout_thread = threading.Thread(target=_stream_pipe_to_trace, args=(mcp_manager_process.stdout, "stdout", mcp_manager_process.pid), daemon=True)
+            _stdout_thread.start()
+        if mcp_manager_process.stderr:
+            _stderr_thread = threading.Thread(target=_stream_pipe_to_trace, args=(mcp_manager_process.stderr, "stderr", mcp_manager_process.pid), daemon=True)
+            _stderr_thread.start()
+        loop = asyncio.get_running_loop()
+        _process_monitor_task = loop.create_task(_monitor_mcp_process())
+        await asyncio.sleep(3)
         if mcp_manager_process.poll() is not None:
-            # Process died, read error output
             stdout, stderr = mcp_manager_process.communicate()
-            error_msg = f"MCP manager failed to start. stdout: {stdout}, stderr: {stderr}"
+            if "address already in use" in stderr:
+                error_msg = f"Port {mcp_manager_port} is still in use. Failed to clean up existing processes."
+            else:
+                error_msg = f"MCP manager failed to start. stderr: {stderr[:500]}..."
+            _record_trace("lifecycle", message="startup failed", stderr_tail=stderr[-500:], exit_code=mcp_manager_process.poll())
             mcp_manager_process = None
             raise HTTPException(status_code=500, detail=error_msg)
-        
-        return {"status": "started", "pid": mcp_manager_process.pid, "port": mcp_manager_port}
-        
+        api_ready = await _verify_mcp_api_ready(timeout=10)
+        if not api_ready:
+            logging.warning("MCP manager process started but API is not responding yet")
+            _record_trace("health", message="api not ready within initial timeout")
+        else:
+            _record_trace("health", message="api ready")
+            _mcp_state["phase"] = "running"
+        return {"status": "started", "pid": mcp_manager_process.pid, "port": mcp_manager_port, "api_ready": api_ready}
     except Exception as e:
         mcp_manager_process = None
+        _mcp_state.update({"phase": "error", "last_error": str(e)})
+        _record_trace("error", message="exception during start", error=str(e))
         raise HTTPException(status_code=500, detail=f"Failed to start MCP manager: {str(e)}")
 
 async def stop_mcp_manager():
     """Stop the MCP manager process"""
     global mcp_manager_process
+    global _process_monitor_task
     
     if not mcp_manager_process or mcp_manager_process.poll() is not None:
         return {"status": "not_running"}
@@ -138,11 +344,17 @@ async def stop_mcp_manager():
                 mcp_manager_process.kill()
                 mcp_manager_process.wait()
         
+        _record_trace("lifecycle", message="process stopped", pid=mcp_manager_process.pid)
         pid = mcp_manager_process.pid
         mcp_manager_process = None
+        _mcp_state["phase"] = "stopped"
+        if _process_monitor_task:
+            _process_monitor_task.cancel()
+            _process_monitor_task = None
         return {"status": "stopped", "pid": pid}
         
     except Exception as e:
+        _record_trace("error", message="stop failed", error=str(e))
         return {"status": "error", "error": str(e)}
 
 async def get_mcp_manager_status():
@@ -163,6 +375,7 @@ async def get_mcp_manager_status():
                     api_status = f"not_responsive_http_{response.status}"
     except Exception as e:
         api_status = f"not_responsive: {str(e)}"
+    _mcp_state["api_status"] = api_status
     
     # Check if we have a process we started
     if mcp_manager_process:
@@ -263,17 +476,20 @@ def get_file_content(repo, commit_hash, filepath):
         return file_content
     except Exception as e:
         print(f"Error fetching '{filepath}' at commit '{commit_hash}': {e}")
-        return ""
+        return None
 
-def ensure_empty_lines_before_symbols(text):
-    lines = text.split('\n')
-    new_lines = []
+def ensure_empty_lines_before_symbols(content: str) -> str:
+    """Ensure there's a blank line before 'def' or 'class' if missing for readability.
+    This is a lightweight formatter to avoid NameError where previous helper was referenced."""
+    lines = content.splitlines()
+    out = []
     for i, line in enumerate(lines):
-        if line.startswith('#') or line.startswith('@'):
-            if i > 0 and lines[i - 1].strip() != '':
-                new_lines.append('')
-        new_lines.append(line)
-    return '\n'.join(new_lines)
+        stripped = line.lstrip()
+        if (stripped.startswith('def ') or stripped.startswith('class ')) and out:
+            if out[-1].strip() != '':
+                out.append('')
+        out.append(line)
+    return '\n'.join(out)
 
 def enrich_call_tree(node, repo):
     operation_src_list = node.get('operation_src', [])
@@ -836,8 +1052,18 @@ async def start_mcp_manager_route():
 
 @app.post("/mcp/stop")
 async def stop_mcp_manager_route():
-    """Stop the MCP manager process"""
-    return await stop_mcp_manager()
+    """(Disabled) Stop the MCP manager process.
+
+    This endpoint has been intentionally stubbed to prevent accidental or
+    unauthorized termination of the managed MCP process. The underlying
+    stop_mcp_manager() helper remains available for internal use but is
+    no longer exposed via this route.
+    """
+    try:
+        _record_trace("security", message="/mcp/stop blocked (stub)")
+    except Exception:
+        pass
+    return {"status": "disabled", "detail": "Stop endpoint disabled"}
 
 @app.get("/mcp/status")
 async def get_mcp_manager_status_route():
@@ -1022,7 +1248,7 @@ async def deploy_docker_registry_with_progress(request: Request):
             try:
                 # Import the plugin manager
                 from publisher.plugin_manager import PluginManager
-                from publisher.models import PublishRequest
+                from publisher.models import PublishRequest, DeploymentConfig
                 
                 # Initialize plugin manager and get Docker registry plugin
                 plugin_manager = PluginManager()
@@ -1031,11 +1257,7 @@ async def deploy_docker_registry_with_progress(request: Request):
                 if not docker_plugin:
                     yield f"data: {json.dumps({'error': 'Docker registry plugin not available'})}\n\n"
                     return
-                
-                # Create deployment config from request data
-                from publisher.models import DeploymentConfig
-                
-                # Convert frontend request to DeploymentConfig
+                # Create deployment config (mirror non-streaming endpoint)
                 config = DeploymentConfig(
                     plugin_name="docker-registry",
                     script_name=data.get("script_name", ""),
@@ -1045,12 +1267,11 @@ async def deploy_docker_registry_with_progress(request: Request):
                     port_mapping={},
                     custom_domain=None,
                     plugin_specific={
-                        "image_name": "ghcr.io/fractalic-ai/fractalic:latest-production",  # Always use production image
+                        "image_name": "ghcr.io/fractalic-ai/fractalic:latest-production",
                         "config_files": data.get("config_files", []),
                         "mount_paths": data.get("mount_paths", {})
                     }
                 )
-                
                 # Start deployment in background
                 loop = asyncio.get_event_loop()
                 

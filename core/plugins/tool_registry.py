@@ -294,13 +294,13 @@ class ToolRegistry(dict):
                     try:
                         import subprocess, time
                         # Kill existing server
-                        subprocess.run(["pkill", "-f", "fractalic_mcp_manager_v2"], check=False)
+                        subprocess.run(["pkill", "-f", "fractalic_mcp_manager.py"], check=False)
                         time.sleep(2)
                         
                         # Start new server with increased timeout
                         proc = subprocess.Popen([
                             "python3", 
-                            "fractalic_mcp_manager_v2.py", 
+                            "fractalic_mcp_manager.py", 
                             "serve",
                             "--port", "5859"
                         ])
@@ -453,8 +453,8 @@ class ToolRegistry(dict):
                     mgr_script = None
                     # Prefer local CWD shim then project root
                     for candidate in [
-                        Path.cwd() / "fractalic_mcp_manager_v2.py",
-                        Path(__file__).resolve().parent.parent.parent / "fractalic_mcp_manager_v2.py",
+                        Path.cwd() / "fractalic_mcp_manager.py",
+                        Path(__file__).resolve().parent.parent.parent / "fractalic_mcp_manager.py",
                         Path.cwd() / "fractalic_mcp_manager_sdk_v2.py",
                         Path(__file__).resolve().parent.parent.parent / "fractalic_mcp_manager_sdk_v2.py",
                     ]:
