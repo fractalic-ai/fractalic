@@ -2690,13 +2690,11 @@ class MCPSupervisorV2:
             "mcp_version": MCP_PROTOCOL_VERSION
         }
 
-# Global supervisor instance
-supervisor = MCPSupervisorV2()
-
 # OAuth callback handler for web server
 async def oauth_callback_handler(request):
     """Handle OAuth callback from the authorization server"""
     global oauth_callback_data
+    supervisor = request.app['supervisor']
     
     query = request.query
 
@@ -2905,10 +2903,13 @@ async def oauth_callback_handler(request):
 
 # REST API endpoints
 async def status_handler(request):
-    """GET /status - Get services status with optional tools info"""
+    """GET /status - Get services status with tools and token counts (legacy compatible)"""
     try:
-        # Check for include_tools_info query parameter
-        include_tools = request.query.get('include_tools_info', '').lower() in ('true', '1', 'yes')
+        # Check for include_tools_info query parameter - default to True for legacy compatibility
+        include_tools_param = request.query.get('include_tools_info', 'true').lower()
+        include_tools = include_tools_param in ('true', '1', 'yes')
+        
+        supervisor = request.app['supervisor']
         status = await supervisor.status(include_tools_info=include_tools)
         return web.json_response(status)
     except Exception as e:
@@ -2918,6 +2919,7 @@ async def status_handler(request):
 async def toggle_service_handler(request):
     """POST /toggle/{name} - Toggle service enabled/disabled state"""
     service_name = request.match_info['name']
+    supervisor = request.app['supervisor']
     
     if service_name not in supervisor.config:
         return web.json_response({"error": f"Service {service_name} not found"}, status=404)
@@ -3056,9 +3058,57 @@ async def list_tools_handler(request):
         logger.error(f"List tools error: {e}")
         return web.json_response({'error': str(e)}, status=500)
 
+async def get_all_tools_handler(request):
+    """GET /tools - Get all tools from all enabled services"""
+    try:
+        supervisor = request.app['supervisor']
+        all_tools = {}
+        total_tools = 0
+        total_tokens = 0
+        
+        for service_name in supervisor.config.keys():
+            service_status = supervisor.service_states.get(service_name, "enabled")
+            if service_status != "enabled":
+                continue
+                
+            try:
+                tools = await supervisor.get_tools_for_service(service_name)
+                tools_info = await supervisor.get_tools_info_for_service(service_name)
+            except OAuthPending:
+                tools = []
+                tools_info = {"tool_count": 0, "token_count": 0, "tools_error": "auth_pending"}
+            except Exception as e:
+                tools = []
+                tools_info = {"tool_count": 0, "token_count": 0, "tools_error": str(e)}
+            
+            all_tools[service_name] = {
+                "tools": tools,
+                "count": len(tools),
+                "tool_count": tools_info.get("tool_count", len(tools)),
+                "token_count": tools_info.get("token_count", 0)
+            }
+            
+            if "tools_error" in tools_info:
+                all_tools[service_name]["tools_error"] = tools_info["tools_error"]
+            
+            total_tools += tools_info.get("tool_count", len(tools))
+            total_tokens += tools_info.get("token_count", 0)
+        
+        return web.json_response({
+            "services": all_tools,
+            "total_tools": total_tools,
+            "total_tokens": total_tokens,
+            "enabled_services": len([s for s in supervisor.service_states.values() if s == "enabled"])
+        })
+        
+    except Exception as e:
+        logger.error(f"Get all tools error: {e}")
+        return web.json_response({"error": str(e)}, status=500)
+
 async def get_tools_handler(request):
     """GET /tools/{name} - Get tools for a service with count and token information"""
     service_name = request.match_info['name']
+    supervisor = request.app['supervisor']
     try:
         # Get both tools and tools info (includes token counting)
         try:
@@ -3101,6 +3151,7 @@ async def get_tools_handler(request):
 async def get_capabilities_handler(request):
     """GET /capabilities/{name} - Get capabilities for a service"""
     service_name = request.match_info['name']
+    supervisor = request.app['supervisor']
     try:
         capabilities = await supervisor.get_service_capabilities(service_name)
         return web.json_response({
@@ -3115,6 +3166,7 @@ async def call_tool_handler(request):
     """POST /call/{service}/{tool} - Call a tool"""
     service_name = request.match_info['service']
     tool_name = request.match_info['tool']
+    supervisor = request.app['supervisor']
     
     try:
         data = await request.json()
@@ -3128,6 +3180,7 @@ async def call_tool_handler(request):
 
 async def list_prompts_handler(request):
     """GET /list_prompts - Get all prompts from all enabled services"""
+    supervisor = request.app['supervisor']
     try:
         services_response = {}
         
@@ -3153,6 +3206,7 @@ async def get_prompt_handler(request):
     """POST /prompt/{service}/{prompt} - Get prompt content with arguments"""
     service_name = request.match_info['service']
     prompt_name = request.match_info['prompt']
+    supervisor = request.app['supervisor']
     
     try:
         data = await request.json()
@@ -3166,6 +3220,7 @@ async def get_prompt_handler(request):
 
 async def list_resources_handler(request):
     """GET /list_resources - Get all resources from all enabled services"""
+    supervisor = request.app['supervisor']
     try:
         services_response = {}
         
@@ -3190,6 +3245,7 @@ async def list_resources_handler(request):
 async def read_resource_handler(request):
     """POST /resource/{service}/read - Read resource content by URI"""
     service_name = request.match_info['service']
+    supervisor = request.app['supervisor']
     
     try:
         data = await request.json()
@@ -3207,6 +3263,7 @@ async def read_resource_handler(request):
 async def oauth_start_handler(request):
     """POST /oauth/start/{service} - Start OAuth flow for a service"""
     service_name = request.match_info['service']
+    supervisor = request.app['supervisor']
     
     if service_name not in supervisor.oauth_providers:
         return web.json_response({"error": "Service does not support OAuth"}, status=400)
@@ -3224,6 +3281,7 @@ async def oauth_start_handler(request):
 async def oauth_reset_handler(request):
     """POST /oauth/reset/{service} - Delete stored tokens and reset auth state"""
     service_name = request.match_info['service']
+    supervisor = request.app['supervisor']
     if service_name not in supervisor.config:
         return web.json_response({"error": "Service not found"}, status=404)
     try:
@@ -3244,6 +3302,7 @@ async def oauth_authorize_handler(request):
     Note: Definition moved above create_app usage to avoid NameError during module import.
     """
     service_name = request.match_info['service']
+    supervisor = request.app['supervisor']
     if service_name not in supervisor.config:
         return web.json_response({"error": "Service not found"}, status=404)
     try:
@@ -3270,6 +3329,7 @@ async def oauth_authorize_handler(request):
 
 async def oauth_status_all_handler(request):
     """GET /oauth/status - Summary of OAuth state for all services."""
+    supervisor = request.app['supervisor']
     try:
         out = {}
         now = time.time()
@@ -3334,6 +3394,7 @@ async def oauth_status_all_handler(request):
 async def oauth_status_service_handler(request):
     """GET /oauth/status/{service} - Detailed OAuth state for one service."""
     service = request.match_info['service']
+    supervisor = request.app['supervisor']
     if service not in supervisor.config:
         return web.json_response({'error':'service not found'}, status=404)
     try:
@@ -3502,7 +3563,7 @@ async def kill_handler(request):
         logger.error(f"Kill handler error: {e}")
         return web.json_response({"error": str(e)}, status=500)
 
-def create_app():
+def create_app(supervisor_instance):
     """Create aiohttp application"""
     app = web.Application()
 
@@ -3566,13 +3627,14 @@ def create_app():
             raise
     app.middlewares.append(_req_logger)
     
-    # Store supervisor reference in app context to avoid global variable issues
-    app['supervisor'] = supervisor
+    # Store supervisor reference in app context
+    app['supervisor'] = supervisor_instance
     
     # API routes with CORS
     cors.add(app.router.add_get('/status', status_handler))
     cors.add(app.router.add_get('/list_tools', list_tools_handler))  # Fractalic compatibility endpoint
     cors.add(app.router.add_post('/toggle/{name}', toggle_service_handler))
+    cors.add(app.router.add_get('/tools', get_all_tools_handler))  # Get all tools from all services
     cors.add(app.router.add_get('/tools/{name}', get_tools_handler))
     cors.add(app.router.add_get('/capabilities/{name}', get_capabilities_handler))
     cors.add(app.router.add_post('/call/{service}/{tool}', call_tool_handler))
@@ -3591,6 +3653,7 @@ def create_app():
     # Force authorize (clear cooldown + trigger test) - debugging only
     async def oauth_force_authorize_handler(request):
         service = request.match_info['service']
+        supervisor = request.app['supervisor']
         if service not in supervisor.config:
             return web.json_response({'error':'service not found'}, status=404)
         supervisor.clear_redirect_cooldown(service)
@@ -3609,6 +3672,7 @@ def create_app():
     # Debug route (non-production sensitive) - returns masked internal state
     async def oauth_debug_handler(request):
         service = request.match_info['service']
+        supervisor = request.app['supervisor']
         if service not in supervisor.config:
             return web.json_response({'error':'service not found'}, status=404)
         try:
@@ -3648,7 +3712,11 @@ async def serve(port: int = 5859, host: str = '0.0.0.0', disable_signals: bool =
     except Exception as _cwd_e:
         logger.warning(f"Could not change working directory to root: {_cwd_e}")
 
-    app = create_app()
+    # Create supervisor instance for this server
+    from fractalic_mcp_manager_sdk_v2 import MCPSupervisorV2
+    supervisor = MCPSupervisorV2()
+    
+    app = create_app(supervisor)
     runner = web.AppRunner(app)
     await runner.setup()
 
@@ -3698,58 +3766,131 @@ async def serve(port: int = 5859, host: str = '0.0.0.0', disable_signals: bool =
         logger.info("Server shutdown complete")
 
 # CLI interface
-async def cli_status():
-    """CLI command to get status"""
-    status = await supervisor.status()
-    print(json.dumps(status, indent=2))
+async def cli_status(port: int = 5859):
+    """CLI command to get status via HTTP"""
+    import aiohttp
+    
+    url = f"http://localhost:{port}"
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(f"{url}/status") as response:
+                if response.status == 200:
+                    data = await response.json()
+                    print(json.dumps(data, indent=2))
+                else:
+                    print(f"❌ Status request failed: HTTP {response.status}")
+    except aiohttp.ClientError as e:
+        print(f"❌ Failed to connect to server at port {port}: {e}")
+    except Exception as e:
+        print(f"❌ Error getting status: {e}")
 
-async def cli_test_service(service_name: str):
-    """CLI command to test a service"""
-    success = await supervisor.test_service_connection(service_name)
-    print(f"Service {service_name}: {'✅ Connected' if success else '❌ Failed'}")
+async def cli_test_service(service_name: str, port: int = 5859):
+    """CLI command to test a service via HTTP"""
+    import aiohttp
+    
+    url = f"http://localhost:{port}"
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.post(f"{url}/test/{service_name}") as response:
+                if response.status == 200:
+                    data = await response.json()
+                    success = data.get("success", False)
+                    print(f"Service {service_name}: {'✅ Connected' if success else '❌ Failed'}")
+                else:
+                    print(f"❌ Test request failed: HTTP {response.status}")
+    except aiohttp.ClientError as e:
+        print(f"❌ Failed to connect to server at port {port}: {e}")
+    except Exception as e:
+        print(f"❌ Error testing service: {e}")
 
-async def cli_get_tools(service_name: str):
-    """CLI command to get tools"""
-    tools = await supervisor.get_tools_for_service(service_name)
-    print(f"Tools for {service_name}:")
-    for tool in tools:
-        print(f"  - {tool['name']}: {tool['description']}")
+async def cli_get_tools(service_name: str, port: int = 5859):
+    """CLI command to get tools via HTTP"""
+    import aiohttp
+    
+    url = f"http://localhost:{port}"
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(f"{url}/tools/{service_name}") as response:
+                if response.status == 200:
+                    data = await response.json()
+                    tools = data.get("tools", [])
+                    print(f"Tools for {service_name}:")
+                    for tool in tools:
+                        print(f"  - {tool['name']}: {tool['description']}")
+                else:
+                    print(f"❌ Tools request failed: HTTP {response.status}")
+    except aiohttp.ClientError as e:
+        print(f"❌ Failed to connect to server at port {port}: {e}")
+    except Exception as e:
+        print(f"❌ Error getting tools: {e}")
+
+async def cli_kill(port: int = 5859):
+    """CLI command to kill running server via HTTP"""
+    import aiohttp
+    
+    url = f"http://localhost:{port}"
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.post(f"{url}/kill") as response:
+                if response.status == 200:
+                    print("✅ Kill command sent successfully")
+                else:
+                    print(f"❌ Kill command failed: HTTP {response.status}")
+    except aiohttp.ClientError as e:
+        print(f"❌ Failed to connect to server at port {port}: {e}")
+    except Exception as e:
+        print(f"❌ Error sending kill command: {e}")
 
 def main():
-    """Main entry point"""
+    """Main entry point - full legacy CLI compatibility"""
     import argparse
+    import os
     
     parser = argparse.ArgumentParser(description='MCP Manager V2 - Per-Request Sessions')
     subparsers = parser.add_subparsers(dest='command', help='Commands')
     
-    # Serve command
+    # Serve command - loads services and starts server
     serve_parser = subparsers.add_parser('serve', help='Start HTTP server')
     serve_parser.add_argument('--port', type=int, default=5859, help='Port to listen on (default: 5859)')
     serve_parser.add_argument('--host', type=str, default='0.0.0.0', help='Host/interface to bind (default: 0.0.0.0)')
     serve_parser.add_argument('--disable-signals', action='store_true', help='Do not register SIGINT/SIGTERM handlers (diagnostics / embedding)')
     
-    # Status command
-    subparsers.add_parser('status', help='Get services status')
+    # Status command - HTTP client
+    status_parser = subparsers.add_parser('status', help='Get services status')
+    status_parser.add_argument('--port', type=int, default=5859, help='Port of server to query (default: 5859)')
     
-    # Test command
+    # Test command - HTTP client
     test_parser = subparsers.add_parser('test', help='Test service connection')
     test_parser.add_argument('service', help='Service name to test')
+    test_parser.add_argument('--port', type=int, default=5859, help='Port of server to query (default: 5859)')
     
-    # Tools command
+    # Tools command - HTTP client
     tools_parser = subparsers.add_parser('tools', help='Get tools for service')
     tools_parser.add_argument('service', help='Service name')
+    tools_parser.add_argument('--port', type=int, default=5859, help='Port of server to query (default: 5859)')
+    
+    # Kill command - HTTP client
+    kill_parser = subparsers.add_parser('kill', help='Kill running server')
+    kill_parser.add_argument('--port', type=int, default=5859, help='Port of server to kill (default: 5859)')
     
     args = parser.parse_args()
     
     if args.command == 'serve':
-        asyncio.run(serve(port=getattr(args, 'port', 5859), host=getattr(args, 'host', '0.0.0.0'), disable_signals=getattr(args, 'disable_signals', False)))
-    elif args.command == 'status':
-        asyncio.run(cli_status())
-    elif args.command == 'test':
-        asyncio.run(cli_test_service(args.service))
-    elif args.command == 'tools':
-        asyncio.run(cli_get_tools(args.service))
+        # Only serve command loads supervisor and services
+        asyncio.run(serve(port=args.port, host=args.host, disable_signals=args.disable_signals))
+    elif args.command in ['status', 'test', 'tools', 'kill']:
+        # HTTP client commands - prevent supervisor initialization
+        os.environ['FRACTALIC_NO_INIT'] = '1'
+        if args.command == 'status':
+            asyncio.run(cli_status(args.port))
+        elif args.command == 'test':
+            asyncio.run(cli_test_service(args.service, args.port))
+        elif args.command == 'tools':
+            asyncio.run(cli_get_tools(args.service, args.port))
+        elif args.command == 'kill':
+            asyncio.run(cli_kill(args.port))
     else:
+        print("DEBUG: No valid command, showing help")
         parser.print_help()
 
 if __name__ == '__main__':
