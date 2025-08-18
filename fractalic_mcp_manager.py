@@ -323,6 +323,9 @@ class MCPSupervisorV2:
         self.token_storages: Dict[str, FileTokenStorage] = {}
         self.service_states: Dict[str, str] = {}
         self.tools_cache: Dict[str, List[Dict[str, Any]]] = {}
+        self.prompts_cache: Dict[str, List[Dict[str, Any]]] = {}
+        self.resources_cache: Dict[str, List[Dict[str, Any]]] = {}
+        self.capabilities_cache: Dict[str, Dict[str, bool]] = {}
         # Auth / throttling bookkeeping
         self.oauth_attempt_timestamps: Dict[str, float] = {}
         self.last_unauthorized: Dict[str, float] = {}
@@ -454,22 +457,29 @@ class MCPSupervisorV2:
         except Exception as e:
             logger.debug(f"Failed persisting redirect state: {e}")
     
-    async def _populate_initial_cache(self):
+    async def _populate_initial_cache(self, comprehensive: bool = False):
         """
-        Populate tools cache on startup for all enabled services.
-        This provides instant tool lookups instead of per-request connections.
+        Populate cache on startup for all enabled services.
+        
+        Args:
+            comprehensive: If True, caches tools, prompts, and resources. 
+                          If False, only caches tools for faster startup.
         """
-        logger.info("Starting initial tools cache population...")
+        cache_type = "comprehensive" if comprehensive else "tools"
+        logger.info(f"Starting initial {cache_type} cache population...")
         cache_start_time = time.time()
         
-        # Load tools for all enabled services in parallel
+        # Load data for all enabled services in parallel
         tasks = []
         for service_name in self.config:
             if self.service_states.get(service_name, "enabled") == "enabled":
-                task = asyncio.create_task(self._cache_tools_for_service(service_name))
+                if comprehensive:
+                    task = asyncio.create_task(self._cache_all_data_for_service(service_name))
+                else:
+                    task = asyncio.create_task(self._cache_tools_for_service(service_name))
                 tasks.append(task)
         
-        # Wait for all services to complete (with individual timeouts handled in _cache_tools_for_service)
+        # Wait for all services to complete (with individual timeouts handled in cache methods)
         if tasks:
             await asyncio.gather(*tasks, return_exceptions=True)
         
@@ -477,8 +487,17 @@ class MCPSupervisorV2:
         cached_services = len([name for name in self.tools_cache if self.tools_cache[name]])
         total_tools = sum(len(tools) for tools in self.tools_cache.values())
         
-        logger.info(f"Initial tools cache populated in {cache_end_time - cache_start_time:.2f}s: "
-                   f"{cached_services} services, {total_tools} total tools")
+        if comprehensive:
+            cached_prompts = len([name for name in self.prompts_cache if self.prompts_cache[name]])
+            total_prompts = sum(len(prompts) for prompts in self.prompts_cache.values())
+            cached_resources = len([name for name in self.resources_cache if self.resources_cache[name]])
+            total_resources = sum(len(resources) for resources in self.resources_cache.values())
+            
+            logger.info(f"Initial comprehensive cache populated in {cache_end_time - cache_start_time:.2f}s: "
+                       f"{cached_services} services, {total_tools} tools, {total_prompts} prompts, {total_resources} resources")
+        else:
+            logger.info(f"Initial tools cache populated in {cache_end_time - cache_start_time:.2f}s: "
+                       f"{cached_services} services, {total_tools} total tools")
     
     async def _cache_tools_for_service(self, service_name: str):
         """
@@ -492,6 +511,47 @@ class MCPSupervisorV2:
         except Exception as e:
             logger.warning(f"Failed to cache tools for {service_name}: {e}")
             self.tools_cache[service_name] = []  # Empty cache on failure
+    
+    async def _cache_all_data_for_service(self, service_name: str):
+        """
+        Cache tools, prompts, resources, and capabilities for a single service with error handling.
+        This comprehensive caching reduces subsequent API call overhead.
+        """
+        try:
+            # Cache tools
+            tools = await self._get_tools_for_service_direct(service_name)
+            self.tools_cache[service_name] = tools
+            logger.debug(f"Cached {len(tools)} tools for {service_name}")
+        except Exception as e:
+            logger.warning(f"Failed to cache tools for {service_name}: {e}")
+            self.tools_cache[service_name] = []
+            
+        try:
+            # Cache prompts
+            prompts = await self.get_prompts_for_service(service_name)
+            self.prompts_cache[service_name] = prompts
+            logger.debug(f"Cached {len(prompts)} prompts for {service_name}")
+        except Exception as e:
+            logger.warning(f"Failed to cache prompts for {service_name}: {e}")
+            self.prompts_cache[service_name] = []
+            
+        try:
+            # Cache resources
+            resources = await self.get_resources_for_service(service_name)
+            self.resources_cache[service_name] = resources
+            logger.debug(f"Cached {len(resources)} resources for {service_name}")
+        except Exception as e:
+            logger.warning(f"Failed to cache resources for {service_name}: {e}")
+            self.resources_cache[service_name] = []
+            
+        try:
+            # Cache capabilities
+            capabilities = await self._get_service_capabilities_impl(service_name, self.config[service_name])
+            self.capabilities_cache[service_name] = capabilities
+            logger.debug(f"Cached capabilities for {service_name}: {capabilities}")
+        except Exception as e:
+            logger.warning(f"Failed to cache capabilities for {service_name}: {e}")
+            self.capabilities_cache[service_name] = {"prompts": False, "resources": False, "tools": False}
     
     async def _get_tools_for_service_direct(self, service_name: str) -> List[Dict[str, Any]]:
         """
@@ -567,18 +627,27 @@ class MCPSupervisorV2:
     def _update_service_cache(self, service_name: str, enabled: bool):
         """
         Update cache when service is enabled/disabled.
-        Adds tools to cache when enabled, removes when disabled.
+        Adds tools/prompts/resources to cache when enabled, removes when disabled.
         """
         if enabled:
-            # Service enabled - cache tools asynchronously
-            asyncio.create_task(self._cache_tools_for_service(service_name))
+            # Service enabled - cache all data asynchronously
+            asyncio.create_task(self._cache_all_data_for_service(service_name))
             logger.info(f"Service {service_name} enabled - updating cache")
         else:
-            # Service disabled - remove from cache
+            # Service disabled - remove from all caches
+            removed_items = 0
             if service_name in self.tools_cache:
-                tool_count = len(self.tools_cache[service_name])
+                removed_items += len(self.tools_cache[service_name])
                 del self.tools_cache[service_name]
-                logger.info(f"Service {service_name} disabled - removed {tool_count} tools from cache")
+            if service_name in self.prompts_cache:
+                removed_items += len(self.prompts_cache[service_name])
+                del self.prompts_cache[service_name]
+            if service_name in self.resources_cache:
+                removed_items += len(self.resources_cache[service_name])
+                del self.resources_cache[service_name]
+            if service_name in self.capabilities_cache:
+                del self.capabilities_cache[service_name]
+            logger.info(f"Service {service_name} disabled - removed {removed_items} items from cache")
 
     # -------- Helper consolidation (auth, sessions, formatting) --------
 
@@ -1786,7 +1855,7 @@ class MCPSupervisorV2:
     
     async def get_service_capabilities(self, service_name: str) -> Dict[str, bool]:
         """
-        Get server capabilities by connecting and calling initialize().
+        Get server capabilities using cache-first approach.
         Returns dict with capability flags: {'prompts': bool, 'resources': bool, 'tools': bool}
         """
         start_ts = time.perf_counter()
@@ -1799,7 +1868,15 @@ class MCPSupervisorV2:
             logger.debug(f"Service {service_name} is disabled, capabilities unavailable")
             self._log_event(service_name, "capabilities", self.config[service_name].transport, start_ts, status="skip", reason="disabled")
             return {"prompts": False, "resources": False, "tools": False}
-        
+
+        # Return cached capabilities if available
+        cached_capabilities = self.capabilities_cache.get(service_name)
+        if cached_capabilities:
+            logger.debug(f"Returning cached capabilities for {service_name}: {cached_capabilities}")
+            self._log_event(service_name, "capabilities", self.config[service_name].transport, start_ts, status="ok", cache="hit", **cached_capabilities)
+            return cached_capabilities
+
+        # Cache miss - fetch and cache capabilities
         service = self.config[service_name]
         
         try:
@@ -1809,32 +1886,34 @@ class MCPSupervisorV2:
             cap_timeout = 3.0
             if needs_oauth:
                 cap_timeout = 15.0  # allow discovery / auth redirect headers
-            return await asyncio.wait_for(
+            
+            capabilities = await asyncio.wait_for(
                 self._get_service_capabilities_impl(service_name, service), 
                 timeout=cap_timeout
             )
+            
+            # Cache the result
+            self.capabilities_cache[service_name] = capabilities
+            logger.debug(f"Cached capabilities for {service_name}: {capabilities}")
+            self._log_event(service_name, "capabilities", service.transport, start_ts, status="ok", cache="miss", **capabilities)
+            return capabilities
+            
         except asyncio.TimeoutError:
+            default_caps = {"prompts": False, "resources": False, "tools": False}
             if needs_oauth:
                 logger.warning(f"Timeout ({cap_timeout}s) getting capabilities for OAuth service {service_name} - may proceed after auth.")
             else:
                 logger.warning(f"Timeout ({cap_timeout}s) getting capabilities for {service_name} - fast fail, non-blocking.")
-            return {"prompts": False, "resources": False, "tools": False}
+            self.capabilities_cache[service_name] = default_caps
+            self._log_event(service_name, "capabilities", service.transport, start_ts, status="timeout", cache="miss", **default_caps)
+            return default_caps
         except Exception as e:
+            default_caps = {"prompts": False, "resources": False, "tools": False}
             logger.debug(f"Failed to get capabilities for {service_name}: {e}")
-            self._log_event(service_name, "capabilities", self.config[service_name].transport, start_ts, status="error", error=type(e).__name__)
-            return {"prompts": False, "resources": False, "tools": False}
-        finally:
-            if service_name in self.config:
-                caps = await self._safe_caps(service_name)
-                self._log_event(service_name, "capabilities", self.config[service_name].transport, start_ts, **caps)
+            self.capabilities_cache[service_name] = default_caps
+            self._log_event(service_name, "capabilities", service.transport, start_ts, status="error", error=type(e).__name__, cache="miss", **default_caps)
+            return default_caps
 
-    async def _safe_caps(self, service_name: str) -> Dict[str, Any]:
-        try:
-            # Do not recurse; read from cache/quick call (no network). Here simply returns placeholders.
-            return {}
-        except Exception:
-            return {}
-    
     async def _get_service_capabilities_impl(self, service_name: str, service: ServiceConfig) -> Dict[str, bool]:
         """Internal implementation of get_service_capabilities"""
         try:
@@ -1941,7 +2020,7 @@ class MCPSupervisorV2:
             return {"prompts": False, "resources": False, "tools": False}
 
     async def get_prompts_for_service(self, service_name: str) -> List[Dict[str, Any]]:
-        """Get prompts for a service using per-request session with capability checking"""
+        """Get prompts for a service using cache-first approach with per-request session fallback"""
         start_ts = time.perf_counter()
         if service_name not in self.config:
             self._log_event(service_name, "list_prompts", None, start_ts, status="skip", reason="not_found")
@@ -1952,11 +2031,19 @@ class MCPSupervisorV2:
             logger.info(f"Service {service_name} is disabled, skipping prompt retrieval")
             return []
         
+        # Return cached prompts for instant response (with lazy fallback fetch if empty)
+        cached_prompts = self.prompts_cache.get(service_name, [])
+        if cached_prompts:
+            logger.debug(f"Returning {len(cached_prompts)} cached prompts for {service_name}")
+            self._log_event(service_name, "list_prompts", self.config[service_name].transport, start_ts, prompt_count=len(cached_prompts), cache="hit")
+            return cached_prompts
+            
         # Check if service supports prompts capability first
         try:
             capabilities = await self.get_service_capabilities(service_name)
             if not capabilities.get("prompts", False):
                 logger.debug(f"Service {service_name} does not support prompts capability")
+                self.prompts_cache[service_name] = []  # Cache empty result
                 return []
         except Exception as e:
             logger.debug(f"Could not check capabilities for {service_name}: {e}")
@@ -1964,14 +2051,20 @@ class MCPSupervisorV2:
         
         service = self.config[service_name]
         
+        # If cache empty attempt a one-shot direct fetch
         try:
+            logger.info(f"Cache empty for {service_name}; attempting direct prompt fetch now")
             needs_oauth = (service_name in self.oauth_providers or 
                            self._is_oauth_service(service.spec.get('url', '')))
             prompts_timeout = 3.0 if not needs_oauth else 20.0
-            return await asyncio.wait_for(
+            direct = await asyncio.wait_for(
                 self._get_prompts_for_service_impl(service_name, service), 
                 timeout=prompts_timeout
             )
+            if direct:
+                self.prompts_cache[service_name] = direct
+            self._log_event(service_name, "list_prompts", self.config[service_name].transport, start_ts, prompt_count=len(direct), cache="miss")
+            return direct
         except asyncio.TimeoutError:
             if needs_oauth:
                 logger.warning(f"Timeout ({prompts_timeout}s) getting prompts for OAuth service {service_name} - may resolve post-auth.")
@@ -1982,14 +2075,6 @@ class MCPSupervisorV2:
             logger.error(f"Failed to get prompts for {service_name}: {e}")
             self._log_event(service_name, "list_prompts", service.transport, start_ts, status="error", error=type(e).__name__)
             return []
-        finally:
-            if service_name in self.config:
-                # Log event with count if available
-                try:
-                    prompts_cached = self.tools_cache.get(service_name, [])  # reuse structure if needed
-                    self._log_event(service_name, "list_prompts", self.config[service_name].transport, start_ts, prompt_count=len(prompts_cached) if prompts_cached else None)
-                except Exception:
-                    pass
     
     async def _get_prompts_for_service_impl(self, service_name: str, service: ServiceConfig) -> List[Dict[str, Any]]:
         """Internal implementation of get_prompts_for_service"""
@@ -2134,7 +2219,7 @@ class MCPSupervisorV2:
             raise
     
     async def get_resources_for_service(self, service_name: str) -> List[Dict[str, Any]]:
-        """Get resources for a service using per-request session with capability checking"""
+        """Get resources for a service using cache-first approach with per-request session fallback"""
         start_ts = time.perf_counter()
         if service_name not in self.config:
             self._log_event(service_name, "list_resources", None, start_ts, status="skip", reason="not_found")
@@ -2145,11 +2230,19 @@ class MCPSupervisorV2:
             logger.info(f"Service {service_name} is disabled, skipping resource retrieval")
             return []
         
+        # Return cached resources for instant response (with lazy fallback fetch if empty)
+        cached_resources = self.resources_cache.get(service_name, [])
+        if cached_resources:
+            logger.debug(f"Returning {len(cached_resources)} cached resources for {service_name}")
+            self._log_event(service_name, "list_resources", self.config[service_name].transport, start_ts, resource_count=len(cached_resources), cache="hit")
+            return cached_resources
+            
         # Check if service supports resources capability first
         try:
             capabilities = await self.get_service_capabilities(service_name)
             if not capabilities.get("resources", False):
                 logger.debug(f"Service {service_name} does not support resources capability")
+                self.resources_cache[service_name] = []  # Cache empty result
                 return []
         except Exception as e:
             logger.debug(f"Could not check capabilities for {service_name}: {e}")
@@ -2157,14 +2250,20 @@ class MCPSupervisorV2:
         
         service = self.config[service_name]
         
+        # If cache empty attempt a one-shot direct fetch
         try:
+            logger.info(f"Cache empty for {service_name}; attempting direct resource fetch now")
             needs_oauth = (service_name in self.oauth_providers or 
                            self._is_oauth_service(service.spec.get('url', '')))
             resources_timeout = 3.0 if not needs_oauth else 20.0
-            return await asyncio.wait_for(
+            direct = await asyncio.wait_for(
                 self._get_resources_for_service_impl(service_name, service), 
                 timeout=resources_timeout
             )
+            if direct:
+                self.resources_cache[service_name] = direct
+            self._log_event(service_name, "list_resources", self.config[service_name].transport, start_ts, resource_count=len(direct), cache="miss")
+            return direct
         except asyncio.TimeoutError:
             if needs_oauth:
                 logger.warning(f"Timeout ({resources_timeout}s) getting resources for OAuth service {service_name} - may resolve post-auth.")
@@ -2175,12 +2274,6 @@ class MCPSupervisorV2:
             logger.error(f"Failed to get resources for {service_name}: {e}")
             self._log_event(service_name, "list_resources", service.transport, start_ts, status="error", error=type(e).__name__)
             return []
-        finally:
-            if service_name in self.config:
-                try:
-                    self._log_event(service_name, "list_resources", self.config[service_name].transport, start_ts)
-                except Exception:
-                    pass
     
     async def _get_resources_for_service_impl(self, service_name: str, service: ServiceConfig) -> List[Dict[str, Any]]:
         """Internal implementation of get_resources_for_service"""
@@ -2631,15 +2724,21 @@ class MCPSupervisorV2:
                 logger.warning(f"Timeout detected during connection test for {service_name}")
             raise  # Re-raise to be caught by the outer timeout handler
     
-    async def status(self, include_tools_info: bool = False) -> Dict[str, Any]:
+    async def status(self, include_tools_info: bool = False, include_complete_data: bool = False) -> Dict[str, Any]:
         """
-        Get status of all services.
-        If include_tools_info=True, fetches actual tools count and token count for each service.
-        Otherwise, returns configuration status only (faster for health checks).
+        Get status of all services with optional complete data inclusion.
+        
+        Args:
+            include_tools_info: Include tool counts and token counts
+            include_complete_data: Include full tools, prompts, resources, and capabilities data
+        
+        Returns complete MCP server state to reduce UI-to-manager traffic.
         """
         services = {}
         total_tools = 0
         total_tokens = 0
+        total_prompts = 0
+        total_resources = 0
         
         for name, service in self.config.items():
             # Base configuration info - per-request pattern with enabled/disabled states
@@ -2655,7 +2754,7 @@ class MCPSupervisorV2:
             }
             
             # Include tools information if requested (aligned with legacy manager)
-            if include_tools_info:
+            if include_tools_info or include_complete_data:
                 try:
                     tools_info = await self.get_tools_info_for_service(name)
                     service_info.update(tools_info)  # Adds tool_count, token_count, and any tools_error
@@ -2678,6 +2777,71 @@ class MCPSupervisorV2:
                     "token_count": 0     # Will be populated when tools info is requested
                 })
             
+            # Include complete data if requested (full MCP feature set)
+            if include_complete_data and service_status == "enabled":
+                # Get tools data (use cache if available)
+                try:
+                    cached_tools = self.tools_cache.get(name, [])
+                    if cached_tools:
+                        tools = cached_tools
+                        logger.debug(f"Using cached tools for {name}: {len(tools)} tools")
+                    else:
+                        tools = await self.get_tools_for_service(name)
+                        if tools:
+                            self.tools_cache[name] = tools
+                    service_info["tools"] = tools
+                except Exception as e:
+                    logger.warning(f"Failed to get tools for {name}: {e}")
+                    service_info["tools"] = []
+                    service_info["tools_error"] = str(e)
+                
+                # Get prompts data (use cache if available)
+                try:
+                    cached_prompts = self.prompts_cache.get(name, [])
+                    if cached_prompts:
+                        prompts = cached_prompts
+                        logger.debug(f"Using cached prompts for {name}: {len(prompts)} prompts")
+                    else:
+                        prompts = await self.get_prompts_for_service(name)
+                        if prompts:
+                            self.prompts_cache[name] = prompts
+                    service_info["prompts"] = prompts
+                    service_info["prompt_count"] = len(prompts)
+                    total_prompts += len(prompts)
+                except Exception as e:
+                    logger.warning(f"Failed to get prompts for {name}: {e}")
+                    service_info["prompts"] = []
+                    service_info["prompt_count"] = 0
+                    service_info["prompts_error"] = str(e)
+                
+                # Get resources data (use cache if available)
+                try:
+                    cached_resources = self.resources_cache.get(name, [])
+                    if cached_resources:
+                        resources = cached_resources
+                        logger.debug(f"Using cached resources for {name}: {len(resources)} resources")
+                    else:
+                        resources = await self.get_resources_for_service(name)
+                        if resources:
+                            self.resources_cache[name] = resources
+                    service_info["resources"] = resources
+                    service_info["resource_count"] = len(resources)
+                    total_resources += len(resources)
+                except Exception as e:
+                    logger.warning(f"Failed to get resources for {name}: {e}")
+                    service_info["resources"] = []
+                    service_info["resource_count"] = 0
+                    service_info["resources_error"] = str(e)
+                
+                # Get capabilities data
+                try:
+                    capabilities = await self.get_service_capabilities(name)
+                    service_info["capabilities"] = capabilities
+                except Exception as e:
+                    logger.warning(f"Failed to get capabilities for {name}: {e}")
+                    service_info["capabilities"] = {}
+                    service_info["capabilities_error"] = str(e)
+            
             services[name] = service_info
         
         return {
@@ -2685,9 +2849,12 @@ class MCPSupervisorV2:
             "total_services": len(self.config),
             "enabled_services": len([s for s in services.values() if s.get("enabled", True)]),
             "oauth_enabled": len(self.oauth_providers) > 0,
-            "total_tools": total_tools if include_tools_info else 0,
-            "total_tokens": total_tokens if include_tools_info else 0,
-            "mcp_version": MCP_PROTOCOL_VERSION
+            "total_tools": total_tools if (include_tools_info or include_complete_data) else 0,
+            "total_tokens": total_tokens if (include_tools_info or include_complete_data) else 0,
+            "total_prompts": total_prompts if include_complete_data else 0,
+            "total_resources": total_resources if include_complete_data else 0,
+            "mcp_version": MCP_PROTOCOL_VERSION,
+            "complete_data_included": include_complete_data
         }
 
 # OAuth callback handler for web server
@@ -2903,17 +3070,47 @@ async def oauth_callback_handler(request):
 
 # REST API endpoints
 async def status_handler(request):
-    """GET /status - Get services status with tools and token counts (legacy compatible)"""
+    """GET /status - Get services status with optional complete data inclusion
+    
+    Query parameters:
+    - include_tools_info: Include tool counts (default: true for legacy compatibility)  
+    - include_complete_data: Include full tools, prompts, resources, and capabilities
+    """
     try:
         # Check for include_tools_info query parameter - default to True for legacy compatibility
         include_tools_param = request.query.get('include_tools_info', 'true').lower()
         include_tools = include_tools_param in ('true', '1', 'yes')
         
+        # Check for include_complete_data query parameter - default to False
+        include_complete_param = request.query.get('include_complete_data', 'false').lower()
+        include_complete = include_complete_param in ('true', '1', 'yes')
+        
         supervisor = request.app['supervisor']
-        status = await supervisor.status(include_tools_info=include_tools)
+        status = await supervisor.status(include_tools_info=include_tools, include_complete_data=include_complete)
         return web.json_response(status)
     except Exception as e:
         logger.error(f"Status error: {e}")
+        return web.json_response({"error": str(e)}, status=500)
+
+async def complete_status_handler(request):
+    """GET /status/complete - Get complete MCP server state (tools, prompts, resources, capabilities)
+    
+    This single endpoint provides all MCP data to minimize UI-to-manager traffic.
+    Returns the complete state including:
+    - All services with their enabled/disabled status
+    - Full tools list for each service
+    - Full prompts list for each service  
+    - Full resources list for each service
+    - Service capabilities
+    - OAuth status
+    - Comprehensive totals and metadata
+    """
+    try:
+        supervisor = request.app['supervisor']
+        status = await supervisor.status(include_tools_info=True, include_complete_data=True)
+        return web.json_response(status)
+    except Exception as e:
+        logger.error(f"Complete status error: {e}")
         return web.json_response({"error": str(e)}, status=500)
 
 async def toggle_service_handler(request):
@@ -3632,6 +3829,7 @@ def create_app(supervisor_instance):
     
     # API routes with CORS
     cors.add(app.router.add_get('/status', status_handler))
+    cors.add(app.router.add_get('/status/complete', complete_status_handler))  # Complete MCP state in single call
     cors.add(app.router.add_get('/list_tools', list_tools_handler))  # Fractalic compatibility endpoint
     cors.add(app.router.add_post('/toggle/{name}', toggle_service_handler))
     cors.add(app.router.add_get('/tools', get_all_tools_handler))  # Get all tools from all services
@@ -3712,8 +3910,7 @@ async def serve(port: int = 5859, host: str = '0.0.0.0', disable_signals: bool =
     except Exception as _cwd_e:
         logger.warning(f"Could not change working directory to root: {_cwd_e}")
 
-    # Create supervisor instance for this server
-    from fractalic_mcp_manager_sdk_v2 import MCPSupervisorV2
+    # Create supervisor instance for this server (use the enhanced version in this file)
     supervisor = MCPSupervisorV2()
     
     app = create_app(supervisor)
@@ -3726,14 +3923,15 @@ async def serve(port: int = 5859, host: str = '0.0.0.0', disable_signals: bool =
     logger.info(f"MCP Manager V2 started on http://{host}:{port}")
     logger.info("Per-request session pattern - no persistent connections")
 
-    # Populate initial tools cache asynchronously so server can accept requests immediately
+    # Populate initial cache asynchronously so server can accept requests immediately
     async def _background_cache():
         try:
-            await supervisor._populate_initial_cache()
+            # Use comprehensive caching to reduce subsequent API calls
+            await supervisor._populate_initial_cache(comprehensive=True)
         except Exception as e:
             logger.error(f"Initial cache population failed: {e}")
     asyncio.create_task(_background_cache())
-    logger.info("Initial cache population started in background")
+    logger.info("Initial comprehensive cache population started in background")
 
     shutdown_event = asyncio.Event()
 

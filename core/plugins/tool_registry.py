@@ -271,7 +271,7 @@ class ToolRegistry(dict):
                 
                 print(f"[ToolRegistry] Attempting to load tools from {srv}")
                 response = mcp_list(srv)
-                print(f"[ToolRegistry] MCP {srv} raw response: {response}")
+                # print(f"[ToolRegistry] MCP {srv} raw response: {response}")  # Disabled: causes huge schema output
                 
                 if not response:
                     print(f"[ToolRegistry] MCP {srv} returned empty or None response.")
