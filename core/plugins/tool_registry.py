@@ -290,33 +290,9 @@ class ToolRegistry(dict):
                     all_services_have_errors = True
 
                 if all_services_have_errors:
-                    print(f"[ToolRegistry] All services have errors. Attempting to restart MCP server...")
-                    try:
-                        import subprocess, time
-                        # Kill existing server
-                        subprocess.run(["pkill", "-f", "fractalic_mcp_manager.py"], check=False)
-                        time.sleep(2)
-                        
-                        # Start new server with increased timeout
-                        proc = subprocess.Popen([
-                            "python3", 
-                            "fractalic_mcp_manager.py", 
-                            "serve",
-                            "--port", "5859"
-                        ])
-                        
-                        # Wait for server to start
-                        time.sleep(5)
-                        
-                        # Try again with increased timeout
-                        response = mcp_list(srv)
-                        if not response or all("error" in service_data for service_data in response.values()):
-                            print(f"[ToolRegistry] Server restart failed. Last error: {response}")
-                            continue
-                            
-                    except Exception as restart_err:
-                        print(f"[ToolRegistry] Failed to restart MCP server: {restart_err}")
-                        continue
+                    print(f"[ToolRegistry] All services have errors. MCP server may be down or misconfigured.")
+                    print(f"[ToolRegistry] Skipping MCP server {srv} - no tools will be loaded from this server.")
+                    continue
                 
                 # Handle both old and new MCP manager response formats
                 if isinstance(response, dict):
