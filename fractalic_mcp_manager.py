@@ -193,8 +193,8 @@ class FileTokenStorage(TokenStorage):
         except Exception as e:
             logger.error(f"Failed to save tokens for {self.service_name}: {e}")
 
-    async def replace_access_token(self, access_token: str, expires_in: Optional[int], scope: Optional[str]):
-        """Update only access token fields during refresh preserving refresh token."""
+    async def replace_access_token(self, access_token: str, expires_in: Optional[int], scope: Optional[str], refresh_token: Optional[str] = None):
+        """Update access token fields during refresh, optionally updating refresh token if server provides new one."""
         try:
             if not self.file_path.exists():
                 return
@@ -212,6 +212,11 @@ class FileTokenStorage(TokenStorage):
                 svc['expires_in']=expires_in
             if scope is not None:
                 svc['scope']=scope
+            if refresh_token is not None:
+                svc['refresh_token']=refresh_token
+                logger.info(f"Server provided new refresh token for {self.service_name} (refresh token rotation)")
+            else:
+                logger.info(f"Server reused existing refresh token for {self.service_name} (refresh token reuse pattern)")
             svc['obtained_at']=_time.time()
             data[self.service_name]=svc
             self._atomic_write_json(data)
@@ -1238,10 +1243,15 @@ class MCPSupervisorV2:
                     return
                 jd = resp.json()
                 new_access = jd.get('access_token')
+                new_refresh = jd.get('refresh_token')  # Check for new refresh token
                 new_expires = jd.get('expires_in')
                 new_scope = jd.get('scope')
+                
+                # Log what we received from the server
+                logger.info(f"Refresh response for {service_name}: access_token={'✓' if new_access else '✗'}, refresh_token={'✓' if new_refresh else '✗'}, expires_in={new_expires}")
+                
                 if new_access:
-                    await storage.replace_access_token(new_access, new_expires, new_scope)
+                    await storage.replace_access_token(new_access, new_expires, new_scope, new_refresh)
                     self._log_event(service_name, 'token_refresh', None, time.perf_counter(), status='refreshed', remaining=int(remaining))
                     logger.info(f"Successfully refreshed tokens for {service_name}")
         except Exception as e:
