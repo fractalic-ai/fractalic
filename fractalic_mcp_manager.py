@@ -1048,6 +1048,10 @@ class MCPSupervisorV2:
                     )
                     
                     await storage.set_tokens(oauth_token)
+                    
+                    # Preserve client_info for future refresh operations
+                    await self._preserve_client_info(service_name, client_info)
+                    
                     logger.info(f"Successfully saved tokens for {service_name} via manual exchange")
                     return True
                 else:
@@ -1057,9 +1061,84 @@ class MCPSupervisorV2:
         except Exception as e:
             logger.error(f"Manual token exchange failed for {service_name}: {e}", exc_info=True)
             return False
+    
+    async def _preserve_client_info_from_provider(self, service_name: str):
+        """Preserve client_info from OAuth provider after tokens are saved"""
+        try:
+            provider = self.oauth_providers.get(service_name)
+            if not provider:
+                return
+                
+            # Get client_info from provider's context
+            if hasattr(provider, 'context') and provider.context:
+                client_info = getattr(provider.context, 'client_info', None)
+                if client_info:
+                    await self._preserve_client_info(service_name, client_info)
+                    logger.info(f"Preserved client_info for {service_name} from OAuth provider")
+        except Exception as e:
+            logger.warning(f"Failed to preserve client_info from provider for {service_name}: {e}")
+    
+    async def _preserve_client_info(self, service_name: str, client_info):
+        """Preserve client_info in token storage for future refresh operations"""
+        try:
+            storage = self.token_storages.get(service_name)
+            if not storage or not client_info:
+                return
+                
+            fp = storage.file_path
+            if not fp.exists():
+                return
+                
+            # Use a lock to prevent concurrent file access
+            if not hasattr(self, '_file_locks'):
+                self._file_locks = {}
+            
+            if str(fp) not in self._file_locks:
+                import asyncio
+                self._file_locks[str(fp)] = asyncio.Lock()
+            
+            async with self._file_locks[str(fp)]:
+                import json as _json
+                
+                # Read current tokens
+                with open(fp, 'r') as f:
+                    data = _json.load(f)
+                
+                # Skip if client_info already exists
+                if service_name in data and 'client_info' in data[service_name]:
+                    logger.debug(f"Client info already exists for {service_name}, skipping")
+                    return
+                
+                # Add client_info to service record
+                if service_name in data:
+                    # Convert client_info to dict if it's a Pydantic model
+                    if hasattr(client_info, 'model_dump'):
+                        # Use mode='json' to handle AnyUrl and other special types
+                        client_info_dict = client_info.model_dump(mode='json')
+                    elif hasattr(client_info, '__dict__'):
+                        client_info_dict = client_info.__dict__
+                    else:
+                        client_info_dict = client_info
+                        
+                    data[service_name]['client_info'] = client_info_dict
+                    
+                    # Write back to file atomically
+                    temp_fp = fp.with_suffix('.tmp')
+                    with open(temp_fp, 'w') as f:
+                        _json.dump(data, f, indent=2)
+                    temp_fp.replace(fp)  # Atomic move
+                        
+                    logger.info(f"Client info preserved for {service_name}")
+        except Exception as e:
+            logger.warning(f"Failed to preserve client_info for {service_name}: {e}")
 
-    async def _maybe_refresh_tokens(self, service_name: str):
-        """If tokens near expiry and refresh_token present, perform refresh grant."""
+    async def _maybe_refresh_tokens(self, service_name: str, force_refresh: bool = False):
+        """If tokens near expiry and refresh_token present, perform refresh grant.
+        
+        Args:
+            service_name: Name of the service to refresh tokens for
+            force_refresh: If True, refresh even if not near expiry (for 401 errors)
+        """
         storage = self.token_storages.get(service_name)
         provider = self.oauth_providers.get(service_name)
         if not storage or not provider:
@@ -1067,21 +1146,28 @@ class MCPSupervisorV2:
         try:
             tokens = await storage.get_tokens()
             if not tokens or not tokens.refresh_token:
+                logger.info(f"No refresh token available for {service_name}, skipping refresh")
                 return
             if not tokens.expires_in:
+                logger.info(f"No expires_in available for {service_name}, skipping refresh")
                 return
             fp = storage.file_path
             if not fp.exists():
+                logger.info(f"Token file doesn't exist for {service_name}, skipping refresh")
                 return
             import json as _json, time as _time, httpx
             with open(fp,'r') as f: data=_json.load(f)
             rec = data.get(service_name)
             if not rec or 'obtained_at' not in rec:
+                logger.info(f"No token record with obtained_at for {service_name}, skipping refresh")
                 return
             age = _time.time() - rec['obtained_at']
             remaining = tokens.expires_in - age
-            if remaining > 120:  # only refresh when close (<2 min)
+            if not force_refresh and remaining > 120:  # only refresh when close (<2 min) unless forced
+                logger.info(f"Token for {service_name} not near expiry ({remaining:.1f}s remaining), skipping refresh")
                 return
+            
+            logger.info(f"Starting token refresh for {service_name} (force={force_refresh}, remaining={remaining:.1f}s)")
             
             # Get server URL from provider context
             server_url = None
@@ -1115,7 +1201,8 @@ class MCPSupervisorV2:
             client_secret = client_info.get('client_secret')
             
             if not client_id:
-                logger.warning(f"No client_id found in stored tokens for {service_name}")
+                logger.warning(f"No client_id found in stored tokens for {service_name}, cannot refresh")
+                logger.debug(f"Available client_info keys for {service_name}: {list(client_info.keys())}")
                 return
             
             payload = {
@@ -1443,6 +1530,12 @@ class MCPSupervisorV2:
                 # Create service-specific token storage
                 token_storage = FileTokenStorage("oauth_tokens.json", name)
                 self.token_storages[name] = token_storage
+                
+                # Set up hook to preserve client_info when tokens are saved
+                def preserve_client_on_save():
+                    asyncio.create_task(self._preserve_client_info_from_provider(name))
+                token_storage.on_set_tokens = preserve_client_on_save
+                
                 redirect_handler = lambda url: self._handle_oauth_redirect_service(name, url)
                 provider = OAuthClientProvider(
                     server_url=server_url,
@@ -1455,7 +1548,7 @@ class MCPSupervisorV2:
                     ),
                     storage=token_storage,
                     redirect_handler=redirect_handler,
-                    callback_handler=self._create_callback_handler_for_service(name),
+                    # No custom callback_handler - let MCP SDK handle it natively
                 )
                 self.oauth_providers[name] = provider
                 logger.info(f"OAuth provider initialized for {name}")
@@ -1475,10 +1568,18 @@ class MCPSupervisorV2:
             # Create service-specific token storage
             token_storage = FileTokenStorage("oauth_tokens.json", name)
             self.token_storages[name] = token_storage
+            
+            # Set up hook to preserve client_info when tokens are saved
+            def preserve_client_on_save():
+                asyncio.create_task(self._preserve_client_info_from_provider(name))
+            token_storage.on_set_tokens = preserve_client_on_save
+            
             redirect_handler = lambda url: self._handle_oauth_redirect_service(name, url)
             
-            # Enhance callback handler to force token exchange completion
-            callback_handler = self._create_enhanced_callback_handler_for_service(name)
+            # Simple callback handler that returns empty values - only for compatibility
+            # The actual OAuth flow should not reach this since we're using existing tokens for refresh
+            async def dummy_callback_handler():
+                return ("", None)
             
             # Enable debug logging for OAuth provider
             import logging
@@ -1500,7 +1601,7 @@ class MCPSupervisorV2:
                 ),
                 storage=token_storage,
                 redirect_handler=redirect_handler,
-                callback_handler=callback_handler,
+                callback_handler=dummy_callback_handler,
             )
             # Store it for future use
             self.oauth_providers[name] = provider
@@ -1797,8 +1898,8 @@ class MCPSupervisorV2:
                             # Check if this is a 401 error indicating expired token
                             if "401" in str(e) or "Unauthorized" in str(e):
                                 logger.info(f"Bearer token appears expired for {service_name}, attempting refresh...")
-                                # Try to refresh tokens
-                                await self._maybe_refresh_tokens(service_name)
+                                # Try to refresh tokens (force refresh on 401 error)
+                                await self._maybe_refresh_tokens(service_name, force_refresh=True)
                                 
                                 # Get updated bearer auth header
                                 updated_bearer_auth = await self._get_bearer_auth_header(service_name)
