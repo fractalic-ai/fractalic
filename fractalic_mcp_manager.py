@@ -116,15 +116,31 @@ class FileTokenStorage(TokenStorage):
             with open(self.file_path, 'r') as f:
                 data = json.load(f)
             
+            # Validate JSON structure
+            if not isinstance(data, dict):
+                logger.error(f"Token file has invalid structure: expected dict, got {type(data)}")
+                return None
+                
             logger.info(f"Token file loaded, available services: {list(data.keys())}")
             
             # Load service-specific token or fall back to default
             token_key = self.service_name if self.service_name in data else "default"
             if token_key in data:
                 token_data = data[token_key]
-                logger.info(f"Found tokens for {token_key}, access_token starts with: {token_data['access_token'][:20]}...")
+                
+                # Validate required fields
+                if not isinstance(token_data, dict) or 'access_token' not in token_data:
+                    logger.error(f"Invalid token structure for {token_key}: missing access_token")
+                    return None
+                
+                access_token = token_data.get('access_token')
+                if not access_token:
+                    logger.error(f"Empty access_token for {token_key}")
+                    return None
+                
+                logger.info(f"Found tokens for {token_key}, access_token starts with: {access_token[:20]}...")
                 return OAuthToken(
-                    access_token=token_data['access_token'],
+                    access_token=access_token,
                     token_type=token_data.get('token_type', 'Bearer'),
                     expires_in=token_data.get('expires_in'),
                     refresh_token=token_data.get('refresh_token'),
@@ -777,6 +793,17 @@ class MCPSupervisorV2:
                         self.oauth_in_progress[service_name] = False
             except Exception:
                 pass
+        
+        # Check for stuck OAuth flow (> 5 minutes)
+        if self.oauth_in_progress.get(service_name):
+            start_time = self.oauth_attempt_timestamps.get(service_name, time.time())
+            elapsed = time.time() - start_time
+            if elapsed > 300:  # 5 minutes timeout
+                logger.warning(f"OAuth flow stuck for {service_name} after {elapsed:.1f}s, clearing flag")
+                self.oauth_in_progress[service_name] = False
+                self.oauth_attempt_timestamps.pop(service_name, None)
+                self._log_event(service_name, purpose, transport, time.perf_counter(), status='oauth_timeout_cleared', elapsed=elapsed)
+        
         # Concurrency guard: if still in progress, surface pending quickly
         if self.oauth_in_progress.get(service_name):
             monotonic_now = time.perf_counter()
@@ -844,6 +871,7 @@ class MCPSupervisorV2:
                             pass
                         if mark_in_progress:
                             self.oauth_in_progress[service_name] = True
+                            self.oauth_attempt_timestamps[service_name] = time.time()
                         base = self._base_server_url(url)
                         self._log_event(service_name, purpose, transport, time.perf_counter(), status='oauth_begin_flow', base=base)
                         fut = getattr(self, 'oauth_futures', {}).get(service_name)
@@ -871,6 +899,7 @@ class MCPSupervisorV2:
                                 pass
                     else:
                         self.oauth_in_progress[service_name] = True
+                        self.oauth_attempt_timestamps[service_name] = time.time()
                         self._log_event(service_name, purpose, transport, time.perf_counter(), status='oauth_reauth_forced')
                         storage = self.token_storages.get(service_name)
                         if storage and hasattr(storage, 'delete_tokens'):
@@ -938,6 +967,96 @@ class MCPSupervisorV2:
             self._log_event(service_name, 'oauth_refresh_schedule', None, time.perf_counter(), status='scheduled', delay=delay)
         except Exception:
             pass
+
+    async def _perform_manual_token_exchange(self, service_name: str, auth_code: str, client_info, state: str = None) -> bool:
+        """Manually perform OAuth token exchange when the MCP SDK fails to do it automatically"""
+        try:
+            import httpx
+            # Get the base server URL from the service config
+            service_config = self.config.get(service_name)
+            if not service_config:
+                logger.error(f"No service config found for {service_name}")
+                return False
+                
+            server_url = service_config.spec.get('url', '').replace('/sse', '')  # Remove /sse suffix
+            if not server_url:
+                logger.error(f"No server URL found for {service_name}")
+                return False
+            
+            # Discover token endpoint
+            discovery_url = server_url.rstrip('/') + '/.well-known/oauth-authorization-server'
+            token_endpoint = None
+            
+            async with httpx.AsyncClient(timeout=10) as client:
+                try:
+                    resp = await client.get(discovery_url)
+                    if resp.status_code == 200:
+                        discovery_data = resp.json()
+                        token_endpoint = discovery_data.get('token_endpoint')
+                        logger.info(f"Discovered token endpoint for {service_name}: {token_endpoint}")
+                except Exception as e:
+                    logger.warning(f"Failed to discover token endpoint for {service_name}: {e}")
+            
+            if not token_endpoint:
+                # Fallback to standard endpoint
+                token_endpoint = server_url.rstrip('/') + '/token'
+                logger.info(f"Using fallback token endpoint for {service_name}: {token_endpoint}")
+            
+            # Prepare token exchange payload
+            payload = {
+                'grant_type': 'authorization_code',
+                'code': auth_code,
+                'redirect_uri': 'http://localhost:5859/oauth/callback',
+                'client_id': client_info.client_id,
+            }
+            
+            # Add client_secret if available (required for confidential clients)
+            if hasattr(client_info, 'client_secret') and client_info.client_secret:
+                payload['client_secret'] = client_info.client_secret
+            
+            logger.info(f"Performing manual token exchange for {service_name} with code={auth_code[:20]}...")
+            
+            # Perform token exchange
+            async with httpx.AsyncClient(timeout=15) as client:
+                resp = await client.post(token_endpoint, data=payload)
+                
+                if resp.status_code != 200:
+                    logger.error(f"Token exchange failed for {service_name}: HTTP {resp.status_code}")
+                    try:
+                        error_data = resp.json()
+                        logger.error(f"Token exchange error: {error_data}")
+                    except:
+                        logger.error(f"Token exchange error text: {resp.text}")
+                    return False
+                
+                token_data = resp.json()
+                access_token = token_data.get('access_token')
+                
+                if not access_token:
+                    logger.error(f"No access_token in response for {service_name}")
+                    return False
+                
+                # Save tokens using our storage system
+                storage = self.token_storages.get(service_name)
+                if storage:
+                    oauth_token = OAuthToken(
+                        access_token=access_token,
+                        token_type=token_data.get('token_type', 'Bearer'),
+                        expires_in=token_data.get('expires_in'),
+                        refresh_token=token_data.get('refresh_token'),
+                        scope=token_data.get('scope')
+                    )
+                    
+                    await storage.set_tokens(oauth_token)
+                    logger.info(f"Successfully saved tokens for {service_name} via manual exchange")
+                    return True
+                else:
+                    logger.error(f"No token storage found for {service_name}")
+                    return False
+                    
+        except Exception as e:
+            logger.error(f"Manual token exchange failed for {service_name}: {e}", exc_info=True)
+            return False
 
     async def _maybe_refresh_tokens(self, service_name: str):
         """If tokens near expiry and refresh_token present, perform refresh grant."""
@@ -1348,7 +1467,11 @@ class MCPSupervisorV2:
         try:
             # Reuse existing provider if present
             if name in self.oauth_providers:
+                logger.info(f"Reusing existing OAuth provider for {name}")
                 return self.oauth_providers[name]
+            
+            logger.info(f"Creating new OAuth provider for {name} with server_url={server_url}")
+            
             # Create service-specific token storage
             token_storage = FileTokenStorage("oauth_tokens.json", name)
             self.token_storages[name] = token_storage
@@ -1362,11 +1485,15 @@ class MCPSupervisorV2:
             oauth_logger = logging.getLogger('mcp.client.auth')
             oauth_logger.setLevel(logging.DEBUG)
             
+            # Log the redirect URI being used
+            redirect_uri = "http://localhost:5859/oauth/callback"
+            logger.info(f"OAuth provider for {name} using redirect_uri: {redirect_uri}")
+            
             provider = OAuthClientProvider(
                 server_url=server_url,
                 client_metadata=OAuthClientMetadata(
                     client_name=f"Fractalic MCP Client - {name}",
-                    redirect_uris=[AnyUrl("http://localhost:5859/oauth/callback")],
+                    redirect_uris=[AnyUrl(redirect_uri)],
                     grant_types=["authorization_code", "refresh_token"],
                     response_types=["code"],
                     scope="read write",
@@ -1377,10 +1504,10 @@ class MCPSupervisorV2:
             )
             # Store it for future use
             self.oauth_providers[name] = provider
-            logger.info(f"Dynamic OAuth provider created for {name} base_url={server_url}")
+            logger.info(f"Dynamic OAuth provider created successfully for {name} base_url={server_url}")
             return provider
         except Exception as e:
-            logger.error(f"Failed to create dynamic OAuth provider for {name}: {e}")
+            logger.error(f"Failed to create dynamic OAuth provider for {name}: {e}", exc_info=True)
             return None
     
     async def _handle_oauth_redirect(self, auth_url: str) -> None:
@@ -1402,8 +1529,11 @@ class MCPSupervisorV2:
         now = time.time()
         last = self.oauth_redirect_times.get(service, 0)
         if now - last < COOLDOWN:
+            logger.info(f"OAuth redirect skipped for {service} - cooldown active (remaining: {COOLDOWN - (now - last):.1f}s)")
             self._log_event(service, 'oauth_redirect', None, now, status='skipped_cooldown', remaining=round(COOLDOWN - (now - last),1))
             return
+        
+        logger.info(f"Opening OAuth authorization URL for {service}: {auth_url}")
         self.oauth_redirect_times[service] = now
         self._persist_redirect_state()
         await self._handle_oauth_redirect(auth_url)
@@ -2686,6 +2816,7 @@ class MCPSupervisorV2:
                         await session.list_tools()
                         
                         self.service_states[service_name] = "enabled"
+                        self._update_service_cache(service_name, True)  # Refresh cache after enabling
                         logger.info(f"Service {service_name} connection tested successfully")
                         return True
                         
@@ -2699,6 +2830,7 @@ class MCPSupervisorV2:
                             await session.initialize()
                             await session.list_tools()
                             self.service_states[service_name] = "enabled"
+                            self._update_service_cache(service_name, True)  # Refresh cache after enabling
                             return True
                 return await self._run_with_oauth_retry(service_name, 'test_connection', 'sse', url, op)
                         
@@ -2712,6 +2844,7 @@ class MCPSupervisorV2:
                             await session.initialize()
                             await session.list_tools()
                             self.service_states[service_name] = "enabled"
+                            self._update_service_cache(service_name, True)  # Refresh cache after enabling
                             return True
                 return await self._run_with_oauth_retry(service_name, 'test_connection', 'http', url, op)
                         
@@ -2894,6 +3027,7 @@ async def oauth_callback_handler(request):
             for svc, in_prog in list(getattr(supervisor, 'oauth_in_progress', {}).items()):
                 if in_prog:
                     supervisor.oauth_in_progress[svc] = False
+                    supervisor.oauth_attempt_timestamps.pop(svc, None)
                     released.append(svc)
             if released:
                 logger.info(f"OAuth in_progress flags released for services={released}")
@@ -2901,6 +3035,9 @@ async def oauth_callback_handler(request):
                 for svc in released:
                     async def _bg(s=svc):
                         try:
+                            # Wait a moment for the OAuth provider to complete token exchange
+                            await asyncio.sleep(1.0)
+                            
                             # Attempt manual token exchange before connection test if tokens still absent.
                             try:
                                 prov = supervisor.oauth_providers.get(s)
@@ -2909,6 +3046,8 @@ async def oauth_callback_handler(request):
                                 if storage:
                                     existing = await storage.get_tokens()
                                     tokens_present = existing is not None
+                                    if tokens_present:
+                                        logger.info(f"Tokens successfully stored for {s} after OAuth callback")
                                 if prov and not tokens_present:
                                     logger.info(f"Manual token exchange attempt for {s} (no tokens present post-callback)")
                                     
@@ -2955,19 +3094,25 @@ async def oauth_callback_handler(request):
                                         except Exception as ex:
                                             logger.warning(f"_complete_token_exchange failed for {s}: {type(ex).__name__} {ex}")
                                     
-                                    # Method 4: Direct token request to the OAuth provider
+                                    # Method 4: Manual HTTP token exchange as fallback
                                     if not success:
                                         try:
                                             # Get the OAuth client info for token exchange
                                             client_info = await storage.get_client_info() if storage else None
                                             if client_info:
-                                                logger.info(f"Attempting direct token exchange for {s} using client_id {client_info.client_id}")
-                                                # This is a fallback - the OAuth provider should handle this automatically
-                                                # but we'll log what we would need for manual token exchange
-                                                logger.warning(f"OAuth provider failed to complete token exchange automatically for {s}")
-                                                logger.info(f"Manual token exchange would need: code={code[:20]}..., client_id={client_info.client_id}, client_secret=***")
+                                                logger.info(f"Attempting manual HTTP token exchange for {s} using client_id {client_info.client_id}")
+                                                
+                                                # Perform manual token exchange
+                                                success = await supervisor._perform_manual_token_exchange(
+                                                    s, code, client_info, state=oauth_callback_data.get(f"{s}_state")
+                                                )
+                                                
+                                                if success:
+                                                    logger.info(f"Manual HTTP token exchange successful for {s}")
+                                                else:
+                                                    logger.warning(f"Manual HTTP token exchange failed for {s}")
                                         except Exception as ex:
-                                            logger.warning(f"Direct token exchange attempt failed for {s}: {type(ex).__name__} {ex}")
+                                            logger.warning(f"Manual HTTP token exchange attempt failed for {s}: {type(ex).__name__} {ex}")
                                     
                                     if not success:
                                         logger.warning(f"All manual token exchange methods failed for {s} - OAuth provider should handle this automatically")
@@ -3015,6 +3160,7 @@ async def oauth_callback_handler(request):
     
     elif 'error' in query:
         error = query['error']
+        error_description = query.get('error_description', '')
         
         # Broadcast error to all pending OAuth sessions
         for key in list(oauth_callback_data.keys()):
@@ -3023,10 +3169,20 @@ async def oauth_callback_handler(request):
                     'received': True,
                     'code': None,
                     'state': None,
-                    'error': error
+                    'error': f"{error}: {error_description}" if error_description else error
                 })
         
-        logger.error(f"OAuth authorization error: {error}")
+        # Clear in-progress flags on error
+        try:
+            for svc in list(getattr(supervisor, 'oauth_in_progress', {}).keys()):
+                if supervisor.oauth_in_progress.get(svc):
+                    supervisor.oauth_in_progress[svc] = False
+                    supervisor.oauth_attempt_timestamps.pop(svc, None)
+                    logger.info(f"OAuth in_progress flag cleared for {svc} due to error")
+        except Exception:
+            pass
+        
+        logger.error(f"OAuth authorization error: {error}" + (f": {error_description}" if error_description else ""))
         
         return web.Response(
             text=f"""
@@ -3921,6 +4077,7 @@ async def serve(port: int = 5859, host: str = '0.0.0.0', disable_signals: bool =
     await site.start()
 
     logger.info(f"MCP Manager V2 started on http://{host}:{port}")
+    logger.info(f"OAuth callback endpoint available at http://localhost:{port}/oauth/callback")
     logger.info("Per-request session pattern - no persistent connections")
 
     # Populate initial cache asynchronously so server can accept requests immediately
