@@ -1329,7 +1329,7 @@ class MCPSupervisorV2:
                     server_url=server_url,
                     client_metadata=OAuthClientMetadata(
                         client_name=f"Fractalic MCP Client - {name}",
-                        redirect_uris=[AnyUrl("http://localhost:5860/oauth/callback")],
+                        redirect_uris=[AnyUrl("http://localhost:5859/oauth/callback")],
                         grant_types=["authorization_code", "refresh_token"],
                         response_types=["code"],
                         scope=service.spec.get('oauth_scope', 'read write'),
@@ -1366,7 +1366,7 @@ class MCPSupervisorV2:
                 server_url=server_url,
                 client_metadata=OAuthClientMetadata(
                     client_name=f"Fractalic MCP Client - {name}",
-                    redirect_uris=[AnyUrl("http://localhost:5860/oauth/callback")],
+                    redirect_uris=[AnyUrl("http://localhost:5859/oauth/callback")],
                     grant_types=["authorization_code", "refresh_token"],
                     response_types=["code"],
                     scope="read write",
