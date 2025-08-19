@@ -2001,10 +2001,15 @@ class MCPSupervisorV2:
                             raise e  # Let retry wrapper perform the retry with new provider
 
                         # TaskGroup bug mitigation (generic)
-                        if 'TaskGroup' in str(e):
+                        # Only disable if it's NOT an auth-related TaskGroup error
+                        if 'TaskGroup' in str(e) and '401' not in str(e) and not unauthorized_detected:
                             prev_state = self.service_states.get(service_name, 'enabled')
                             self.service_states[service_name] = 'disabled'
                             self._log_event(service_name, 'tools', 'sse', time.perf_counter(), status='disabled_taskgroup_bug', previous_state=prev_state)
+                            raise
+                        elif 'TaskGroup' in str(e):
+                            # It's a 401-related TaskGroup error, let OAuth retry handle it
+                            self._log_event(service_name, 'tools', 'sse', time.perf_counter(), status='taskgroup_401_retry', unauthorized=unauthorized_detected)
                             raise
                         if '404' in str(e) and target_url.endswith('/sse'):
                             alt = target_url.rstrip('/sse') + '/mcp'
@@ -2901,6 +2906,18 @@ class MCPSupervisorV2:
                 logger.info(f"OAuth pending during test for {service_name}; leaving service enabled")
                 self._log_event(service_name, "test_connection", service.transport, start_ts, status="pending_oauth")
                 return False
+            
+            # Check if it's an auth error that might be resolved by token refresh
+            error_str = str(e)
+            is_auth_error = ('401' in error_str or 'Unauthorized' in error_str or 
+                           'TaskGroup' in error_str and '401' in error_str)
+            
+            if is_auth_error:
+                logger.warning(f"Auth error during test for {service_name}, keeping enabled for retry: {e}")
+                self._log_event(service_name, "test_connection", service.transport, start_ts, status="auth_error", error=type(e).__name__)
+                return False
+            
+            # Only disable for non-recoverable errors
             logger.error(f"Failed to test connection to {service_name}: {e}")
             self.service_states[service_name] = "disabled"
             self._log_event(service_name, "test_connection", service.transport, start_ts, status="error", error=type(e).__name__)
@@ -3389,9 +3406,34 @@ async def toggle_service_handler(request):
         return web.json_response({"error": f"Service {service_name} not found"}, status=404)
     
     try:
-        data = await request.json()
-        enabled = data.get('enabled', None)
-        force = data.get('force', False)
+        # Try to get parameters from JSON body first, then fall back to query params
+        enabled = None
+        force = False
+        
+        # Check for JSON body - only parse if content-type is JSON and body is not empty
+        content_type = request.content_type
+        if content_type and 'application/json' in content_type:
+            try:
+                body = await request.text()
+                if body and body.strip():  # Only parse if body is not empty
+                    import json
+                    data = json.loads(body)
+                    enabled = data.get('enabled', None)
+                    force = data.get('force', False)
+            except Exception as e:
+                # Log but don't fail - will use query params
+                logger.debug(f"Failed to parse JSON body: {e}")
+        
+        # Fall back to query parameters if not found in body
+        if enabled is None and 'enabled' in request.query:
+            enabled_str = request.query.get('enabled', '').lower()
+            if enabled_str in ('true', '1', 'yes'):
+                enabled = True
+            elif enabled_str in ('false', '0', 'no'):
+                enabled = False
+        
+        if 'force' in request.query:
+            force = request.query.get('force', '').lower() in ('true', '1', 'yes')
         
         if enabled is None:
             # Toggle current state
