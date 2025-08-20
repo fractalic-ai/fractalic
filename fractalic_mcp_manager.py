@@ -1257,6 +1257,73 @@ class MCPSupervisorV2:
         except Exception as e:
             self._log_event(service_name, 'token_refresh', None, time.perf_counter(), status='error', error=type(e).__name__)
             logger.warning(f"Token refresh exception for {service_name}: {e}")
+    
+    async def _get_oauth_token_info(self, service_name: str) -> Dict[str, Any]:
+        """Get comprehensive OAuth token information for a service"""
+        oauth_info = {
+            "has_access_token": False,
+            "has_refresh_token": False,
+            "access_token_obtained_at": None,
+            "access_token_expires_in": None,
+            "access_token_remaining_seconds": None,
+            "refresh_token_obtained_at": None,
+            "last_refresh_at": None,
+            "refresh_needed": False,
+            "client_configured": False
+        }
+        
+        try:
+            storage = self.token_storages.get(service_name)
+            if not storage:
+                return oauth_info
+            
+            # Get token information
+            tokens = await storage.get_tokens()
+            if tokens:
+                oauth_info["has_access_token"] = bool(tokens.access_token)
+                oauth_info["has_refresh_token"] = bool(tokens.refresh_token)
+                
+                # Get token file data for timestamps
+                if storage.file_path.exists():
+                    import json as _json, time as _time
+                    with open(storage.file_path, 'r') as f:
+                        data = _json.load(f)
+                    
+                    rec = data.get(service_name, {})
+                    if rec:
+                        # Access token info
+                        obtained_at = rec.get('obtained_at')
+                        if obtained_at:
+                            oauth_info["access_token_obtained_at"] = obtained_at
+                            age = _time.time() - obtained_at
+                            
+                            if tokens.expires_in:
+                                oauth_info["access_token_expires_in"] = tokens.expires_in
+                                remaining = tokens.expires_in - age
+                                oauth_info["access_token_remaining_seconds"] = round(remaining, 1)
+                                oauth_info["refresh_needed"] = remaining < 300  # Refresh needed if < 5 minutes
+                        
+                        # Check if we have refresh token metadata (for tracking when it was obtained)
+                        # Since refresh tokens may be rotated, the obtained_at actually tracks the last refresh
+                        if tokens.refresh_token:
+                            oauth_info["refresh_token_obtained_at"] = obtained_at  # Same as access token for now
+                            oauth_info["last_refresh_at"] = obtained_at  # This is effectively the last refresh time
+                        
+                        # Client info
+                        client_info = rec.get('client_info', {})
+                        oauth_info["client_configured"] = bool(client_info.get('client_id'))
+            
+            # Check provider status
+            provider = self.oauth_providers.get(service_name)
+            if provider:
+                oauth_info["provider_configured"] = True
+            else:
+                oauth_info["provider_configured"] = False
+                
+        except Exception as e:
+            logger.debug(f"Error getting OAuth token info for {service_name}: {e}")
+        
+        return oauth_info
 
     def _extract_http_error_info(self, exc: Exception):
         """Attempt to pull status code & WWW-Authenticate header from common HTTP client exceptions."""
@@ -3013,6 +3080,11 @@ class MCPSupervisorV2:
                 "url": service.spec.get('url', None),
                 "command": service.spec.get('command', None)
             }
+            
+            # Add comprehensive OAuth token information if OAuth is configured
+            if name in self.oauth_providers:
+                oauth_info = await self._get_oauth_token_info(name)
+                service_info["oauth"] = oauth_info
             
             # Include tools information if requested (aligned with legacy manager)
             if include_tools_info or include_complete_data:
