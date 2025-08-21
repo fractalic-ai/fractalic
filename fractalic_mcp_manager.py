@@ -402,7 +402,12 @@ class MCPSupervisorV2:
         """
         for name, service in self.config.items():
             # Create OAuth providers for services that likely need OAuth (heuristic)
-            if self._is_oauth_service(service.spec.get('url', '')):
+            url = service.spec.get('url', '')
+            if self._is_oauth_service(url):
+                # Skip OAuth provider creation for services with embedded auth
+                if self._has_embedded_auth(url):
+                    logger.info(f"Skipping OAuth provider creation for {name} - has embedded auth")
+                    continue
                 self._create_oauth_provider(name, service)
                 logger.info(f"OAuth provider created for detected OAuth service: {name}")
 
