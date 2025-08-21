@@ -209,6 +209,10 @@ class ToolRegistry(dict):
             # Store original name for reverse lookup during tool execution
             function_schema["_original_name"] = original_name
             
+            # Store service name for filtering
+            if "_service" in m:
+                function_schema["_service"] = m["_service"]
+            
             # Add to schema list
             schema.append({
                 "type": "function",
@@ -371,29 +375,40 @@ class ToolRegistry(dict):
                                         "_type": "mcp_prompt",
                                     }
                                     self._manifests.append(manifest)
-                        resources_data = mcp_list_resources(srv)
-                        if isinstance(resources_data, dict):
-                            for svc_name, payload in resources_data.items():
-                                resources = (payload or {}).get("resources") or []
-                                if resources:
-                                    # Generic read_resource tool per service (one per service)
-                                    manifest = {
-                                        "name": f"{svc_name}.read_resource",
-                                        "description": "Read a resource by URI for service '" + svc_name + "'",
-                                        "parameters": {
-                                            "type": "object",
-                                            "properties": {
-                                                "uri": {"type": "string", "description": "Resource URI to read"}
-                                            },
-                                            "required": ["uri"]
-                                        },
-                                        "_mcp": srv,
-                                        "_service": svc_name,
-                                        "_type": "mcp_resource_read",
-                                    }
-                                    # Avoid duplicate if already present
-                                    if not any(m.get("name") == manifest["name"] for m in self._manifests):
-                                        self._manifests.append(manifest)
+                        # TODO: Replace generic read_resource with intelligent search-based resource tools
+                        # Current implementation creates bloated tool schemas by exposing full resource content
+                        # Future implementation should:
+                        # 1. Create lightweight search tools instead of generic read tools
+                        # 2. Support exact, fuzzy, and semantic search within resources
+                        # 3. Return only relevant excerpts, not entire resource content
+                        # 4. Keep resource content on MCP server side for on-demand access
+                        # Example: notion_search_resource(query="table syntax") instead of notion.read_resource(uri)
+                        # This will reduce token usage from ~5000 to ~100 per resource tool
+                        
+                        # DISABLED: Generic resource-to-tool conversion (causes token bloat)
+                        # resources_data = mcp_list_resources(srv)
+                        # if isinstance(resources_data, dict):
+                        #     for svc_name, payload in resources_data.items():
+                        #         resources = (payload or {}).get("resources") or []
+                        #         if resources:
+                        #             # Generic read_resource tool per service (one per service)
+                        #             manifest = {
+                        #                 "name": f"{svc_name}.read_resource",
+                        #                 "description": "Read a resource by URI for service '" + svc_name + "'",
+                        #                 "parameters": {
+                        #                     "type": "object",
+                        #                     "properties": {
+                        #                         "uri": {"type": "string", "description": "Resource URI to read"}
+                        #                     },
+                        #                     "required": ["uri"]
+                        #                 },
+                        #                 "_mcp": srv,
+                        #                 "_service": svc_name,
+                        #                 "_type": "mcp_resource_read",
+                        #             }
+                        #             # Avoid duplicate if already present
+                        #             if not any(m.get("name") == manifest["name"] for m in self._manifests):
+                        #                 self._manifests.append(manifest)
                     except Exception:
                         pass  # Non-fatal: prompts/resources optional
                 else:

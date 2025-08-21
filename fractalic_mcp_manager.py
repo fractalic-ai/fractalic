@@ -1594,9 +1594,10 @@ class MCPSupervisorV2:
             
             # Check for path-based token embedding (like Zapier /s/token/mcp)
             path_parts = p.path.strip('/').split('/')
-            if len(path_parts) >= 3 and path_parts[-2] == 's':
-                # Pattern: /s/[token]/endpoint or /api/mcp/s/[token]/mcp
-                return True
+            # Look for 's' followed by a token in the path: /api/mcp/s/[token]/mcp
+            for i in range(len(path_parts) - 1):
+                if path_parts[i] == 's' and len(path_parts[i + 1]) > 10:  # Token likely to be >10 chars
+                    return True
             
             qs = parse_qs(p.query)
             # Common api key param names (extendable)

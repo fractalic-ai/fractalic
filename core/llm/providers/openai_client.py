@@ -618,23 +618,19 @@ class liteclient:
             filtered_schema = []
             
             for tool in self.schema:
-                tool_name = tool["function"]["name"]
-                
-                # Check if this tool has MCP metadata and matches the server name
-                if hasattr(self, 'registry') and self.registry:
-                    for manifest in self.registry._manifests:
-                        # Check both original name and sanitized name
-                        original_name = manifest.get("name")
-                        sanitized_name = tool["function"].get("_original_name")
-                        
-                        name_matches = (original_name == tool_name or 
-                                      original_name == sanitized_name or
-                                      tool_name == sanitized_name)
-                        
-                        if (name_matches and 
-                            manifest.get("_service", "").lower() == mcp_server_name.lower()):
-                            filtered_schema.append(tool)
-                            break
+                # Check if this tool matches the server name
+                tool_service = tool["function"].get("_service", "")
+                if tool_service.lower() == mcp_server_name.lower():
+                    # Clean the tool by removing internal metadata before sending to API
+                    clean_tool = {
+                        "type": "function",
+                        "function": {
+                            "name": tool["function"]["name"],
+                            "description": tool["function"]["description"],
+                            "parameters": tool["function"]["parameters"]
+                        }
+                    }
+                    filtered_schema.append(clean_tool)
             
             params["tools"] = filtered_schema
             params["stream"] = True  # Enable streaming for tool calls too
@@ -652,21 +648,10 @@ class liteclient:
                             # MCP server filter
                             mcp_server_name = filter_item[4:]  # Remove the mcp/ prefix
                             
-                            # Check if this tool has MCP metadata and matches the server name
-                            if hasattr(self, 'registry') and self.registry:
-                                for manifest in self.registry._manifests:
-                                    # Check both original name and sanitized name
-                                    original_name = manifest.get("name")
-                                    sanitized_name = tool["function"].get("_original_name")
-                                    
-                                    name_matches = (original_name == tool_name or 
-                                                  original_name == sanitized_name or
-                                                  tool_name == sanitized_name)
-                                    
-                                    if (name_matches and 
-                                        manifest.get("_service", "").lower() == mcp_server_name.lower()):
-                                        should_include = True
-                                        break
+                            # Check if this tool matches the server name
+                            tool_service = tool["function"].get("_service", "")
+                            if tool_service.lower() == mcp_server_name.lower():
+                                should_include = True
                         else:
                             # Regular tool name filter
                             if tool_name == filter_item:
