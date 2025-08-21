@@ -52,8 +52,8 @@ from mcp.shared.auth import OAuthClientInformationFull, OAuthClientMetadata, OAu
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# MCP Protocol Version (Required for 2025-06-18)
-MCP_PROTOCOL_VERSION = "2025-06-18"
+# MCP Protocol Version - Let SDK handle negotiation automatically
+MCP_PROTOCOL_VERSION = None
 
 @dataclass
 class ServiceConfig:
@@ -78,7 +78,7 @@ class ServiceConfig:
                 transport = 'sse'
             else:
                 # Default to streamable HTTP for generic URLs
-                transport = 'http'
+                transport = 'streamable-http'
         
         return cls(
             name=name,
@@ -671,9 +671,35 @@ class MCPSupervisorV2:
             logger.info(f"Service {service_name} disabled - removed {removed_items} items from cache")
 
     # -------- Helper consolidation (auth, sessions, formatting) --------
+    
+    def _get_server_supported_scope(self, server_url: str) -> str:
+        """Get supported scopes from OAuth authorization server discovery endpoint."""
+        try:
+            # Try to get OAuth discovery info
+            discovery_url = f"{server_url}/.well-known/oauth-authorization-server"
+            import httpx
+            response = httpx.get(discovery_url, timeout=5.0)
+            if response.status_code == 200:
+                data = response.json()
+                scopes = data.get('scopes_supported', [])
+                if scopes:
+                    return ' '.join(scopes)
+                # If no scopes declared, use empty scope for Notion
+                elif 'notion.com' in server_url:
+                    return ''
+        except Exception:
+            pass
+        
+        # Default fallback for services like Notion that use standard scopes
+        return 'read write'
 
     def _protocol_headers(self) -> Dict[str, str]:
-        return {'MCP-Protocol-Version': MCP_PROTOCOL_VERSION} if MCP_PROTOCOL_VERSION else {}
+        headers = {}
+        if MCP_PROTOCOL_VERSION:
+            headers['MCP-Protocol-Version'] = MCP_PROTOCOL_VERSION
+        # Set Accept header for streamable HTTP like Inspector does
+        headers['Accept'] = 'text/event-stream, application/json'
+        return headers
 
     def _resolve_oauth_provider(self, service_name: str, url: str) -> Optional[OAuthClientProvider]:
         """Return existing OAuth provider (no heuristic creation here).
@@ -1428,7 +1454,7 @@ class MCPSupervisorV2:
             if service_name.lower() == 'zapier':
                 base_conn = max(base_conn, 5.0)
             return base_conn, None
-        else:  # http streamable
+        else:  # http or streamable-http
             base_conn = 5
             read = 5
             if has_oauth and purpose in ('tools','init'):
@@ -1560,6 +1586,13 @@ class MCPSupervisorV2:
             p = urlparse(url)
             if '@' in p.netloc:
                 return True  # user:pass@host style
+            
+            # Check for path-based token embedding (like Zapier /s/token/mcp)
+            path_parts = p.path.strip('/').split('/')
+            if len(path_parts) >= 3 and path_parts[-2] == 's':
+                # Pattern: /s/[token]/endpoint or /api/mcp/s/[token]/mcp
+                return True
+            
             qs = parse_qs(p.query)
             # Common api key param names (extendable)
             key_markers = {'api_key', 'apikey', 'token', 'auth', 'key'}
@@ -1621,7 +1654,7 @@ class MCPSupervisorV2:
                         redirect_uris=[AnyUrl("http://localhost:5859/oauth/callback")],
                         grant_types=["authorization_code", "refresh_token"],
                         response_types=["code"],
-                        scope=service.spec.get('oauth_scope', 'read write'),
+                        scope=self._get_server_supported_scope(server_url),
                     ),
                     storage=token_storage,
                     redirect_handler=redirect_handler,
@@ -1635,6 +1668,11 @@ class MCPSupervisorV2:
     def _create_dynamic_oauth_provider(self, name: str, server_url: str) -> OAuthClientProvider:
         """Create OAuth provider dynamically for automatic OAuth discovery"""
         try:
+            # Skip OAuth provider creation for services with embedded auth
+            if self._has_embedded_auth(server_url):
+                logger.info(f"Skipping OAuth provider creation for {name} - has embedded auth")
+                return None
+            
             # Reuse existing provider if present
             if name in self.oauth_providers:
                 logger.info(f"Reusing existing OAuth provider for {name}")
@@ -1653,10 +1691,8 @@ class MCPSupervisorV2:
             
             redirect_handler = lambda url: self._handle_oauth_redirect_service(name, url)
             
-            # Simple callback handler that returns empty values - only for compatibility
-            # The actual OAuth flow should not reach this since we're using existing tokens for refresh
-            async def dummy_callback_handler():
-                return ("", None)
+            # Use the proper callback handler that waits for the OAuth callback
+            callback_handler = self._create_callback_handler_for_service(name)
             
             # Enable debug logging for OAuth provider
             import logging
@@ -1674,11 +1710,11 @@ class MCPSupervisorV2:
                     redirect_uris=[AnyUrl(redirect_uri)],
                     grant_types=["authorization_code", "refresh_token"],
                     response_types=["code"],
-                    scope="read write",
+                    scope=self._get_server_supported_scope(server_url),
                 ),
                 storage=token_storage,
                 redirect_handler=redirect_handler,
-                callback_handler=dummy_callback_handler,
+                callback_handler=callback_handler,
             )
             # Store it for future use
             self.oauth_providers[name] = provider
@@ -2063,7 +2099,8 @@ class MCPSupervisorV2:
 
                         if (("401" in str(e)) or unauthorized_detected) and oauth_provider is None:
                             base = self._base_server_url(target_url)
-                            self._create_dynamic_oauth_provider(service_name, base)
+                            if not self._has_embedded_auth(target_url):
+                                self._create_dynamic_oauth_provider(service_name, base)
                             self._log_event(service_name, 'tools', 'sse', time.perf_counter(), status='forced_oauth_provider', base=base, agg=bool(unauthorized_detected), had_www_auth=had_www_auth)
                             raise e  # Let retry wrapper perform the retry with new provider
 
@@ -2107,7 +2144,8 @@ class MCPSupervisorV2:
                             # Drop existing provider
                             self.oauth_providers.pop(service_name, None)
                             self._log_event(service_name, 'tools', 'sse', time.perf_counter(), status='provider_dropped_for_stall')
-                            self._create_dynamic_oauth_provider(service_name, base)
+                            if not self._has_embedded_auth(target_url):
+                                self._create_dynamic_oauth_provider(service_name, base)
                             self._log_event(service_name, 'tools', 'sse', time.perf_counter(), status='provider_recreated')
                     except Exception:
                         logger.debug("Provider recreation failed during stall recovery", exc_info=True)
@@ -2135,11 +2173,11 @@ class MCPSupervisorV2:
                         self._log_event(service_name, 'tools', 'sse', time.perf_counter(), status='stall_retry_error', error=type(e).__name__)
                 return tools
                         
-            elif service.transport == "http":
+            elif service.transport in ("http", "streamable-http"):
                 url = service.spec['url']
                 headers = self._protocol_headers()
                 async def op(oauth_provider):
-                    connection_timeout, read_timeout = self._compute_timeouts(service_name, 'http', 'tools', oauth_provider is not None)
+                    connection_timeout, read_timeout = self._compute_timeouts(service_name, service.transport, 'tools', oauth_provider is not None)
                     async with streamablehttp_client(
                         url,
                         auth=oauth_provider,
@@ -2147,11 +2185,15 @@ class MCPSupervisorV2:
                         timeout=connection_timeout,
                         sse_read_timeout=read_timeout
                     ) as (r,w,_sid):
+                        logger.info(f"[{service_name}] Streamable HTTP client connected successfully")
                         async with ClientSession(r,w) as session:
+                            logger.info(f"[{service_name}] Starting session initialization...")
                             await session.initialize()
+                            logger.info(f"[{service_name}] Session initialized, fetching tools...")
                             tr = await session.list_tools()
+                            logger.info(f"[{service_name}] Tools fetched: {len(tr.tools) if hasattr(tr, 'tools') else 'unknown'}")
                             return self._format_tools(tr)
-                return await self._run_with_oauth_retry(service_name, 'tools', 'http', url, op)
+                return await self._run_with_oauth_retry(service_name, 'tools', service.transport, url, op)
                         
             else:
                 raise ValueError(f"Unsupported transport: {service.transport}")
@@ -2265,7 +2307,10 @@ class MCPSupervisorV2:
                     token_storage = FileTokenStorage("oauth_tokens.json", service_name)
                     tokens = await token_storage.get_tokens()
                     if not tokens:
-                        oauth_provider = self.oauth_providers.get(service_name) or self._create_dynamic_oauth_provider(service_name, url)
+                        if not self._has_embedded_auth(url):
+                            oauth_provider = self.oauth_providers.get(service_name) or self._create_dynamic_oauth_provider(service_name, url)
+                        else:
+                            oauth_provider = None
                 
                 connection_timeout = 3.0
                 
@@ -2289,8 +2334,8 @@ class MCPSupervisorV2:
                         
                         return capabilities
                         
-            elif service.transport == "http":
-                # HTTP transport
+            elif service.transport in ("http", "streamable-http"):
+                # HTTP/Streamable HTTP transport
                 url = service.spec['url']
                 headers = {}
                 if MCP_PROTOCOL_VERSION:
@@ -2440,7 +2485,10 @@ class MCPSupervisorV2:
                     token_storage = FileTokenStorage("oauth_tokens.json", service_name)
                     tokens = await token_storage.get_tokens()
                     if not tokens:
-                        oauth_provider = self.oauth_providers.get(service_name) or self._create_dynamic_oauth_provider(service_name, url)
+                        if not self._has_embedded_auth(url):
+                            oauth_provider = self.oauth_providers.get(service_name) or self._create_dynamic_oauth_provider(service_name, url)
+                        else:
+                            oauth_provider = None
                 
                 connection_timeout = 3.0
                 
@@ -2476,8 +2524,8 @@ class MCPSupervisorV2:
                         
                         return prompts
                         
-            elif service.transport == "http":
-                # HTTP transport
+            elif service.transport in ("http", "streamable-http"):
+                # HTTP/Streamable HTTP transport
                 url = service.spec['url']
                 headers = {}
                 if MCP_PROTOCOL_VERSION:
@@ -2634,7 +2682,10 @@ class MCPSupervisorV2:
                     token_storage = FileTokenStorage("oauth_tokens.json", service_name)
                     tokens = await token_storage.get_tokens()
                     if not tokens:
-                        oauth_provider = self.oauth_providers.get(service_name) or self._create_dynamic_oauth_provider(service_name, url)
+                        if not self._has_embedded_auth(url):
+                            oauth_provider = self.oauth_providers.get(service_name) or self._create_dynamic_oauth_provider(service_name, url)
+                        else:
+                            oauth_provider = None
                 
                 connection_timeout = 3.0
                 
@@ -2665,8 +2716,8 @@ class MCPSupervisorV2:
                         
                         return resources
                         
-            elif service.transport == "http":
-                # HTTP transport
+            elif service.transport in ("http", "streamable-http"):
+                # HTTP/Streamable HTTP transport
                 url = service.spec['url']
                 headers = {}
                 if MCP_PROTOCOL_VERSION:
@@ -2833,17 +2884,17 @@ class MCPSupervisorV2:
                         raise
                 return await self._run_with_oauth_retry(service_name, 'call_tool', 'sse', url, op)
                         
-            elif service.transport == "http":
+            elif service.transport in ("http", "streamable-http"):
                 url = service.spec['url']
                 headers = self._protocol_headers()
                 async def op(oauth_provider):
-                    conn_timeout, read_timeout = self._compute_timeouts(service_name, 'http', 'call', oauth_provider is not None)
+                    conn_timeout, read_timeout = self._compute_timeouts(service_name, service.transport, 'call', oauth_provider is not None)
                     async with streamablehttp_client(url, auth=oauth_provider, headers=headers, timeout=conn_timeout, sse_read_timeout=read_timeout) as (r,w,_sid):
                         async with ClientSession(r,w) as session:
                             await session.initialize()
                             result = await session.call_tool(tool_name, arguments)
                             return self._format_tool_call_result(result)
-                return await self._run_with_oauth_retry(service_name, 'call_tool', 'http', url, op)
+                return await self._run_with_oauth_retry(service_name, 'call_tool', service.transport, url, op)
                         
             else:
                 raise ValueError(f"Unsupported transport: {service.transport}")
@@ -2884,17 +2935,17 @@ class MCPSupervisorV2:
                             result = await session.get_prompt(prompt_name, arguments or {})
                             return self._format_prompt(result)
                 return await self._run_with_oauth_retry(service_name, 'get_prompt', 'sse', url, op)
-            elif service.transport == "http":
+            elif service.transport in ("http", "streamable-http"):
                 url = service.spec['url']
                 headers = self._protocol_headers()
                 async def op(oauth):
-                    conn_timeout, read_timeout = self._compute_timeouts(service_name, 'http', 'prompt', oauth is not None)
+                    conn_timeout, read_timeout = self._compute_timeouts(service_name, service.transport, 'prompt', oauth is not None)
                     async with streamablehttp_client(url, auth=oauth, headers=headers, timeout=conn_timeout, sse_read_timeout=read_timeout) as (r,w,_sid):
                         async with ClientSession(r,w) as session:
                             await session.initialize()
                             result = await session.get_prompt(prompt_name, arguments or {})
                             return self._format_prompt(result)
-                return await self._run_with_oauth_retry(service_name, 'get_prompt', 'http', url, op)
+                return await self._run_with_oauth_retry(service_name, 'get_prompt', service.transport, url, op)
             else:
                 raise ValueError(f"Unsupported transport: {service.transport}")
         except Exception as e:
@@ -2935,17 +2986,17 @@ class MCPSupervisorV2:
                             result = await session.read_resource(uri)
                             return self._format_resource(result, resource_uri)
                 return await self._run_with_oauth_retry(service_name, 'read_resource', 'sse', url, op)
-            if service.transport == "http":
+            if service.transport in ("http", "streamable-http"):
                 url = service.spec['url']
                 headers = self._protocol_headers()
                 async def op(oauth):
-                    conn_timeout, read_timeout = self._compute_timeouts(service_name, 'http', 'resource', oauth is not None)
+                    conn_timeout, read_timeout = self._compute_timeouts(service_name, service.transport, 'resource', oauth is not None)
                     async with streamablehttp_client(url, auth=oauth, headers=headers, timeout=conn_timeout, sse_read_timeout=read_timeout) as (r,w,_sid):
                         async with ClientSession(r,w) as session:
                             await session.initialize()
                             result = await session.read_resource(uri)
                             return self._format_resource(result, resource_uri)
-                return await self._run_with_oauth_retry(service_name, 'read_resource', 'http', url, op)
+                return await self._run_with_oauth_retry(service_name, 'read_resource', service.transport, url, op)
             raise ValueError(f"Unsupported transport: {service.transport}")
         except Exception as e:
             logger.error(f"Failed to read resource {resource_uri} for {service_name}: {e}")
@@ -3029,11 +3080,11 @@ class MCPSupervisorV2:
                             return True
                 return await self._run_with_oauth_retry(service_name, 'test_connection', 'sse', url, op)
                         
-            elif service.transport == "http":
+            elif service.transport in ("http", "streamable-http"):
                 url = service.spec['url']
                 headers = self._protocol_headers()
                 async def op(oauth):
-                    conn_timeout, read_timeout = self._compute_timeouts(service_name, 'http', 'init', oauth is not None)
+                    conn_timeout, read_timeout = self._compute_timeouts(service_name, service.transport, 'init', oauth is not None)
                     async with streamablehttp_client(url, auth=oauth, headers=headers, timeout=conn_timeout, sse_read_timeout=read_timeout) as (r,w,_sid):
                         async with ClientSession(r,w) as session:
                             await session.initialize()
@@ -3041,7 +3092,7 @@ class MCPSupervisorV2:
                             self.service_states[service_name] = "enabled"
                             self._update_service_cache(service_name, True)  # Refresh cache after enabling
                             return True
-                return await self._run_with_oauth_retry(service_name, 'test_connection', 'http', url, op)
+                return await self._run_with_oauth_retry(service_name, 'test_connection', service.transport, url, op)
                         
             else:
                 raise ValueError(f"Unsupported transport: {service.transport}")
@@ -3271,7 +3322,7 @@ async def oauth_callback_handler(request):
                                     # Method 2: Try auth flow completion
                                     if not success and hasattr(prov, 'complete_auth_flow'):
                                         try:
-                                            await prov.complete_auth_flow(code, oauth_callback_data.get(f"{s}_state"))
+                                            await prov.complete_auth_flow(code, state)
                                             # Verify tokens were saved
                                             if storage:
                                                 tokens_after = await storage.get_tokens()
@@ -3284,7 +3335,7 @@ async def oauth_callback_handler(request):
                                     # Method 3: Force the OAuth provider to complete its auth flow
                                     if not success and hasattr(prov, '_complete_token_exchange'):
                                         try:
-                                            await prov._complete_token_exchange(code, oauth_callback_data.get(f"{s}_state"))
+                                            await prov._complete_token_exchange(code, state)
                                             # Verify tokens were saved
                                             if storage:
                                                 tokens_after = await storage.get_tokens()
@@ -3304,7 +3355,7 @@ async def oauth_callback_handler(request):
                                                 
                                                 # Perform manual token exchange
                                                 success = await supervisor._perform_manual_token_exchange(
-                                                    s, code, client_info, state=oauth_callback_data.get(f"{s}_state")
+                                                    s, code, client_info, state=state
                                                 )
                                                 
                                                 if success:
