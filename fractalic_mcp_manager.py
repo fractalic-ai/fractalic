@@ -1977,6 +1977,29 @@ class MCPSupervisorV2:
                 # Try bearer auth first if tokens are available (more reliable than OAuth provider)
                 bearer_auth = await self._get_bearer_auth_header(service_name)
                 if bearer_auth:
+                    # Pre-flight token refresh check (same as MCP manager startup)
+                    try:
+                        storage_prefetch = self.token_storages.get(service_name)
+                        if storage_prefetch:
+                            _tokens = await storage_prefetch.get_tokens()
+                            if _tokens and _tokens.expires_in:
+                                fp = storage_prefetch.file_path
+                                if fp.exists():
+                                    import json as _json, time as _time
+                                    with open(fp,'r') as f: _data=_json.load(f)
+                                    rec = _data.get(service_name)
+                                    if rec and 'obtained_at' in rec:
+                                        age = _time.time() - rec['obtained_at']
+                                        remaining = _tokens.expires_in - age
+                                        if remaining < 120:  # refresh when <2m remaining
+                                            logger.info(f"Pre-flight token refresh for {service_name} (remaining={remaining:.1f}s)")
+                                            await self._maybe_refresh_tokens(service_name)
+                                            self._log_event(service_name, 'tools_sse_token_preflight_refresh', 'sse', time.perf_counter(), status='token_prefetch_refresh', remaining=round(remaining,1))
+                                            # Get updated bearer auth after refresh
+                                            bearer_auth = await self._get_bearer_auth_header(service_name)
+                    except Exception:
+                        logger.debug("Pre-flight token refresh check failed", exc_info=True)
+                    
                     headers.update(bearer_auth)
                     logger.info(f"Using bearer token auth for {service_name} SSE connection")
                     
@@ -2055,9 +2078,23 @@ class MCPSupervisorV2:
                     try:
                         return await op_bearer()
                     except Exception as e:
-                        logger.warning(f"Bearer auth failed for {service_name} after refresh attempt, falling back to OAuth provider: {e}")
+                        # Check if we have refresh tokens - if so, don't fall back to OAuth provider
+                        storage = self.token_storages.get(service_name)
+                        has_refresh_token = False
+                        if storage:
+                            try:
+                                tokens = await storage.get_tokens()
+                                has_refresh_token = tokens and tokens.refresh_token
+                            except Exception:
+                                pass
+                        
+                        if has_refresh_token:
+                            logger.error(f"Bearer auth failed for {service_name} despite having refresh token, not falling back to OAuth provider: {e}")
+                            raise e  # Don't fall back if we have refresh tokens - something else is wrong
+                        else:
+                            logger.warning(f"Bearer auth failed for {service_name} (no refresh token), falling back to OAuth provider: {e}")
                 
-                # Fallback to OAuth provider if bearer auth not available or failed completely
+                # Fallback to OAuth provider only if bearer auth not available or no refresh tokens
                 async def op(oauth_provider):
                     # compute timeouts each attempt (provider may appear after retry)
                     conn_timeout, _ = self._compute_timeouts(service_name, 'sse', 'tools', oauth_provider is not None)
