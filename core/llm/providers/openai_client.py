@@ -55,12 +55,13 @@ def fractalic_cost_callback(kwargs, completion_response, start_time, end_time):
                     filename = metadata.get("filename", filename)
                     turn_info = metadata.get("turn_info", turn_info)
             
-            
             # Capture the model being used
             model = kwargs.get("model", "unknown")
             token_tracker.current_model = model
             
             # Record in token tracker with actual cost but WITHOUT display (we'll show it at the right time)
+            # NOTE: LiteLLM reports TOTAL tokens for the entire conversation, not per-call incremental tokens
+            # Our deduplication logic in record_llm_call_with_cost_silent should handle this properly
             token_tracker.record_llm_call_with_cost_silent(filename, input_tokens, output_tokens, turn_info, response_cost)
             
     except Exception as e:
