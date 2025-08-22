@@ -45,7 +45,7 @@ def list_tools(server: str) -> List[Dict[str, Any]]:
     
     # Fetch fresh data and cache it
     try:
-        response = requests.get(f"{server.rstrip('/')}/list_tools", timeout=5).json()
+        response = requests.get(f"{server.rstrip('/')}/list_tools", timeout=15).json()
         _list_tools_cache[server] = (response, current_time)
         return response
     except Exception as e:

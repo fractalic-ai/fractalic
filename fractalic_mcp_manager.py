@@ -1914,6 +1914,27 @@ class MCPSupervisorV2:
         # Return cached tools for instant response (with lazy fallback fetch if empty)
         cached_tools = self.tools_cache.get(service_name, [])
         if cached_tools:
+            # Pre-flight token refresh check even for cached tools (prevents auth window during fractalic run)
+            try:
+                storage_prefetch = self.token_storages.get(service_name)
+                if storage_prefetch:
+                    _tokens = await storage_prefetch.get_tokens()
+                    if _tokens and _tokens.expires_in:
+                        fp = storage_prefetch.file_path
+                        if fp.exists():
+                            import json as _json, time as _time
+                            with open(fp,'r') as f: _data=_json.load(f)
+                            rec = _data.get(service_name)
+                            if rec and 'obtained_at' in rec:
+                                age = _time.time() - rec['obtained_at']
+                                remaining = _tokens.expires_in - age
+                                if remaining < 120:  # refresh when <2m remaining
+                                    logger.info(f"Pre-flight token refresh for {service_name} before returning cached tools (remaining={remaining:.1f}s)")
+                                    await self._maybe_refresh_tokens(service_name)
+                                    self._log_event(service_name, 'tools_cache_token_preflight_refresh', self.config[service_name].transport, time.perf_counter(), status='token_prefetch_refresh', remaining=round(remaining,1))
+            except Exception:
+                logger.debug("Pre-flight token refresh check failed for cached tools", exc_info=True)
+            
             logger.debug(f"Returning {len(cached_tools)} cached tools for {service_name}")
             self._log_event(service_name, "get_tools", self.config[service_name].transport, start_ts, tool_count=len(cached_tools), cache="hit")
             return cached_tools
