@@ -2807,8 +2807,8 @@ class MCPSupervisorV2:
                         }
                         openai_tools.append(openai_tool)
                     
-                    # Use LiteLLM to count tokens (same as legacy manager)
-                    token_count = litellm.token_counter(model="gpt-4", messages=[], tools=openai_tools)
+                    # Use LiteLLM to count tokens - use gpt-4o to match actual usage
+                    token_count = litellm.token_counter(model="gpt-4o", messages=[], tools=openai_tools)
                     
                 except Exception as e:
                     # Fallback to tiktoken if LiteLLM fails
