@@ -262,6 +262,7 @@ async def start_mcp_manager():
         mcp_manager_script = Path(project_root) / "fractalic_mcp_manager.py"
         if not mcp_manager_script.exists():
             raise HTTPException(status_code=500, detail=f"MCP manager script not found at {mcp_manager_script}")
+        
         await _cleanup_port_conflicts(mcp_manager_port)
         env = os.environ.copy()
         env.update({'PYTHONIOENCODING': 'utf-8','LC_ALL': 'en_US.UTF-8','LANG': 'en_US.UTF-8','PYTHONUNBUFFERED': '1'})
