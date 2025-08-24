@@ -259,6 +259,7 @@ class ToolRegistry(dict):
                     "parameters": schema,
                     "_auto": True,
                     "_simple": True,  # Mark as simple tool
+                    "_src": str(src.relative_to(self.tools_dir)),  # Add _src field for local tool detection
                 }
                 self._register(manifest, runner_override=runner)
 
@@ -1030,6 +1031,10 @@ class ToolRegistry(dict):
 
     def _execute_local_tool(self, manifest: dict, args: dict):
         """Execute a local file-based tool."""
-        # This would implement the execution of local Python/shell tools
-        # For now, return a placeholder
-        return {"error": "Local tool execution not implemented yet"}
+        tool_name = manifest.get("name")
+        # Access the runner function directly from the dict to avoid recursion
+        if tool_name in dict.keys(self):
+            runner = dict.__getitem__(self, tool_name)
+            return runner(**args)
+        else:
+            return {"error": f"Tool '{tool_name}' not found in registry"}

@@ -70,7 +70,7 @@ app.add_middleware(
 )
 
 # Define the settings file path
-SETTINGS_FILE_PATH = '../../settings.toml'
+SETTINGS_FILE_PATH = os.path.join(project_root, 'settings.toml')
 
 def set_repo_path(path: str):
     """Set the current repository path globally"""
