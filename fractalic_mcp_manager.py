@@ -864,6 +864,9 @@ class MCPSupervisorV2:
                         if rec and 'obtained_at' in rec:
                             age = _time.time() - rec['obtained_at']
                             remaining = _tokens.expires_in - age
+                        if rec and 'obtained_at' in rec:
+                            age = _time.time() - rec['obtained_at']
+                            remaining = _tokens.expires_in - age
                             if remaining < 120:  # refresh when <2m remaining
                                 await self._maybe_refresh_tokens(service_name)
                                 self._log_event(service_name, purpose, transport, time.perf_counter(), status='token_prefetch_refresh', remaining=round(remaining,1))
@@ -2208,7 +2211,7 @@ class MCPSupervisorV2:
                             # Drop existing provider
                             self.oauth_providers.pop(service_name, None)
                             self._log_event(service_name, 'tools', 'sse', time.perf_counter(), status='provider_dropped_for_stall')
-                            if not self._has_embedded_auth(target_url):
+                            if not self._has_embedded_auth(url):
                                 self._create_dynamic_oauth_provider(service_name, base)
                             self._log_event(service_name, 'tools', 'sse', time.perf_counter(), status='provider_recreated')
                     except Exception:
@@ -2240,23 +2243,62 @@ class MCPSupervisorV2:
             elif service.transport in ("http", "streamable-http"):
                 url = service.spec['url']
                 headers = self._protocol_headers()
+                
+                # Check if we should use lazy initialization for this service (avoid blocking startup)
+                use_lazy_init = self._should_use_lazy_initialization(service_name, service)
+                
                 async def op(oauth_provider):
                     connection_timeout, read_timeout = self._compute_timeouts(service_name, service.transport, 'tools', oauth_provider is not None)
-                    async with streamablehttp_client(
-                        url,
-                        auth=oauth_provider,
-                        headers=headers,
-                        timeout=connection_timeout,
-                        sse_read_timeout=read_timeout
-                    ) as (r,w,_sid):
-                        logger.info(f"[{service_name}] Streamable HTTP client connected successfully")
-                        async with ClientSession(r,w) as session:
-                            logger.info(f"[{service_name}] Starting session initialization...")
-                            await session.initialize()
-                            logger.info(f"[{service_name}] Session initialized, fetching tools...")
-                            tr = await session.list_tools()
-                            logger.info(f"[{service_name}] Tools fetched: {len(tr.tools) if hasattr(tr, 'tools') else 'unknown'}")
-                            return self._format_tools(tr)
+                    
+                    if use_lazy_init:
+                        # Lazy initialization approach - return empty tools if initialization would block
+                        try:
+                            async with asyncio.timeout(3.0):  # Short timeout for connection attempt
+                                async with streamablehttp_client(
+                                    url,
+                                    auth=oauth_provider,
+                                    headers=headers,
+                                    timeout=connection_timeout,
+                                    sse_read_timeout=read_timeout
+                                ) as (r,w,_sid):
+                                    logger.info(f"[{service_name}] Streamable HTTP client connected (lazy mode)")
+                                    async with ClientSession(r,w) as session:
+                                        logger.info(f"[{service_name}] Starting lazy session initialization...")
+                                        
+                                        # Try quick initialization with short timeout
+                                        async with asyncio.timeout(2.0):
+                                            await session.initialize()
+                                            if stage is not None:
+                                                stage['initialized'] = True
+                                            logger.info(f"[{service_name}] Session initialized quickly, fetching tools...")
+                                            tr = await session.list_tools()
+                                            logger.info(f"[{service_name}] Tools fetched: {len(tr.tools) if hasattr(tr, 'tools') else 'unknown'}")
+                                            return self._format_tools(tr)
+                        except (asyncio.TimeoutError, Exception) as e:
+                            logger.warning(f"[{service_name}] Lazy initialization blocked ({e}), scheduling background initialization")
+                            # Schedule background initialization but return empty tools now
+                            asyncio.create_task(self._background_initialize_service(service_name))
+                            return []
+                    else:
+                        # Standard initialization for non-blocking services
+                        async with streamablehttp_client(
+                            url,
+                            auth=oauth_provider,
+                            headers=headers,
+                            timeout=connection_timeout,
+                            sse_read_timeout=read_timeout
+                        ) as (r,w,_sid):
+                            logger.info(f"[{service_name}] Streamable HTTP client connected successfully")
+                            async with ClientSession(r,w) as session:
+                                logger.info(f"[{service_name}] Starting session initialization...")
+                                await session.initialize()
+                                if stage is not None:
+                                    stage['initialized'] = True
+                                logger.info(f"[{service_name}] Session initialized, fetching tools...")
+                                tr = await session.list_tools()
+                                logger.info(f"[{service_name}] Tools fetched: {len(tr.tools) if hasattr(tr, 'tools') else 'unknown'}")
+                                return self._format_tools(tr)
+                
                 return await self._run_with_oauth_retry(service_name, 'tools', service.transport, url, op)
                         
             else:
@@ -3563,6 +3605,27 @@ async def status_handler(request):
         logger.error(f"Status error: {e}")
         return web.json_response({"error": str(e)}, status=500)
 
+async def health_handler(request):
+    """GET /health - Fast health check endpoint for UI responsiveness
+    
+    Returns minimal server health information without querying individual services.
+    This is much faster than /status for simple "is server running" checks.
+    """
+    try:
+        supervisor = request.app['supervisor']
+        # Return basic health info without querying services
+        health_info = {
+            "status": "healthy",
+            "timestamp": time.time(),
+            "services_configured": len(supervisor.services) if supervisor.services else 0,
+            "mcp_manager_version": "v2",
+            "uptime_seconds": time.time() - supervisor._start_time if hasattr(supervisor, '_start_time') else 0
+        }
+        return web.json_response(health_info)
+    except Exception as e:
+        logger.error(f"Health check error: {e}")
+        return web.json_response({"status": "error", "error": str(e)}, status=500)
+
 async def complete_status_handler(request):
     """GET /status/complete - Get complete MCP server state (tools, prompts, resources, capabilities)
     
@@ -4324,6 +4387,7 @@ def create_app(supervisor_instance):
     app['supervisor'] = supervisor_instance
     
     # API routes with CORS
+    cors.add(app.router.add_get('/health', health_handler))  # Fast health check for UI
     cors.add(app.router.add_get('/status', status_handler))
     cors.add(app.router.add_get('/status/complete', complete_status_handler))  # Complete MCP state in single call
     cors.add(app.router.add_get('/list_tools', list_tools_handler))  # Fractalic compatibility endpoint
