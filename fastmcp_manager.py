@@ -295,8 +295,9 @@ class FastMCPManager:
                 #         not isinstance(resource_results[service_idx], Exception)):
                 #         resources = resource_results[service_idx] or []
                 
+                service_state = "connected" if service_info["connected"] else ("disabled" if not service_info["enabled"] else "error")
                 complete_service = {
-                    "status": "connected" if service_info["connected"] else ("disabled" if not service_info["enabled"] else "error"),
+                    "status": service_state,
                     "connected": service_info["connected"],
                     "enabled": service_info["enabled"], 
                     "transport": service_info["transport"],
