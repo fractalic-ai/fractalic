@@ -134,7 +134,23 @@ async def call_tool_handler(request):
         arguments = data.get('arguments', {})
         
         result = await manager.call_tool_for_service(service_name, tool_name, arguments)
-        return web.json_response(result)
+        
+        # Handle non-serializable objects in result
+        try:
+            return web.json_response(result)
+        except TypeError as e:
+            if "not JSON serializable" in str(e):
+                # Convert non-serializable objects to strings
+                safe_result = {
+                    "success": result.get("success", False),
+                    "result": {
+                        "content": str(result.get("result", {}).get("content", "")),
+                        "isError": result.get("result", {}).get("isError", False)
+                    }
+                }
+                return web.json_response(safe_result)
+            else:
+                raise
     except Exception as e:
         logger.error(f"Call tool error: {e}")
         return web.json_response({"error": str(e)}, status=500)

@@ -102,7 +102,6 @@ class FastMCPManager:
             service_status = {
                 "enabled": config.enabled,
                 "transport": config.transport,
-                "has_oauth": config.has_oauth,
                 "connected": False,
                 "tools_count": 0,
                 "error": None
@@ -195,12 +194,33 @@ class FastMCPManager:
             async with client as c:
                 result = await c.call_tool(tool_name, arguments)
                 
-                # Format result for API response
+                # Extract content from FastMCP CallToolResult
+                content_parts = []
+                
+                # Handle content list (TextContent, etc.)
+                if result.content:
+                    for item in result.content:
+                        if hasattr(item, 'text'):
+                            content_parts.append(item.text)
+                        else:
+                            content_parts.append(str(item))
+                
+                # Handle structured_content if available
+                if result.structured_content:
+                    content_parts.append(str(result.structured_content))
+                
+                # Handle data field if available
+                if result.data:
+                    content_parts.append(str(result.data))
+                
+                # Join all content parts
+                content = "\n".join(content_parts) if content_parts else ""
+                
                 return {
                     "success": True,
                     "result": {
-                        "content": result.content if hasattr(result, 'content') else str(result),
-                        "isError": getattr(result, 'is_error', False)
+                        "content": content,
+                        "isError": result.is_error
                     }
                 }
                 
@@ -326,8 +346,18 @@ class FastMCPManager:
         """Start OAuth flow for service (using FastMCP)"""
         try:
             config = self.service_configs.get(service_name)
-            if not config or not config.has_oauth:
-                return {"error": f"Service {service_name} does not support OAuth"}
+            if not config:
+                return {"error": f"Service {service_name} not found"}
+            
+            # Check if service requires OAuth using FastMCP's check
+            url = config.spec.get('url')
+            if not url:
+                return {"error": f"Service {service_name} is not an HTTP server"}
+                
+            from fastmcp.client.auth.oauth import check_if_auth_required
+            requires_auth = await check_if_auth_required(url)
+            if not requires_auth:
+                return {"error": f"Service {service_name} does not require OAuth"}
             
             # Create client - this will trigger OAuth flow  
             client = self.create_fastmcp_client(service_name)
@@ -380,13 +410,22 @@ class FastMCPManager:
         oauth_status = {}
         
         for service_name, config in self.service_configs.items():
-            if config.has_oauth:
-                try:
-                    # Check FastMCP token status
-                    from fastmcp.client.auth.oauth import FileTokenStorage
+            # Check only HTTP servers
+            if 'url' in config.spec:
+                url = config.spec.get('url')
+                if not url:
+                    continue
                     
-                    url = config.spec.get('url')
-                    if url:
+                try:
+                    # Use FastMCP's check_if_auth_required to determine if server needs OAuth
+                    from fastmcp.client.auth.oauth import check_if_auth_required
+                    
+                    requires_auth = await check_if_auth_required(url)
+                    
+                    if requires_auth:
+                        # Server requires OAuth - check token status
+                        from fastmcp.client.auth.oauth import FileTokenStorage
+                        
                         storage = FileTokenStorage(server_url=url)
                         tokens = await storage.get_tokens()
                         
@@ -403,11 +442,11 @@ class FastMCPManager:
                                 "authenticated": False,
                                 "has_token": False
                             }
-                    else:
-                        oauth_status[service_name] = {"error": "No URL configured"}
-                        
+                    # If server doesn't require OAuth, we don't include it in oauth_status
+                    
                 except Exception as e:
-                    oauth_status[service_name] = {"error": str(e)}
+                    logger.warning(f"Failed to check OAuth status for {service_name}: {e}")
+                    # Don't add to oauth_status if we can't determine the requirement
         
         return oauth_status
     

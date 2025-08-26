@@ -40,7 +40,7 @@ class ServiceConfig:
             else:
                 transport = 'streamable-http'
         
-        # OAuth explicitly configured by user or disabled by default
+        # OAuth only when explicitly configured by user
         has_oauth = config.get('oauth', False)
         
         return cls(
