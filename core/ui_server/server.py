@@ -228,23 +228,51 @@ async def clear_mcp_trace():
     return {"status": "cleared"}
 
 async def _verify_mcp_api_ready(timeout: int = 10) -> bool:
-    """Verify that the MCP manager API is responding"""
+    """Fast readiness probe.
+    1. Prefer /health (constant‑time, no tool listing)
+    2. Fallback to /status only if /health not yet available
+    This prevents slow/blocked service (e.g. notion streamable-http init) from delaying api_ready.
+    """
     start_time = time.time()
-    
+    attempt = 0
     while (time.time() - start_time) < timeout:
+        attempt += 1
         try:
             async with aiohttp.ClientSession() as session:
-                async with session.get(f"{mcp_manager_url}/status", timeout=2) as response:
-                    if response.status == 200:
-                        data = await response.json()
-                        # Verify it's actually a valid MCP status response
-                        if 'services' in data:
-                            return True
-        except Exception as e:
-            logging.debug(f"API check attempt failed: {e}")
-        
+                # First: lightweight /health
+                try:
+                    async with session.get(f"{mcp_manager_url}/health", timeout=2) as r_health:
+                        if r_health.status == 200:
+                            h = await r_health.json()
+                            if h.get("status") == "healthy":
+                                _record_trace("health", message=f"health ok (fast) attempt={attempt}")
+                                return True
+                        else:
+                            _record_trace("health", message=f"health non-200={r_health.status}")
+                except asyncio.TimeoutError:
+                    _record_trace("health", message="health timeout")
+                except Exception as e_h:
+                    _record_trace("health", message=f"health error: {str(e_h)[:80]}")
+                # Second: fallback /status (heavier)
+                try:
+                    async with session.get(f"{mcp_manager_url}/status", timeout=5) as r_status:
+                        if r_status.status == 200:
+                            data = await r_status.json()
+                            if 'services' in data and 'total_services' in data:
+                                _record_trace("health", message=f"status ok services={data.get('total_services')}")
+                                return True
+                            else:
+                                _record_trace("health", message="status missing keys")
+                        else:
+                            _record_trace("health", message=f"status non-200={r_status.status}")
+                except asyncio.TimeoutError:
+                    _record_trace("health", message="status timeout")
+                except Exception as e_s:
+                    _record_trace("health", message=f"status error: {str(e_s)[:80]}")
+        except Exception as outer:
+            logging.debug(f"Readiness outer failure: {outer}")
+            _record_trace("health", message=f"outer failure: {str(outer)[:80]}")
         await asyncio.sleep(1)
-    
     return False
 
 async def start_mcp_manager():
@@ -266,8 +294,13 @@ async def start_mcp_manager():
         await _cleanup_port_conflicts(mcp_manager_port)
         env = os.environ.copy()
         env.update({'PYTHONIOENCODING': 'utf-8','LC_ALL': 'en_US.UTF-8','LANG': 'en_US.UTF-8','PYTHONUNBUFFERED': '1'})
+        
+        # Use Python from virtual environment if available
+        venv_python = Path(project_root) / ".venv" / "bin" / "python"
+        python_executable = str(venv_python) if venv_python.exists() else sys.executable
+        
         mcp_manager_process = subprocess.Popen(
-            [sys.executable, str(mcp_manager_script), "serve", "--port", str(mcp_manager_port)],
+            [python_executable, str(mcp_manager_script), "serve", "--port", str(mcp_manager_port), "--host", "localhost"],
             cwd=project_root,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
@@ -294,13 +327,20 @@ async def start_mcp_manager():
             _record_trace("lifecycle", message="startup failed", stderr_tail=stderr[-500:], exit_code=mcp_manager_process.poll())
             mcp_manager_process = None
             raise HTTPException(status_code=500, detail=error_msg)
-        api_ready = await _verify_mcp_api_ready(timeout=10)
+        api_ready = await _verify_mcp_api_ready(timeout=15)
         if not api_ready:
             logging.warning("MCP manager process started but API is not responding yet")
             _record_trace("health", message="api not ready within initial timeout")
         else:
             _record_trace("health", message="api ready")
             _mcp_state["phase"] = "running"
+            # Additional check after short delay to ensure stability
+            await asyncio.sleep(2)
+            stable_check = await _verify_mcp_api_ready(timeout=3)
+            if not stable_check:
+                logging.warning("MCP manager API became unresponsive after initial readiness")
+                _record_trace("health", message="api became unstable after readiness check")
+                api_ready = False
         return {"status": "started", "pid": mcp_manager_process.pid, "port": mcp_manager_port, "api_ready": api_ready}
     except Exception as e:
         mcp_manager_process = None
@@ -368,7 +408,7 @@ async def get_mcp_manager_status():
     
     try:
         async with aiohttp.ClientSession() as session:
-            async with session.get(f"{mcp_manager_url}/status", timeout=5) as response:
+            async with session.get(f"{mcp_manager_url}/status", timeout=30) as response:
                 if response.status == 200:
                     mcp_data = await response.json()
                     api_status = "responsive"
