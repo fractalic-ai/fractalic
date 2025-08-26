@@ -40,12 +40,19 @@ async def status_handler(request):
         return web.json_response({"error": str(e)}, status=500)
 
 async def complete_status_handler(request):
-    """GET /status/complete - Complete MCP state"""
+    """GET /status/complete - Complete MCP state with parallel processing"""
     init_manager()
     try:
-        # Get comprehensive status including OAuth
-        basic_status = await manager.get_service_status()
-        oauth_status = await manager.get_oauth_status()
+        # Run both in parallel for efficiency
+        import asyncio
+        basic_status_task = manager.get_service_status()
+        oauth_status_task = manager.get_oauth_status()
+        
+        # Wait for both to complete
+        basic_status, oauth_status = await asyncio.gather(
+            basic_status_task, 
+            oauth_status_task
+        )
         
         # Merge OAuth info into service status
         for service_name, service_info in basic_status["services"].items():
@@ -76,7 +83,7 @@ async def toggle_service_handler(request):
     service_name = request.match_info['name']
     
     try:
-        result = manager.toggle_service(service_name)
+        result = await manager.toggle_service(service_name)
         return web.json_response(result)
     except Exception as e:
         logger.error(f"Toggle service error: {e}")
@@ -161,19 +168,28 @@ async def list_prompts_handler(request):
     """GET /list_prompts - Get all prompts from all enabled services"""
     init_manager()
     try:
-        services_response = {}
+        import asyncio
+        
+        # Collect tasks for parallel execution
+        tasks = []
+        service_names = []
         
         for service_name, config in manager.service_configs.items():
-            if not config.enabled:
-                continue
-                
-            try:
-                prompts = await manager.get_prompts_for_service(service_name)
-                if prompts:
-                    services_response[service_name] = {"prompts": prompts}
-            except Exception as e:
-                logger.warning(f"Failed to get prompts for {service_name}: {e}")
-                services_response[service_name] = {"error": str(e), "prompts": []}
+            if config.enabled:
+                tasks.append(manager.get_prompts_for_service(service_name))
+                service_names.append(service_name)
+        
+        # Execute all tasks in parallel with timeout
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        
+        # Process results
+        services_response = {}
+        for service_name, result in zip(service_names, results):
+            if isinstance(result, Exception):
+                logger.warning(f"Failed to get prompts for {service_name}: {result}")
+                services_response[service_name] = {"error": str(result), "prompts": []}
+            elif result:
+                services_response[service_name] = {"prompts": result}
         
         return web.json_response(services_response)
     except Exception as e:
@@ -214,19 +230,28 @@ async def list_resources_handler(request):
     """GET /list_resources - Get all resources from all enabled services"""
     init_manager()
     try:
-        services_response = {}
+        import asyncio
+        
+        # Collect tasks for parallel execution
+        tasks = []
+        service_names = []
         
         for service_name, config in manager.service_configs.items():
-            if not config.enabled:
-                continue
-                
-            try:
-                resources = await manager.get_resources_for_service(service_name)
-                if resources:
-                    services_response[service_name] = {"resources": resources}
-            except Exception as e:
-                logger.warning(f"Failed to get resources for {service_name}: {e}")
-                services_response[service_name] = {"error": str(e), "resources": []}
+            if config.enabled:
+                tasks.append(manager.get_resources_for_service(service_name))
+                service_names.append(service_name)
+        
+        # Execute all tasks in parallel with timeout
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        
+        # Process results
+        services_response = {}
+        for service_name, result in zip(service_names, results):
+            if isinstance(result, Exception):
+                logger.warning(f"Failed to get resources for {service_name}: {result}")
+                services_response[service_name] = {"error": str(result), "resources": []}
+            elif result:
+                services_response[service_name] = {"resources": result}
         
         return web.json_response(services_response)
     except Exception as e:
@@ -334,7 +359,7 @@ async def add_server_handler(request):
     init_manager()
     try:
         data = await request.json()
-        result = manager.add_server(data)
+        result = await manager.add_server(data)
         return web.json_response(result)
     except Exception as e:
         logger.error(f"Add server error: {e}")
@@ -350,7 +375,7 @@ async def delete_server_handler(request):
         if not service_name:
             return web.json_response({"error": "Server name is required"}, status=400)
         
-        result = manager.delete_server(service_name)
+        result = await manager.delete_server(service_name)
         return web.json_response(result)
     except Exception as e:
         logger.error(f"Delete server error: {e}")

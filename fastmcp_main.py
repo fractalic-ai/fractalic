@@ -140,11 +140,11 @@ async def test_services():
     
     for service_name, service_info in status['services'].items():
         status_icon = "✅" if service_info['connected'] else "❌"
-        oauth_status = " (OAuth)" if service_info['has_oauth'] else ""
+        # OAuth status now comes separately from get_oauth_status()
         tools_count = f" ({service_info['tools_count']} tools)" if service_info['connected'] else ""
         error_msg = f" - Error: {service_info['error']}" if service_info.get('error') else ""
         
-        print(f"{status_icon} {service_name}{oauth_status}{tools_count}{error_msg}")
+        print(f"{status_icon} {service_name}{tools_count}{error_msg}")
     
     print("\n=== OAuth Status ===")
     oauth_status = await manager.get_oauth_status()
