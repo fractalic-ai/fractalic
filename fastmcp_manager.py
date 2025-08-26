@@ -187,6 +187,218 @@ class FastMCPManager:
         
         return status
     
+    async def get_complete_status(self) -> Dict[str, Any]:
+        """Get complete status by combining existing methods with all embedded data"""
+        import traceback
+        import json
+        
+        try:
+            logger.info("=== Starting get_complete_status() DEBUG ===")
+            
+            # Get all data in parallel - leverage existing caching
+            start_time = time.time()
+            
+            # For enabled services, get prompts and resources too
+            enabled_services = [name for name, config in self.service_configs.items() if config.enabled]
+            logger.debug(f"Enabled services: {enabled_services}")
+            
+            # Gather everything in parallel
+            tasks = [
+                self.get_service_status(),
+                self.get_oauth_status(), 
+                self.get_all_tools(),
+            ]
+            
+            # TEMPORARILY DISABLED: Skip prompts and resources for performance testing
+            # prompt_tasks = [self._safe_get_prompts(name) for name in enabled_services]
+            # resource_tasks = [self._safe_get_resources(name) for name in enabled_services]
+            prompt_tasks = []
+            resource_tasks = []
+            
+            logger.debug("Getting basic status, oauth status, all tools...")
+            basic_status, oauth_status, all_tools = await asyncio.gather(*tasks)
+            logger.debug(f"Basic data gathered - services: {len(basic_status['services'])}, oauth: {len(oauth_status)}, tools: {len(all_tools)}")
+            
+            # Test JSON serialization of each component
+            try:
+                json.dumps(basic_status)
+                logger.debug("basic_status: JSON serializable ✓")
+            except Exception as e:
+                logger.error(f"basic_status JSON ERROR: {e}")
+                logger.error(f"basic_status traceback:\n{traceback.format_exc()}")
+                raise
+            
+            try:
+                json.dumps(oauth_status)
+                logger.debug("oauth_status: JSON serializable ✓")
+            except Exception as e:
+                logger.error(f"oauth_status JSON ERROR: {e}")
+                logger.error(f"oauth_status traceback:\n{traceback.format_exc()}")
+                raise
+                
+            try:
+                json.dumps(all_tools)
+                logger.debug("all_tools: JSON serializable ✓")
+            except Exception as e:
+                logger.error(f"all_tools JSON ERROR: {e}")
+                logger.error(f"all_tools traceback:\n{traceback.format_exc()}")
+                raise
+            
+            # TEMPORARILY DISABLED: Skip prompts and resources gathering
+            # if enabled_services:
+            #     logger.debug(f"Getting prompts and resources for {len(enabled_services)} enabled services...")
+            #     prompt_results, resource_results = await asyncio.gather(
+            #         asyncio.gather(*prompt_tasks, return_exceptions=True),
+            #         asyncio.gather(*resource_tasks, return_exceptions=True)
+            #     )
+            #     logger.debug(f"Prompts/resources gathered - prompt results: {len(prompt_results)}, resource results: {len(resource_results)}")
+            # else:
+            #     prompt_results, resource_results = [], []
+            prompt_results, resource_results = [], []
+            
+            elapsed = time.time() - start_time
+            logger.debug(f"Complete status gathered in {elapsed:.2f}s")
+            
+            # Build response in frontend schema format
+            total_prompts = 0
+            total_resources = 0
+            
+            complete_status = {
+                "total_services": len(self.service_configs),
+                "enabled_services": basic_status["total_enabled"], 
+                "total_tools": sum(data.get("count", 0) for data in all_tools.values()),
+                "services": {}
+            }
+            
+            # Build service details with embedded data
+            logger.debug("Building service details...")
+            for service_name, service_info in basic_status["services"].items():
+                logger.debug(f"Processing service: {service_name}")
+                
+                tools_data = all_tools.get(service_name, {})
+                tools = tools_data.get("tools", [])
+                
+                # TEMPORARILY DISABLED: Set prompts/resources to null for performance testing
+                prompts = None
+                resources = None
+                
+                # if service_info["enabled"] and service_name in enabled_services:
+                #     service_idx = enabled_services.index(service_name)
+                #     
+                #     # Get prompts result
+                #     if (service_idx < len(prompt_results) and 
+                #         not isinstance(prompt_results[service_idx], Exception)):
+                #         prompts = prompt_results[service_idx] or []
+                #     
+                #     # Get resources result
+                #     if (service_idx < len(resource_results) and 
+                #         not isinstance(resource_results[service_idx], Exception)):
+                #         resources = resource_results[service_idx] or []
+                
+                complete_service = {
+                    "status": "connected" if service_info["connected"] else ("disabled" if not service_info["enabled"] else "error"),
+                    "connected": service_info["connected"],
+                    "enabled": service_info["enabled"], 
+                    "transport": service_info["transport"],
+                    "has_oauth": service_name in oauth_status,
+                    "tool_count": len(tools),
+                    "prompt_count": 0,
+                    "resource_count": 0,
+                    "token_count": 0,  # Skip token counting for now
+                    "tools": tools,
+                    "prompts": prompts,
+                    "resources": resources
+                }
+                
+                # TEMPORARILY DISABLED: Skip totals counting
+                # total_prompts += len(prompts)
+                # total_resources += len(resources)
+                
+                # Add config info (ensure JSON serializable)
+                logger.debug(f"Adding config info for {service_name}")
+                config = self.service_configs.get(service_name)
+                if config:
+                    url = config.spec.get("url")
+                    complete_service["url"] = str(url) if url else None
+                    complete_service["command"] = config.spec.get("command")
+                
+                # Add OAuth details if present
+                logger.debug(f"Adding OAuth details for {service_name}")
+                if service_name in oauth_status:
+                    oauth_data = oauth_status[service_name]
+                    complete_service["oauth"] = oauth_data
+                    
+                    # Test JSON serialization of this service's oauth data
+                    try:
+                        json.dumps(oauth_data)
+                        logger.debug(f"{service_name} oauth data: JSON serializable ✓")
+                    except Exception as e:
+                        logger.error(f"{service_name} oauth JSON ERROR: {e}")
+                        logger.error(f"OAuth data type/content: {type(oauth_data)} = {oauth_data}")
+                        logger.error(f"OAuth traceback:\n{traceback.format_exc()}")
+                        raise
+                
+                # Test JSON serialization of complete service
+                try:
+                    json.dumps(complete_service)
+                    logger.debug(f"{service_name} complete_service: JSON serializable ✓")
+                except Exception as e:
+                    logger.error(f"{service_name} complete_service JSON ERROR: {e}")
+                    logger.error(f"Complete service traceback:\n{traceback.format_exc()}")
+                    
+                    # Deep inspection of problematic data
+                    for key, value in complete_service.items():
+                        try:
+                            json.dumps(value)
+                        except Exception as field_err:
+                            logger.error(f"  Field '{key}' ({type(value)}): {field_err}")
+                            logger.error(f"  Value: {value}")
+                    raise
+                
+                complete_status["services"][service_name] = complete_service
+                logger.debug(f"Service {service_name} processed successfully")
+            
+            # Add calculated totals
+            complete_status["total_prompts"] = total_prompts
+            complete_status["total_resources"] = total_resources
+            complete_status["total_tokens"] = 0  # Skip for now
+            
+            # Final JSON serialization test
+            logger.debug("Testing final complete_status JSON serialization...")
+            try:
+                json.dumps(complete_status)
+                logger.debug("Final complete_status: JSON serializable ✓")
+            except Exception as e:
+                logger.error(f"Final complete_status JSON ERROR: {e}")
+                logger.error(f"Final traceback:\n{traceback.format_exc()}")
+                raise
+            
+            logger.info("=== get_complete_status() DEBUG COMPLETE ===")
+            return complete_status
+            
+        except Exception as e:
+            logger.error(f"=== COMPLETE STATUS FATAL ERROR ===")
+            logger.error(f"Error: {e}")
+            logger.error(f"Full traceback:\n{traceback.format_exc()}")
+            logger.error(f"=== END FATAL ERROR ===")
+            raise
+    
+    async def _safe_get_prompts(self, service_name: str) -> List[Dict[str, Any]]:
+        """Safely get prompts with timeout and error handling"""
+        try:
+            return await asyncio.wait_for(self.get_prompts_for_service(service_name), timeout=5.0)
+        except Exception as e:
+            logger.debug(f"Failed to get prompts for {service_name}: {e}")
+            return []
+    
+    async def _safe_get_resources(self, service_name: str) -> List[Dict[str, Any]]:
+        """Safely get resources with timeout and error handling"""
+        try:
+            return await asyncio.wait_for(self.get_resources_for_service(service_name), timeout=5.0)
+        except Exception as e:
+            logger.debug(f"Failed to get resources for {service_name}: {e}")
+            return []
+    
     async def get_tools_for_service(self, service_name: str) -> List[Dict[str, Any]]:
         """Get tools for specific service with caching"""
         # Try cache first
@@ -377,7 +589,7 @@ class FastMCPManager:
                 formatted_resources = []
                 for resource in resources_list:
                     formatted_resources.append({
-                        "uri": resource.uri,
+                        "uri": str(resource.uri),  # Convert AnyUrl to string for JSON serialization
                         "name": resource.name,
                         "description": resource.description,
                         "mimeType": resource.mimeType if hasattr(resource, 'mimeType') else None

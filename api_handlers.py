@@ -30,38 +30,57 @@ async def health_handler(request):
     return web.json_response({"status": "ok", "timestamp": time.time()})
 
 async def status_handler(request):
-    """GET /status - Basic status"""
+    """GET /status - Simple health check (no service polling)"""
     init_manager()
     try:
-        status = await manager.get_service_status()
+        # Simple health check - just return manager is running
+        # Frontend expects this to be instant
+        import os
+        status = {
+            "status": "running",
+            "api_responsive": True,
+            "exit_code": None,
+            "last_pid": os.getpid()
+        }
         return web.json_response(status)
     except Exception as e:
         logger.error(f"Status error: {e}")
-        return web.json_response({"error": str(e)}, status=500)
+        return web.json_response({
+            "status": "error",
+            "api_responsive": False,
+            "error": str(e)
+        }, status=500)
 
 async def complete_status_handler(request):
-    """GET /status/complete - Complete MCP state with parallel processing"""
+    """GET /status/complete - Complete MCP state with all data embedded"""
     init_manager()
     try:
-        # Run both in parallel for efficiency
-        import asyncio
-        basic_status_task = manager.get_service_status()
-        oauth_status_task = manager.get_oauth_status()
+        # Get or compute complete status with all embedded data
+        complete_status = await manager.get_complete_status()
         
-        # Wait for both to complete
-        basic_status, oauth_status = await asyncio.gather(
-            basic_status_task, 
-            oauth_status_task
+        # Add global metadata
+        complete_status["complete_data_included"] = True
+        complete_status["mcp_version"] = "2.0.1"
+        complete_status["oauth_enabled"] = any(
+            s.get("has_oauth", False) 
+            for s in complete_status.get("services", {}).values()
         )
         
-        # Merge OAuth info into service status
-        for service_name, service_info in basic_status["services"].items():
-            if service_name in oauth_status:
-                service_info["oauth"] = oauth_status[service_name]
-        
-        return web.json_response(basic_status)
+        return web.json_response(complete_status)
     except Exception as e:
         logger.error(f"Complete status error: {e}")
+        # If JSON serialization error, try to convert problematic objects
+        try:
+            import json
+            # Try to serialize and catch specific error
+            json.dumps(complete_status)
+        except TypeError as json_err:
+            logger.error(f"JSON serialization error: {json_err}")
+            # Return error without trying to serialize problematic data
+            return web.json_response({
+                "error": f"JSON serialization error: {str(json_err)}",
+                "hint": "Some objects cannot be serialized to JSON"
+            }, status=500)
         return web.json_response({"error": str(e)}, status=500)
 
 async def list_tools_handler(request):

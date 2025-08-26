@@ -78,6 +78,9 @@ class StatusCache:
         self.service_resources: Dict[str, CacheEntry] = {}
         self.oauth_status: Dict[str, CacheEntry] = {}
         
+        # Complete status cache (single entry for all data)
+        self.complete_status: Optional[CacheEntry] = None
+        
         # Aggregate counters (updated incrementally)
         self.total_enabled = 0
         self.total_disabled = 0
