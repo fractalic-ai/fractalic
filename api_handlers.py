@@ -84,13 +84,43 @@ async def complete_status_handler(request):
         return web.json_response({"error": str(e)}, status=500)
 
 async def list_tools_handler(request):
-    """GET /list_tools - Fractalic compatibility endpoint"""
+    """GET /list_tools - Fractalic compatibility endpoint (flat array format)"""
     init_manager()
     try:
         all_tools = await manager.get_all_tools()
         
-        # Format for Fractalic compatibility
-        response = {"services": all_tools}
+        # Convert nested services format to flat array format for Fractalic compatibility
+        flat_tools = []
+        total_token_count = 0
+        enabled_services = 0
+        
+        for service_name, service_data in all_tools.items():
+            if 'error' in service_data:
+                continue
+                
+            tools = service_data.get('tools', [])
+            enabled_services += 1
+            
+            for tool in tools:
+                # Create tool with service prefix as expected by Fractalic
+                tool_with_service = {
+                    **tool,
+                    "name": f"{service_name}.{tool['name']}",
+                    "service": service_name,
+                    "original_name": tool['name']
+                }
+                flat_tools.append(tool_with_service)
+            
+            # Add service token count if available
+            total_token_count += service_data.get('token_count', 0)
+        
+        # Return format matching original fractalic_mcp_manager.py
+        response = {
+            'tools': flat_tools,
+            'count': len(flat_tools),
+            'total_token_count': total_token_count,
+            'services_count': enabled_services
+        }
         return web.json_response(response)
     except Exception as e:
         logger.error(f"List tools error: {e}")

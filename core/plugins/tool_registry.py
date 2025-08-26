@@ -147,6 +147,13 @@ class ToolRegistry(dict):
         super().__init__()
         self._manifests: List[Dict[str, Any]] = []
         self.tools_dir = Path(tools_dir).expanduser()
+        # Load MCP servers from config if not explicitly provided
+        if mcp_servers is None:
+            from core.config import Config
+            # Load settings if not already loaded
+            if Config.TOML_SETTINGS is None:
+                Config.TOML_SETTINGS = load_settings()
+            mcp_servers = Config.TOML_SETTINGS.get("mcp", {}).get("mcpServers", [])
         self.mcp_servers = mcp_servers or []
         # Store current execution context for fractalic_run tool
         self._current_ast = None
@@ -528,8 +535,13 @@ class ToolRegistry(dict):
                 
             # Mark this as an MCP tool for the _create_tool_function method
             meta["_type"] = "mcp"
-                
-            # Add to manifests list so it appears in the schema sent to the LLM
+            
+            # Create the MCP tool function
+            def mcp_runner(**kwargs):
+                return mcp_call(srv, name, kwargs)
+            
+            # Add to registry dictionary and manifests list
+            self[name] = mcp_runner
             self._manifests.append(meta)
             return
 
