@@ -51,6 +51,7 @@ tutorials/context-test/
 tutorials/context-test-v002/
 tutorials/lyricstest/
 tutorials/token-tracking-test/
+tutorials/tools-test/
 
 # Build artifacts and temporary directories
 # These should never be in the main repo - they belong in temp build directories
