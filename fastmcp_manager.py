@@ -267,6 +267,7 @@ class FastMCPManager:
                 "total_services": len(self.service_configs),
                 "enabled_services": basic_status["total_enabled"], 
                 "total_tools": sum(data.get("count", 0) for data in all_tools.values()),
+                "oauth_enabled": len(oauth_status) > 0,
                 "services": {}
             }
             
@@ -763,17 +764,57 @@ class FastMCPManager:
                 tokens = await storage.get_tokens()
                 
                 if tokens:
+                    # FastMCP uses token file modification time + expires_in for expiry calculation
+                    import time as _time
+                    from pathlib import Path
+                    
+                    expires_in = getattr(tokens, 'expires_in', None)
+                    expires_at = None
+                    remaining_seconds = None
+                    refresh_needed = False
+                    
+                    if expires_in:
+                        # Build token file path using FastMCP's naming convention
+                        cache_key = storage.get_cache_key()
+                        token_file = storage.cache_dir / f'{cache_key}_tokens.json'
+                        
+                        if token_file.exists():
+                            # Use file modification time as token issued time
+                            issued_at = token_file.stat().st_mtime
+                            expires_at = issued_at + expires_in
+                            remaining = expires_at - _time.time()
+                            remaining_seconds = max(0, int(remaining))
+                            refresh_needed = remaining < 300  # Refresh if less than 5 minutes left
+                        else:
+                            # Fallback: live validation since we can't calculate locally
+                            expires_at = None
+                            remaining_seconds = None
+                    else:
+                        # Token doesn't expire (permanent token)  
+                        expires_at = None
+                        remaining_seconds = None
+                    
                     return (service_name, {
                         "authenticated": True,
                         "has_token": True,
+                        "has_access_token": bool(getattr(tokens, 'access_token', None)),
+                        "has_refresh_token": bool(getattr(tokens, 'refresh_token', None)),
                         "token_type": getattr(tokens, 'token_type', 'Bearer'),
-                        "expires_at": getattr(tokens, 'expires_at', None),
-                        "scope": getattr(tokens, 'scope', '')
+                        "expires_at": expires_at,
+                        "access_token_remaining_seconds": remaining_seconds,
+                        "refresh_needed": refresh_needed,
+                        "scope": getattr(tokens, 'scope', ''),
+                        "client_configured": True,  # FastMCP handles OAuth internally
+                        "provider_configured": requires_auth  # Server requires OAuth
                     })
                 else:
                     return (service_name, {
                         "authenticated": False,
-                        "has_token": False
+                        "has_token": False,
+                        "has_access_token": False,
+                        "has_refresh_token": False,
+                        "client_configured": True,  # FastMCP handles OAuth internally
+                        "provider_configured": requires_auth  # Server requires OAuth
                     })
             # If server doesn't require OAuth, we don't include it
             return (service_name, None)
