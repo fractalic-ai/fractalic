@@ -20,8 +20,8 @@ from pathlib import Path
 from fastmcp import Client
 from fastmcp.client.auth import OAuth
 
-from mcp_config import MCPConfigLoader, ServiceConfig
-from status_cache import StatusCache
+from .mcp_config import MCPConfigLoader, ServiceConfig
+from .status_cache import StatusCache
 
 logger = logging.getLogger(__name__)
 
@@ -224,44 +224,74 @@ class FastMCPManager:
             enabled_services = [name for name, config in self.service_configs.items() if config.enabled]
             logger.info(f"Enabled services for single-client data fetch: {enabled_services}")
             
-            # Create tasks for parallel execution - but each service uses SINGLE CLIENT
+            # UNIFIED APPROACH: Only get OAuth status separately, extract service status from unified service data
             all_tasks = [
-                self.get_service_status(),
                 self.get_oauth_status(), 
             ]
             
-            # Add single task per service that gets ALL data (tools+prompts+resources) with one client  
+            # Add single task per service that gets ALL data (status+tools+prompts+resources) with one client  
             service_data_tasks = []
             if enabled_services:
                 service_data_tasks = [self.get_all_service_data(name) for name in enabled_services]
                 all_tasks.extend(service_data_tasks)
             
-            logger.info(f"Running {len(all_tasks)} total tasks ({len(service_data_tasks)} single-client service tasks)")
+            logger.info(f"Running {len(all_tasks)} total tasks ({len(service_data_tasks)} unified single-client service tasks)")
             
             # Execute all operations in parallel
             results = await asyncio.gather(*all_tasks, return_exceptions=True)
             
             # Unpack results
-            basic_status = results[0]
-            oauth_status = results[1]
+            oauth_status = results[0]
             
-            # Process service data results
+            # Build service status from unified service data results (no duplicate clients!)
+            basic_status = {
+                "services": {},
+                "total_enabled": 0,
+                "total_disabled": 0
+            }
             all_tools = {}
             all_prompts = {}
             all_resources = {}
             
             if enabled_services:
                 for i, service_name in enumerate(enabled_services):
-                    service_data = results[2 + i]  # Skip basic_status and oauth_status
+                    service_data = results[1 + i]  # Skip oauth_status
                     if isinstance(service_data, dict) and 'tools' in service_data:
+                        # Extract status info from unified data
+                        status_info = service_data.get("status_info", {})
+                        basic_status["services"][service_name] = {
+                            "enabled": status_info.get("enabled", True),
+                            "transport": status_info.get("transport", "unknown"),
+                            "connected": status_info.get("connected", False),
+                            "tools_count": status_info.get("tools_count", len(service_data["tools"])),
+                            "error": status_info.get("error")
+                        }
+                        
+                        # Process tools, prompts, resources from unified data
                         all_tools[service_name] = {
                             "tools": service_data["tools"],
                             "count": len(service_data["tools"])
                         }
                         all_prompts[service_name] = service_data["prompts"]
                         all_resources[service_name] = service_data["resources"]
+                        
+                        # Update totals
+                        if status_info.get("enabled", True):
+                            basic_status["total_enabled"] += 1
+                        else:
+                            basic_status["total_disabled"] += 1
                     else:
                         logger.warning(f"Invalid service data for {service_name}: {service_data}")
+                        # Add to basic_status with error state
+                        basic_status["services"][service_name] = {
+                            "enabled": True,
+                            "transport": "unknown", 
+                            "connected": False,
+                            "tools_count": 0,
+                            "error": f"Invalid service data: {service_data}"
+                        }
+                        basic_status["total_disabled"] += 1
+                        
                         all_tools[service_name] = {"tools": [], "count": 0}
                         all_prompts[service_name] = []
                         all_resources[service_name] = []
@@ -426,18 +456,21 @@ class FastMCPManager:
             return []
     
     async def get_all_service_data(self, service_name: str) -> Dict[str, Any]:
-        """Get all data (tools, prompts, resources) for a service using single client - AVOIDS MULTIPLE OAUTH!"""
-        logger.debug(f"Getting all data for service {service_name} with single client")
+        """Get ALL data (status, tools, prompts, resources) for a service using single client - UNIFIED APPROACH"""
+        logger.debug(f"Getting unified data for service {service_name} with single client")
         
         # Check caches first
+        cached_status = await self.cache.get_service_status(service_name)
         cached_tools = await self.cache.get_service_tools(service_name)
         cached_prompts = await self.cache.get_cached_data(f"prompts_{service_name}", ttl=60.0)
         cached_resources = await self.cache.get_cached_data(f"resources_{service_name}", ttl=60.0)
         
-        # If all are cached, return cached data
-        if cached_tools is not None and cached_prompts is not None and cached_resources is not None:
-            logger.debug(f"All data cached for {service_name}")
+        # If all are cached, return cached data with status
+        if (cached_status is not None and cached_tools is not None and 
+            cached_prompts is not None and cached_resources is not None):
+            logger.debug(f"All unified data cached for {service_name}")
             return {
+                "status_info": cached_status,
                 "tools": cached_tools,
                 "prompts": cached_prompts,
                 "resources": cached_resources
@@ -449,14 +482,49 @@ class FastMCPManager:
             if not client:
                 return {"tools": [], "prompts": [], "resources": []}
             
-            # SINGLE CLIENT SESSION WITH PARALLEL OPERATIONS - NO MULTIPLE OAUTH BUT FAST!
+            # SINGLE CLIENT SESSION WITH PARALLEL OPERATIONS - UNIFIED STATUS + DATA
+            config = self.service_configs.get(service_name)
+            service_status = {
+                "enabled": config.enabled if config else False,
+                "transport": config.transport if config else "unknown",
+                "connected": False,
+                "tools_count": 0,
+                "error": None
+            }
+            
             async with client as c:
-                logger.debug(f"Using single client session for {service_name} - fetching all data in PARALLEL")
+                logger.debug(f"Using unified single client session for {service_name} - status + data in PARALLEL")
                 
                 # Create tasks for parallel execution within single client session
                 tasks_to_run = []
                 
-                # Add tools task if not cached
+                # Add status tasks if not cached (ping + tools for count)
+                if cached_status is None:
+                    async def get_status():
+                        try:
+                            # Parallel ping and tools for status
+                            ping_task = asyncio.wait_for(c.ping(), timeout=5.0)
+                            tools_task = asyncio.wait_for(c.list_tools(), timeout=5.0)
+                            
+                            ping_result, tools_result = await asyncio.gather(ping_task, tools_task, return_exceptions=True)
+                            
+                            # Process status results
+                            if not isinstance(ping_result, Exception):
+                                service_status["connected"] = True
+                            if not isinstance(tools_result, Exception):
+                                tools_list = tools_result.tools if hasattr(tools_result, 'tools') else tools_result
+                                service_status["tools_count"] = len(tools_list) if tools_list else 0
+                            
+                            await self.cache.set_service_status(service_name, service_status)
+                            return service_status
+                        except Exception as e:
+                            logger.warning(f"Status check failed for {service_name}: {e}")
+                            service_status["error"] = str(e)
+                            return service_status
+                    
+                    tasks_to_run.append(("status", get_status()))
+                
+                # Add tools task if not cached (or if we need fresh data for status)
                 if cached_tools is None:
                     async def get_tools():
                         try:
@@ -545,23 +613,42 @@ class FastMCPManager:
                     # Process results
                     for i, (task_name, _) in enumerate(tasks_to_run):
                         result = results[i]
-                        if task_name == "tools" and cached_tools is None:
+                        if task_name == "status" and cached_status is None:
+                            cached_status = result if not isinstance(result, Exception) else service_status
+                        elif task_name == "tools" and cached_tools is None:
                             cached_tools = result if not isinstance(result, Exception) else []
                         elif task_name == "prompts" and cached_prompts is None:
                             cached_prompts = result if not isinstance(result, Exception) else []
                         elif task_name == "resources" and cached_resources is None:
                             cached_resources = result if not isinstance(result, Exception) else []
             
-            logger.debug(f"Single client session complete for {service_name}")
+            # Ensure we have status info (from cache or fresh)
+            final_status = cached_status if cached_status is not None else service_status
+            
+            logger.debug(f"Unified single client session complete for {service_name}")
             return {
-                "tools": cached_tools,
-                "prompts": cached_prompts, 
-                "resources": cached_resources
+                "status_info": final_status,
+                "tools": cached_tools if cached_tools is not None else [],
+                "prompts": cached_prompts if cached_prompts is not None else [], 
+                "resources": cached_resources if cached_resources is not None else []
             }
                 
         except Exception as e:
-            logger.error(f"Failed to get data for {service_name} with single client: {e}")
-            return {"tools": [], "prompts": [], "resources": []}
+            logger.error(f"Failed to get unified data for {service_name} with single client: {e}")
+            # Return error status + empty data
+            error_status = {
+                "enabled": config.enabled if config else False,
+                "transport": config.transport if config else "unknown", 
+                "connected": False,
+                "tools_count": 0,
+                "error": str(e)
+            }
+            return {
+                "status_info": error_status,
+                "tools": [], 
+                "prompts": [], 
+                "resources": []
+            }
 
     async def get_tools_for_service(self, service_name: str) -> List[Dict[str, Any]]:
         """Get tools for specific service - delegates to single client method"""

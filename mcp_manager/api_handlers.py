@@ -9,7 +9,7 @@ import logging
 import time
 from aiohttp import web
 
-from fastmcp_manager import FastMCPManager
+from .fastmcp_manager import FastMCPManager
 
 logger = logging.getLogger(__name__)
 

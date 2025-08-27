@@ -13,7 +13,7 @@ from urllib.parse import urlparse
 
 logger = logging.getLogger(__name__)
 
-ROOT_DIR = Path(__file__).resolve().parent
+ROOT_DIR = Path(__file__).resolve().parent.parent  # Go up one level from mcp_manager/
 
 @dataclass
 class ServiceConfig:
