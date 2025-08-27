@@ -1,7 +1,13 @@
 #!/usr/bin/env python3
 """
-FastMCP-based MCP Manager
-Replaces 4656-line manual implementation with FastMCP client
+Fractalic MCP Manager
+
+
+TODO: Token counting feature
+- Scope: Only tool schemas (not prompts/resources) 
+- Method: 3-tier fallback (LiteLLM→TikToken→char/4 approximation)
+- Format: Convert MCP tools to OpenAI function format for LiteLLM
+- Model: Use gpt-4o tokenizer for accuracy
 """
 
 import asyncio
@@ -323,7 +329,7 @@ class FastMCPManager:
                     "tool_count": len(tools),
                     "prompt_count": len(prompts) if prompts else 0,
                     "resource_count": len(resources) if resources else 0,
-                    "token_count": 0,  # Skip token counting for now
+                    "token_count": 0,  # TODO: Implement token counting - convert tools to OpenAI format, use LiteLLM→TikToken→approx fallback
                     "tools": tools,
                     "prompts": prompts,
                     "resources": resources
@@ -378,7 +384,7 @@ class FastMCPManager:
             # Add calculated totals
             complete_status["total_prompts"] = total_prompts
             complete_status["total_resources"] = total_resources
-            complete_status["total_tokens"] = 0  # Skip for now
+            complete_status["total_tokens"] = 0  # TODO: Sum token_count from all services (only tools schemas)
             
             # Final JSON serialization test
             logger.debug("Testing final complete_status JSON serialization...")
