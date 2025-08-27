@@ -442,26 +442,54 @@ class FastMCPManager:
             raise
     
     async def get_all_tools(self) -> Dict[str, Any]:
-        """Get tools from all enabled services"""
+        """Get tools from all enabled services with full collection caching"""
+        # Try to get cached full collection first
+        cached_all_tools = await self.cache.get_cached_data("all_tools", ttl=30.0)
+        if cached_all_tools is not None:
+            logger.info("Returning cached all_tools collection")
+            return cached_all_tools
+        
+        logger.info("Building fresh all_tools collection")
         all_tools = {}
         
-        for service_name, config in self.service_configs.items():
-            if not config.enabled:
-                continue
-            
+        # Get enabled services
+        enabled_services = [(name, config) for name, config in self.service_configs.items() if config.enabled]
+        
+        if not enabled_services:
+            return all_tools
+        
+        # Create tasks for parallel execution
+        async def get_service_tools_safe(service_name: str) -> tuple[str, Dict[str, Any]]:
             try:
                 tools = await self.get_tools_for_service(service_name)
-                all_tools[service_name] = {
+                return service_name, {
                     "tools": tools,
                     "count": len(tools)
                 }
             except Exception as e:
-                all_tools[service_name] = {
+                logger.error(f"Error getting tools for {service_name}: {e}")
+                return service_name, {
                     "error": str(e),
                     "tools": [],
                     "count": 0
                 }
         
+        # Execute all service tool fetching in parallel
+        logger.info(f"Fetching tools from {len(enabled_services)} services in parallel")
+        tasks = [get_service_tools_safe(name) for name, _ in enabled_services]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        
+        # Build results dictionary
+        for result in results:
+            if isinstance(result, Exception):
+                logger.error(f"Task failed with exception: {result}")
+                continue
+            service_name, service_data = result
+            all_tools[service_name] = service_data
+        
+        # Cache the full collection for 30 seconds
+        await self.cache.set_cached_data("all_tools", all_tools, ttl=30.0)
+        logger.info(f"Built all_tools collection with {len(all_tools)} services")
         return all_tools
     
     async def call_tool_for_service(self, service_name: str, tool_name: str, arguments: Dict[str, Any]) -> Dict[str, Any]:

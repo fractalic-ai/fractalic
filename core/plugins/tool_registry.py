@@ -326,7 +326,6 @@ class ToolRegistry(dict):
                             tool["_mcp"] = srv
                             tool["_service"] = service_name
                             self._register(tool, from_mcp=True)
-                            # print(f"[ToolRegistry] Registered MCP tool: {tool.get('name')} from {srv} ({service_name})")
                     else:
                         # Old format: {service_name: {"tools": [...], ...}, ...}
                         for service_name, service_data in response.items():

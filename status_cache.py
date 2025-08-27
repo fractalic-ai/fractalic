@@ -310,3 +310,35 @@ class StatusCache:
                         ttl=0
                     )
             logger.info(f"Cache warmed with {len(services)} services to track")
+    
+    async def get_cached_data(self, key: str, ttl: Optional[float] = None) -> Optional[Any]:
+        """Get cached data by key"""
+        if not hasattr(self, 'generic_cache'):
+            self.generic_cache = {}
+        
+        if key in self.generic_cache:
+            entry = self.generic_cache[key]
+            if ttl is not None:
+                entry.ttl = ttl
+            if not entry.is_expired():
+                self.stats.hits += 1
+                return entry.data
+            else:
+                # Remove expired entry
+                del self.generic_cache[key]
+        
+        self.stats.misses += 1
+        return None
+    
+    async def set_cached_data(self, key: str, data: Any, ttl: Optional[float] = None) -> None:
+        """Set cached data by key"""
+        if not hasattr(self, 'generic_cache'):
+            self.generic_cache = {}
+        
+        cache_ttl = ttl if ttl is not None else self.default_ttl
+        self.generic_cache[key] = CacheEntry(
+            data=data,
+            timestamp=time.time(),
+            ttl=cache_ttl
+        )
+        logger.debug(f"Cached data for key: {key} (TTL: {cache_ttl}s)")
