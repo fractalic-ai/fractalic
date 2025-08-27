@@ -342,3 +342,13 @@ class StatusCache:
             ttl=cache_ttl
         )
         logger.debug(f"Cached data for key: {key} (TTL: {cache_ttl}s)")
+    
+    async def invalidate_cached_data(self, key: str) -> None:
+        """Invalidate cached data by key"""
+        if not hasattr(self, 'generic_cache'):
+            self.generic_cache = {}
+        
+        if key in self.generic_cache:
+            del self.generic_cache[key]
+            logger.debug(f"Invalidated cached data for key: {key}")
+            self.stats.evictions += 1

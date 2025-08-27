@@ -687,8 +687,11 @@ class FastMCPManager:
         # Update config file
         self.config_loader.update_service_enabled(service_name, new_state == "enabled")
         
-        # Invalidate only this service's cache
+        # Invalidate this service's cache
         await self.cache.invalidate_service(service_name)
+        
+        # Invalidate complete status cache since service state changed
+        await self.cache.invalidate_cached_data("complete_status")
         
         # If enabling, poll the service to populate cache
         if new_state == "enabled":
@@ -956,6 +959,9 @@ class FastMCPManager:
                     "error": None
                 })
             
+            # Invalidate complete status cache since server list changed
+            await self.cache.invalidate_cached_data("complete_status")
+            
             return {
                 "success": True,
                 "service": name,
@@ -982,6 +988,9 @@ class FastMCPManager:
             
             # Remove from cache (will update counters)
             await self.cache.remove_service(service_name)
+            
+            # Invalidate complete status cache since server list changed
+            await self.cache.invalidate_cached_data("complete_status")
             
             return {
                 "success": True,
