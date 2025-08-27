@@ -194,6 +194,15 @@ Examples:
         """
     )
     
+    # Add optional 'serve' subcommand for UI server compatibility
+    parser.add_argument(
+        'command',
+        nargs='?',
+        default='serve',
+        choices=['serve'],
+        help='Command to run (default: serve) - for UI server compatibility'
+    )
+    
     parser.add_argument(
         '--port', '-p',
         type=int,
