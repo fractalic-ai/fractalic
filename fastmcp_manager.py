@@ -111,25 +111,36 @@ class FastMCPManager:
             client = self.create_fastmcp_client(service_name)
             if client:
                 async with client as c:
-                    # Set timeout for individual service
-                    await asyncio.wait_for(c.ping(), timeout=5.0)
-                    service_status["connected"] = True
+                    # Run ping and list_tools IN PARALLEL within same client session
+                    ping_task = asyncio.wait_for(c.ping(), timeout=5.0)
+                    tools_task = asyncio.wait_for(c.list_tools(), timeout=5.0)
                     
-                    # Get tools count
-                    tools = await asyncio.wait_for(c.list_tools(), timeout=5.0)
-                    tools_list = tools.tools if hasattr(tools, 'tools') else tools
-                    service_status["tools_count"] = len(tools_list) if tools_list else 0
+                    ping_result, tools_result = await asyncio.gather(ping_task, tools_task, return_exceptions=True)
                     
-                    # Cache the tools while we have them
-                    if tools_list:
-                        formatted_tools = []
-                        for tool in tools_list:
-                            formatted_tools.append({
-                                "name": tool.name,
-                                "description": tool.description,
-                                "inputSchema": tool.inputSchema if hasattr(tool, 'inputSchema') else None
-                            })
-                        await self.cache.set_service_tools(service_name, formatted_tools)
+                    # Process ping result
+                    if not isinstance(ping_result, Exception):
+                        service_status["connected"] = True
+                    else:
+                        logger.warning(f"Ping failed for {service_name}: {ping_result}")
+                    
+                    # Process tools result
+                    if not isinstance(tools_result, Exception):
+                        tools_list = tools_result.tools if hasattr(tools_result, 'tools') else tools_result
+                        service_status["tools_count"] = len(tools_list) if tools_list else 0
+                        
+                        # Cache the tools while we have them
+                        if tools_list:
+                            formatted_tools = []
+                            for tool in tools_list:
+                                formatted_tools.append({
+                                    "name": tool.name,
+                                    "description": tool.description,
+                                    "inputSchema": tool.inputSchema if hasattr(tool, 'inputSchema') else None
+                                })
+                            await self.cache.set_service_tools(service_name, formatted_tools)
+                    else:
+                        logger.warning(f"Tools fetch failed for {service_name}: {tools_result}")
+                        service_status["tools_count"] = 0
                     
         except asyncio.TimeoutError:
             service_status["error"] = "Service timeout (5s)"
@@ -199,48 +210,58 @@ class FastMCPManager:
             return cached_complete_status
         
         try:
-            logger.info("=== Starting get_complete_status() DEBUG ===")
+            logger.info("=== Starting get_complete_status() with SINGLE CLIENT architecture ===")
             
-            # Get all data in TRUE parallel - all operations run simultaneously
             start_time = time.time()
             
-            # For enabled services, get prompts and resources too
+            # Get enabled services
             enabled_services = [name for name, config in self.service_configs.items() if config.enabled]
-            logger.debug(f"Enabled services: {enabled_services}")
+            logger.info(f"Enabled services for single-client data fetch: {enabled_services}")
             
-            # Create ALL tasks for single parallel execution batch
+            # Create tasks for parallel execution - but each service uses SINGLE CLIENT
             all_tasks = [
                 self.get_service_status(),
                 self.get_oauth_status(), 
-                self.get_all_tools(),
             ]
             
-            # Add prompt and resource tasks for enabled services
-            prompt_tasks = [self._safe_get_prompts(name) for name in enabled_services]
-            resource_tasks = [self._safe_get_resources(name) for name in enabled_services]
+            # Add single task per service that gets ALL data (tools+prompts+resources) with one client  
+            service_data_tasks = []
+            if enabled_services:
+                service_data_tasks = [self.get_all_service_data(name) for name in enabled_services]
+                all_tasks.extend(service_data_tasks)
             
-            # Combine everything into single parallel execution
-            logger.debug(f"Running {len(all_tasks)} base tasks + {len(prompt_tasks)} prompt tasks + {len(resource_tasks)} resource tasks in parallel...")
+            logger.info(f"Running {len(all_tasks)} total tasks ({len(service_data_tasks)} single-client service tasks)")
+            
+            # Execute all operations in parallel
+            results = await asyncio.gather(*all_tasks, return_exceptions=True)
+            
+            # Unpack results
+            basic_status = results[0]
+            oauth_status = results[1]
+            
+            # Process service data results
+            all_tools = {}
+            all_prompts = {}
+            all_resources = {}
             
             if enabled_services:
-                # Execute ALL operations truly in parallel 
-                results = await asyncio.gather(
-                    *all_tasks,
-                    asyncio.gather(*prompt_tasks, return_exceptions=True),
-                    asyncio.gather(*resource_tasks, return_exceptions=True),
-                    return_exceptions=True
-                )
-                
-                # Unpack results
-                basic_status, oauth_status, all_tools, prompt_results, resource_results = results
-                
-            else:
-                # No enabled services - only get basic data
-                basic_status, oauth_status, all_tools = await asyncio.gather(*all_tasks)
-                prompt_results, resource_results = [], []
+                for i, service_name in enumerate(enabled_services):
+                    service_data = results[2 + i]  # Skip basic_status and oauth_status
+                    if isinstance(service_data, dict) and 'tools' in service_data:
+                        all_tools[service_name] = {
+                            "tools": service_data["tools"],
+                            "count": len(service_data["tools"])
+                        }
+                        all_prompts[service_name] = service_data["prompts"]
+                        all_resources[service_name] = service_data["resources"]
+                    else:
+                        logger.warning(f"Invalid service data for {service_name}: {service_data}")
+                        all_tools[service_name] = {"tools": [], "count": 0}
+                        all_prompts[service_name] = []
+                        all_resources[service_name] = []
             
             elapsed = time.time() - start_time
-            logger.info(f"ALL data gathered in TRUE parallel in {elapsed:.2f}s")
+            logger.info(f"ALL data gathered with SINGLE CLIENT architecture in {elapsed:.2f}s")
             
             # Test JSON serialization of each component
             try:
@@ -269,8 +290,8 @@ class FastMCPManager:
             
             
             # Build response in frontend schema format
-            total_prompts = 0
-            total_resources = 0
+            total_prompts = sum(len(prompts) for prompts in all_prompts.values())
+            total_resources = sum(len(resources) for resources in all_resources.values())
             
             complete_status = {
                 "total_services": len(self.service_configs),
@@ -288,22 +309,9 @@ class FastMCPManager:
                 tools_data = all_tools.get(service_name, {})
                 tools = tools_data.get("tools", [])
                 
-                # Get prompts and resources from parallel results
-                prompts = []
-                resources = []
-                
-                if service_info["enabled"] and service_name in enabled_services:
-                    service_idx = enabled_services.index(service_name)
-                    
-                    # Get prompts result
-                    if (service_idx < len(prompt_results) and 
-                        not isinstance(prompt_results[service_idx], Exception)):
-                        prompts = prompt_results[service_idx] or []
-                    
-                    # Get resources result
-                    if (service_idx < len(resource_results) and 
-                        not isinstance(resource_results[service_idx], Exception)):
-                        resources = resource_results[service_idx] or []
+                # Get prompts and resources from single-client results
+                prompts = all_prompts.get(service_name, [])
+                resources = all_resources.get(service_name, [])
                 
                 service_state = "connected" if service_info["connected"] else ("disabled" if not service_info["enabled"] else "error")
                 complete_service = {
@@ -321,9 +329,7 @@ class FastMCPManager:
                     "resources": resources
                 }
                 
-                # Count totals for prompts and resources
-                total_prompts += len(prompts) if prompts else 0
-                total_resources += len(resources) if resources else 0
+                # Totals already calculated above
                 
                 # Add config info (ensure JSON serializable)
                 logger.debug(f"Adding config info for {service_name}")
@@ -413,46 +419,148 @@ class FastMCPManager:
             logger.debug(f"Failed to get resources for {service_name}: {e}")
             return []
     
-    async def get_tools_for_service(self, service_name: str) -> List[Dict[str, Any]]:
-        """Get tools for specific service with caching"""
-        # Try cache first
-        cached_tools = await self.cache.get_service_tools(service_name)
-        if cached_tools is not None:
-            logger.debug(f"Returning cached tools for {service_name}")
-            return cached_tools
+    async def get_all_service_data(self, service_name: str) -> Dict[str, Any]:
+        """Get all data (tools, prompts, resources) for a service using single client - AVOIDS MULTIPLE OAUTH!"""
+        logger.debug(f"Getting all data for service {service_name} with single client")
         
+        # Check caches first
+        cached_tools = await self.cache.get_service_tools(service_name)
+        cached_prompts = await self.cache.get_cached_data(f"prompts_{service_name}", ttl=60.0)
+        cached_resources = await self.cache.get_cached_data(f"resources_{service_name}", ttl=60.0)
+        
+        # If all are cached, return cached data
+        if cached_tools is not None and cached_prompts is not None and cached_resources is not None:
+            logger.debug(f"All data cached for {service_name}")
+            return {
+                "tools": cached_tools,
+                "prompts": cached_prompts,
+                "resources": cached_resources
+            }
+        
+        # Need to fetch some or all data - use SINGLE CLIENT for everything
         try:
             client = self.create_fastmcp_client(service_name)
             if not client:
-                return []
+                return {"tools": [], "prompts": [], "resources": []}
             
+            # SINGLE CLIENT SESSION WITH PARALLEL OPERATIONS - NO MULTIPLE OAUTH BUT FAST!
             async with client as c:
-                tools = await asyncio.wait_for(c.list_tools(), timeout=10.0)
-                tools_list = tools.tools if hasattr(tools, 'tools') else tools
+                logger.debug(f"Using single client session for {service_name} - fetching all data in PARALLEL")
                 
-                if not tools_list:
-                    return []
+                # Create tasks for parallel execution within single client session
+                tasks_to_run = []
                 
-                # Format tools for API response
-                formatted_tools = []
-                for tool in tools_list:
-                    formatted_tools.append({
-                        "name": tool.name,
-                        "description": tool.description,
-                        "inputSchema": tool.inputSchema if hasattr(tool, 'inputSchema') else None
-                    })
+                # Add tools task if not cached
+                if cached_tools is None:
+                    async def get_tools():
+                        try:
+                            tools = await asyncio.wait_for(c.list_tools(), timeout=10.0)
+                            tools_list = tools.tools if hasattr(tools, 'tools') else tools
+                            
+                            if tools_list:
+                                formatted_tools = []
+                                for tool in tools_list:
+                                    formatted_tools.append({
+                                        "name": tool.name,
+                                        "description": tool.description,
+                                        "inputSchema": tool.inputSchema if hasattr(tool, 'inputSchema') else None
+                                    })
+                                await self.cache.set_service_tools(service_name, formatted_tools)
+                                return formatted_tools
+                            else:
+                                await self.cache.set_service_tools(service_name, [])
+                                return []
+                        except Exception as e:
+                            logger.warning(f"Failed to get tools for {service_name}: {e}")
+                            return []
+                    
+                    tasks_to_run.append(("tools", get_tools()))
                 
-                # Cache the result
-                await self.cache.set_service_tools(service_name, formatted_tools)
+                # Add prompts task if not cached
+                if cached_prompts is None:
+                    async def get_prompts():
+                        try:
+                            prompts = await asyncio.wait_for(c.list_prompts(), timeout=5.0)
+                            prompts_list = prompts.prompts if hasattr(prompts, 'prompts') else prompts
+                            
+                            if prompts_list:
+                                formatted_prompts = []
+                                for prompt in prompts_list:
+                                    formatted_prompts.append({
+                                        "name": prompt.name,
+                                        "description": prompt.description,
+                                        "arguments": prompt.arguments if hasattr(prompt, 'arguments') else []
+                                    })
+                                await self.cache.set_cached_data(f"prompts_{service_name}", formatted_prompts, ttl=60.0)
+                                return formatted_prompts
+                            else:
+                                await self.cache.set_cached_data(f"prompts_{service_name}", [], ttl=60.0)
+                                return []
+                        except Exception as e:
+                            logger.warning(f"Failed to get prompts for {service_name}: {e}")
+                            await self.cache.set_cached_data(f"prompts_{service_name}", [], ttl=60.0)
+                            return []
+                    
+                    tasks_to_run.append(("prompts", get_prompts()))
                 
-                return formatted_tools
+                # Add resources task if not cached
+                if cached_resources is None:
+                    async def get_resources():
+                        try:
+                            resources = await asyncio.wait_for(c.list_resources(), timeout=5.0)
+                            resources_list = resources.resources if hasattr(resources, 'resources') else resources
+                            
+                            if resources_list:
+                                formatted_resources = []
+                                for resource in resources_list:
+                                    formatted_resources.append({
+                                        "uri": str(resource.uri),
+                                        "name": resource.name,
+                                        "description": resource.description,
+                                        "mimeType": resource.mimeType if hasattr(resource, 'mimeType') else None
+                                    })
+                                await self.cache.set_cached_data(f"resources_{service_name}", formatted_resources, ttl=60.0)
+                                return formatted_resources
+                            else:
+                                await self.cache.set_cached_data(f"resources_{service_name}", [], ttl=60.0)
+                                return []
+                        except Exception as e:
+                            logger.warning(f"Failed to get resources for {service_name}: {e}")
+                            await self.cache.set_cached_data(f"resources_{service_name}", [], ttl=60.0)
+                            return []
+                    
+                    tasks_to_run.append(("resources", get_resources()))
                 
-        except asyncio.TimeoutError:
-            logger.error(f"Timeout getting tools for {service_name}")
-            raise
+                # Run all needed operations in parallel within the SAME client session
+                if tasks_to_run:
+                    logger.debug(f"Running {len(tasks_to_run)} operations in parallel for {service_name}")
+                    results = await asyncio.gather(*[task for _, task in tasks_to_run], return_exceptions=True)
+                    
+                    # Process results
+                    for i, (task_name, _) in enumerate(tasks_to_run):
+                        result = results[i]
+                        if task_name == "tools" and cached_tools is None:
+                            cached_tools = result if not isinstance(result, Exception) else []
+                        elif task_name == "prompts" and cached_prompts is None:
+                            cached_prompts = result if not isinstance(result, Exception) else []
+                        elif task_name == "resources" and cached_resources is None:
+                            cached_resources = result if not isinstance(result, Exception) else []
+            
+            logger.debug(f"Single client session complete for {service_name}")
+            return {
+                "tools": cached_tools,
+                "prompts": cached_prompts, 
+                "resources": cached_resources
+            }
+                
         except Exception as e:
-            logger.error(f"Failed to get tools for {service_name}: {e}")
-            raise
+            logger.error(f"Failed to get data for {service_name} with single client: {e}")
+            return {"tools": [], "prompts": [], "resources": []}
+
+    async def get_tools_for_service(self, service_name: str) -> List[Dict[str, Any]]:
+        """Get tools for specific service - delegates to single client method"""
+        all_data = await self.get_all_service_data(service_name)
+        return all_data["tools"]
     
     async def get_all_tools(self) -> Dict[str, Any]:
         """Get tools from all enabled services with full collection caching"""
@@ -582,95 +690,14 @@ class FastMCPManager:
             return {"error": str(e)}
     
     async def get_prompts_for_service(self, service_name: str) -> List[Dict[str, Any]]:
-        """Get prompts for specific service with caching"""
-        # Try cache first
-        cached_prompts = await self.cache.get_cached_data(f"prompts_{service_name}", ttl=60.0)
-        if cached_prompts is not None:
-            logger.debug(f"Returning cached prompts for {service_name}")
-            return cached_prompts
-        
-        try:
-            client = self.create_fastmcp_client(service_name)
-            if not client:
-                await self.cache.set_cached_data(f"prompts_{service_name}", [], ttl=60.0)
-                return []
-            
-            async with client as c:
-                prompts = await asyncio.wait_for(c.list_prompts(), timeout=5.0)
-                prompts_list = prompts.prompts if hasattr(prompts, 'prompts') else prompts
-                
-                if not prompts_list:
-                    await self.cache.set_cached_data(f"prompts_{service_name}", [], ttl=60.0)
-                    return []
-                
-                # Format prompts for API response
-                formatted_prompts = []
-                for prompt in prompts_list:
-                    formatted_prompts.append({
-                        "name": prompt.name,
-                        "description": prompt.description,
-                        "arguments": prompt.arguments if hasattr(prompt, 'arguments') else []
-                    })
-                
-                # Cache the result
-                await self.cache.set_cached_data(f"prompts_{service_name}", formatted_prompts, ttl=60.0)
-                
-                return formatted_prompts
-                
-        except asyncio.TimeoutError:
-            logger.warning(f"Timeout getting prompts for {service_name}")
-            await self.cache.set_cached_data(f"prompts_{service_name}", [], ttl=60.0)
-            return []
-        except Exception as e:
-            logger.error(f"Failed to get prompts for {service_name}: {e}")
-            await self.cache.set_cached_data(f"prompts_{service_name}", [], ttl=60.0)
-            return []
+        """Get prompts for specific service - delegates to single client method"""
+        all_data = await self.get_all_service_data(service_name)
+        return all_data["prompts"]
     
     async def get_resources_for_service(self, service_name: str) -> List[Dict[str, Any]]:
-        """Get resources for specific service with caching"""
-        # Try cache first
-        cached_resources = await self.cache.get_cached_data(f"resources_{service_name}", ttl=60.0)
-        if cached_resources is not None:
-            logger.debug(f"Returning cached resources for {service_name}")
-            return cached_resources
-        
-        try:
-            client = self.create_fastmcp_client(service_name)
-            if not client:
-                await self.cache.set_cached_data(f"resources_{service_name}", [], ttl=60.0)
-                return []
-            
-            async with client as c:
-                resources = await asyncio.wait_for(c.list_resources(), timeout=5.0)
-                resources_list = resources.resources if hasattr(resources, 'resources') else resources
-                
-                if not resources_list:
-                    await self.cache.set_cached_data(f"resources_{service_name}", [], ttl=60.0)
-                    return []
-                
-                # Format resources for API response
-                formatted_resources = []
-                for resource in resources_list:
-                    formatted_resources.append({
-                        "uri": str(resource.uri),  # Convert AnyUrl to string for JSON serialization
-                        "name": resource.name,
-                        "description": resource.description,
-                        "mimeType": resource.mimeType if hasattr(resource, 'mimeType') else None
-                    })
-                
-                # Cache the result
-                await self.cache.set_cached_data(f"resources_{service_name}", formatted_resources, ttl=60.0)
-                
-                return formatted_resources
-                
-        except asyncio.TimeoutError:
-            logger.warning(f"Timeout getting resources for {service_name}")
-            await self.cache.set_cached_data(f"resources_{service_name}", [], ttl=60.0)
-            return []
-        except Exception as e:
-            logger.error(f"Failed to get resources for {service_name}: {e}")
-            await self.cache.set_cached_data(f"resources_{service_name}", [], ttl=60.0)
-            return []
+        """Get resources for specific service - delegates to single client method"""
+        all_data = await self.get_all_service_data(service_name)
+        return all_data["resources"]
     
     async def toggle_service(self, service_name: str) -> Dict[str, Any]:
         """Toggle service enabled/disabled status with cache update"""
