@@ -192,32 +192,55 @@ class FastMCPManager:
         import traceback
         import json
         
+        # Check for cached complete status first
+        cached_complete_status = await self.cache.get_cached_data("complete_status", ttl=30.0)
+        if cached_complete_status is not None:
+            logger.info("Returning cached complete status")
+            return cached_complete_status
+        
         try:
             logger.info("=== Starting get_complete_status() DEBUG ===")
             
-            # Get all data in parallel - leverage existing caching
+            # Get all data in TRUE parallel - all operations run simultaneously
             start_time = time.time()
             
             # For enabled services, get prompts and resources too
             enabled_services = [name for name, config in self.service_configs.items() if config.enabled]
             logger.debug(f"Enabled services: {enabled_services}")
             
-            # Gather everything in parallel
-            tasks = [
+            # Create ALL tasks for single parallel execution batch
+            all_tasks = [
                 self.get_service_status(),
                 self.get_oauth_status(), 
                 self.get_all_tools(),
             ]
             
-            # TEMPORARILY DISABLED: Skip prompts and resources for performance testing
-            # prompt_tasks = [self._safe_get_prompts(name) for name in enabled_services]
-            # resource_tasks = [self._safe_get_resources(name) for name in enabled_services]
-            prompt_tasks = []
-            resource_tasks = []
+            # Add prompt and resource tasks for enabled services
+            prompt_tasks = [self._safe_get_prompts(name) for name in enabled_services]
+            resource_tasks = [self._safe_get_resources(name) for name in enabled_services]
             
-            logger.debug("Getting basic status, oauth status, all tools...")
-            basic_status, oauth_status, all_tools = await asyncio.gather(*tasks)
-            logger.debug(f"Basic data gathered - services: {len(basic_status['services'])}, oauth: {len(oauth_status)}, tools: {len(all_tools)}")
+            # Combine everything into single parallel execution
+            logger.debug(f"Running {len(all_tasks)} base tasks + {len(prompt_tasks)} prompt tasks + {len(resource_tasks)} resource tasks in parallel...")
+            
+            if enabled_services:
+                # Execute ALL operations truly in parallel 
+                results = await asyncio.gather(
+                    *all_tasks,
+                    asyncio.gather(*prompt_tasks, return_exceptions=True),
+                    asyncio.gather(*resource_tasks, return_exceptions=True),
+                    return_exceptions=True
+                )
+                
+                # Unpack results
+                basic_status, oauth_status, all_tools, prompt_results, resource_results = results
+                
+            else:
+                # No enabled services - only get basic data
+                basic_status, oauth_status, all_tools = await asyncio.gather(*all_tasks)
+                prompt_results, resource_results = [], []
+            
+            elapsed = time.time() - start_time
+            logger.info(f"ALL data gathered in TRUE parallel in {elapsed:.2f}s")
             
             # Test JSON serialization of each component
             try:
@@ -244,20 +267,6 @@ class FastMCPManager:
                 logger.error(f"all_tools traceback:\n{traceback.format_exc()}")
                 raise
             
-            # TEMPORARILY DISABLED: Skip prompts and resources gathering
-            # if enabled_services:
-            #     logger.debug(f"Getting prompts and resources for {len(enabled_services)} enabled services...")
-            #     prompt_results, resource_results = await asyncio.gather(
-            #         asyncio.gather(*prompt_tasks, return_exceptions=True),
-            #         asyncio.gather(*resource_tasks, return_exceptions=True)
-            #     )
-            #     logger.debug(f"Prompts/resources gathered - prompt results: {len(prompt_results)}, resource results: {len(resource_results)}")
-            # else:
-            #     prompt_results, resource_results = [], []
-            prompt_results, resource_results = [], []
-            
-            elapsed = time.time() - start_time
-            logger.debug(f"Complete status gathered in {elapsed:.2f}s")
             
             # Build response in frontend schema format
             total_prompts = 0
@@ -279,22 +288,22 @@ class FastMCPManager:
                 tools_data = all_tools.get(service_name, {})
                 tools = tools_data.get("tools", [])
                 
-                # TEMPORARILY DISABLED: Set prompts/resources to null for performance testing
-                prompts = None
-                resources = None
+                # Get prompts and resources from parallel results
+                prompts = []
+                resources = []
                 
-                # if service_info["enabled"] and service_name in enabled_services:
-                #     service_idx = enabled_services.index(service_name)
-                #     
-                #     # Get prompts result
-                #     if (service_idx < len(prompt_results) and 
-                #         not isinstance(prompt_results[service_idx], Exception)):
-                #         prompts = prompt_results[service_idx] or []
-                #     
-                #     # Get resources result
-                #     if (service_idx < len(resource_results) and 
-                #         not isinstance(resource_results[service_idx], Exception)):
-                #         resources = resource_results[service_idx] or []
+                if service_info["enabled"] and service_name in enabled_services:
+                    service_idx = enabled_services.index(service_name)
+                    
+                    # Get prompts result
+                    if (service_idx < len(prompt_results) and 
+                        not isinstance(prompt_results[service_idx], Exception)):
+                        prompts = prompt_results[service_idx] or []
+                    
+                    # Get resources result
+                    if (service_idx < len(resource_results) and 
+                        not isinstance(resource_results[service_idx], Exception)):
+                        resources = resource_results[service_idx] or []
                 
                 service_state = "connected" if service_info["connected"] else ("disabled" if not service_info["enabled"] else "error")
                 complete_service = {
@@ -304,17 +313,17 @@ class FastMCPManager:
                     "transport": service_info["transport"],
                     "has_oauth": service_name in oauth_status,
                     "tool_count": len(tools),
-                    "prompt_count": 0,
-                    "resource_count": 0,
+                    "prompt_count": len(prompts) if prompts else 0,
+                    "resource_count": len(resources) if resources else 0,
                     "token_count": 0,  # Skip token counting for now
                     "tools": tools,
                     "prompts": prompts,
                     "resources": resources
                 }
                 
-                # TEMPORARILY DISABLED: Skip totals counting
-                # total_prompts += len(prompts)
-                # total_resources += len(resources)
+                # Count totals for prompts and resources
+                total_prompts += len(prompts) if prompts else 0
+                total_resources += len(resources) if resources else 0
                 
                 # Add config info (ensure JSON serializable)
                 logger.debug(f"Adding config info for {service_name}")
@@ -374,6 +383,9 @@ class FastMCPManager:
                 logger.error(f"Final complete_status JSON ERROR: {e}")
                 logger.error(f"Final traceback:\n{traceback.format_exc()}")
                 raise
+            
+            # Cache the complete result for 30 seconds
+            await self.cache.set_cached_data("complete_status", complete_status, ttl=30.0)
             
             logger.info("=== get_complete_status() DEBUG COMPLETE ===")
             return complete_status
@@ -570,10 +582,17 @@ class FastMCPManager:
             return {"error": str(e)}
     
     async def get_prompts_for_service(self, service_name: str) -> List[Dict[str, Any]]:
-        """Get prompts for specific service with timeout"""
+        """Get prompts for specific service with caching"""
+        # Try cache first
+        cached_prompts = await self.cache.get_cached_data(f"prompts_{service_name}", ttl=60.0)
+        if cached_prompts is not None:
+            logger.debug(f"Returning cached prompts for {service_name}")
+            return cached_prompts
+        
         try:
             client = self.create_fastmcp_client(service_name)
             if not client:
+                await self.cache.set_cached_data(f"prompts_{service_name}", [], ttl=60.0)
                 return []
             
             async with client as c:
@@ -581,6 +600,7 @@ class FastMCPManager:
                 prompts_list = prompts.prompts if hasattr(prompts, 'prompts') else prompts
                 
                 if not prompts_list:
+                    await self.cache.set_cached_data(f"prompts_{service_name}", [], ttl=60.0)
                     return []
                 
                 # Format prompts for API response
@@ -592,20 +612,32 @@ class FastMCPManager:
                         "arguments": prompt.arguments if hasattr(prompt, 'arguments') else []
                     })
                 
+                # Cache the result
+                await self.cache.set_cached_data(f"prompts_{service_name}", formatted_prompts, ttl=60.0)
+                
                 return formatted_prompts
                 
         except asyncio.TimeoutError:
             logger.warning(f"Timeout getting prompts for {service_name}")
-            raise
+            await self.cache.set_cached_data(f"prompts_{service_name}", [], ttl=60.0)
+            return []
         except Exception as e:
             logger.error(f"Failed to get prompts for {service_name}: {e}")
-            raise
+            await self.cache.set_cached_data(f"prompts_{service_name}", [], ttl=60.0)
+            return []
     
     async def get_resources_for_service(self, service_name: str) -> List[Dict[str, Any]]:
-        """Get resources for specific service with timeout"""
+        """Get resources for specific service with caching"""
+        # Try cache first
+        cached_resources = await self.cache.get_cached_data(f"resources_{service_name}", ttl=60.0)
+        if cached_resources is not None:
+            logger.debug(f"Returning cached resources for {service_name}")
+            return cached_resources
+        
         try:
             client = self.create_fastmcp_client(service_name)
             if not client:
+                await self.cache.set_cached_data(f"resources_{service_name}", [], ttl=60.0)
                 return []
             
             async with client as c:
@@ -613,6 +645,7 @@ class FastMCPManager:
                 resources_list = resources.resources if hasattr(resources, 'resources') else resources
                 
                 if not resources_list:
+                    await self.cache.set_cached_data(f"resources_{service_name}", [], ttl=60.0)
                     return []
                 
                 # Format resources for API response
@@ -625,14 +658,19 @@ class FastMCPManager:
                         "mimeType": resource.mimeType if hasattr(resource, 'mimeType') else None
                     })
                 
+                # Cache the result
+                await self.cache.set_cached_data(f"resources_{service_name}", formatted_resources, ttl=60.0)
+                
                 return formatted_resources
                 
         except asyncio.TimeoutError:
             logger.warning(f"Timeout getting resources for {service_name}")
-            raise
+            await self.cache.set_cached_data(f"resources_{service_name}", [], ttl=60.0)
+            return []
         except Exception as e:
             logger.error(f"Failed to get resources for {service_name}: {e}")
-            raise
+            await self.cache.set_cached_data(f"resources_{service_name}", [], ttl=60.0)
+            return []
     
     async def toggle_service(self, service_name: str) -> Dict[str, Any]:
         """Toggle service enabled/disabled status with cache update"""
