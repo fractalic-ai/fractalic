@@ -1093,18 +1093,17 @@ async def start_mcp_manager_route():
 
 @app.post("/mcp/stop")
 async def stop_mcp_manager_route():
-    """(Disabled) Stop the MCP manager process.
-
-    This endpoint has been intentionally stubbed to prevent accidental or
-    unauthorized termination of the managed MCP process. The underlying
-    stop_mcp_manager() helper remains available for internal use but is
-    no longer exposed via this route.
+    """Stop the MCP manager process gracefully.
+    
+    First attempts graceful shutdown via API, then terminate, finally kill if needed.
     """
     try:
-        _record_trace("security", message="/mcp/stop blocked (stub)")
-    except Exception:
-        pass
-    return {"status": "disabled", "detail": "Stop endpoint disabled"}
+        _record_trace("api", message="/mcp/stop called")
+        result = await stop_mcp_manager()
+        return result
+    except Exception as e:
+        _record_trace("error", message="/mcp/stop failed", error=str(e))
+        raise HTTPException(status_code=500, detail=f"Failed to stop MCP manager: {str(e)}")
 
 @app.get("/mcp/status")
 async def get_mcp_manager_status_route():
