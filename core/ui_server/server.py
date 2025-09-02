@@ -51,6 +51,10 @@ _stdout_thread: Optional[threading.Thread] = None
 _stderr_thread: Optional[threading.Thread] = None
 _process_monitor_task: Optional[asyncio.Task] = None
 _mcp_state: Dict[str, Any] = {"phase": "idle", "last_exit_code": None, "last_error": None, "start_time": None}
+
+# Trace enable/disable flag (default disabled). Set MCP_TRACE_ENABLED=1 to enable.
+_TRACE_ENABLED = os.environ.get("MCP_TRACE_ENABLED", "0") not in ("0", "false", "False", "")
+
 mcp_manager_port = 5859
 mcp_manager_url = f"http://localhost:{mcp_manager_port}"
 
@@ -125,6 +129,8 @@ async def _cleanup_port_conflicts(port: int):
 
 # ---------------- Trace / Monitoring Utilities (top-level) ----------------
 def _record_trace(event_type: str, message: str = "", **fields):
+    if not _TRACE_ENABLED:
+        return
     record = {
         "ts": datetime.utcnow().isoformat(timespec='milliseconds') + 'Z',
         "type": event_type,
@@ -141,6 +147,8 @@ def _record_trace(event_type: str, message: str = "", **fields):
 
 def _init_trace_log(base_dir: Optional[str] = None):
     """Initialize on-disk trace log location (idempotent)."""
+    if not _TRACE_ENABLED:
+        return
     global _trace_log_path
     if _trace_log_path is not None:
         return
@@ -216,12 +224,16 @@ async def _monitor_mcp_process():
 
 @app.get("/mcp/trace")
 async def get_mcp_trace(tail: int = Query(200, ge=1, le=5000)):
+    if not _TRACE_ENABLED:
+        return {"disabled": True, "reason": "Tracing disabled. Set MCP_TRACE_ENABLED=1 to enable."}
     with _trace_lock:
         data = list(_trace_buffer)[-tail:]
     return {"tail": tail, "size": len(_trace_buffer), "entries": data}
 
 @app.post("/mcp/trace/clear")
 async def clear_mcp_trace():
+    if not _TRACE_ENABLED:
+        return {"disabled": True, "status": "noop"}
     with _trace_lock:
         _trace_buffer.clear()
     _record_trace("trace", message="trace cleared")
