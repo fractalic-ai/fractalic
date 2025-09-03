@@ -456,6 +456,12 @@ class liteclient:
         self.ui = ConsoleManager()
         self.exec = ToolExecutor(self.registry, self.ui, self._on_tool_response)  # registry replaces toolkit
         self.schema = self.registry.generate_schema()  # registry replaces toolkit
+        # Debug: Show how many tools were loaded
+        if self.schema:
+            services = set(tool["function"].get("_service", "unknown") for tool in self.schema)
+            print(f"[DEBUG] Loaded {len(self.schema)} tools from services: {sorted(services)}")
+        else:
+            print("[DEBUG] Warning: No tools loaded in schema!")
         self.tool_loop_ast = None  # Will be set by execution context
 
     def _on_tool_response(self, tool_name: str, args_json: str, result: str):
@@ -633,6 +639,16 @@ class liteclient:
                     }
                     filtered_schema.append(clean_tool)
             
+            # Validate that tools were found when explicitly requested
+            if not filtered_schema:
+                available_services = set()
+                for tool in self.schema:
+                    service = tool["function"].get("_service", "unknown")
+                    available_services.add(service)
+                error_msg = f"No tools found for MCP service '{mcp_server_name}'. "
+                error_msg += f"Available services: {sorted(available_services)}"
+                raise ValueError(error_msg)
+            
             params["tools"] = filtered_schema
             params["stream"] = True  # Enable streaming for tool calls too
         elif isinstance(tools_param, list):
@@ -660,6 +676,17 @@ class liteclient:
                 
                 if should_include:
                     filtered_schema.append(tool)
+            
+            # Validate that tools were found when explicitly requested
+            if not filtered_schema:
+                requested_items = tools_param if isinstance(tools_param, list) else [tools_param]
+                requested_str = ", ".join(str(item) for item in requested_items)
+                available_tools = [tool["function"]["name"] for tool in self.schema]
+                available_services = set(tool["function"].get("_service", "unknown") for tool in self.schema)
+                error_msg = f"No tools found matching: {requested_str}. "
+                error_msg += f"Available tools: {len(available_tools)} tools from services: {sorted(available_services)}"
+                raise ValueError(error_msg)
+            
             params["tools"] = filtered_schema
             params["stream"] = True  # Enable streaming for tool calls too
         elif isinstance(tools_param, str):
@@ -668,6 +695,16 @@ class liteclient:
                 tool for tool in self.schema 
                 if tool["function"]["name"] == tools_param
             ]
+            
+            # Validate that tools were found when explicitly requested
+            if not filtered_schema:
+                available_tools = [tool["function"]["name"] for tool in self.schema]
+                error_msg = f"Tool '{tools_param}' not found. "
+                error_msg += f"Available tools: {available_tools[:10]}" if available_tools else "No tools available in registry."
+                if len(available_tools) > 10:
+                    error_msg += f" (and {len(available_tools) - 10} more)"
+                raise ValueError(error_msg)
+            
             params["tools"] = filtered_schema
             params["stream"] = True  # Enable streaming for tool calls too
 

@@ -312,7 +312,7 @@ class ToolRegistry(dict):
                     if "tools" in response and isinstance(response["tools"], list):
                         # New SDK v2 format: {"tools": [{"name": "...", "service": "...", ...}, ...]}
                         tools = response["tools"]
-                        # print(f"[ToolRegistry] Processing {len(tools)} tools from new SDK v2 format")
+                        print(f"[ToolRegistry] Processing {len(tools)} tools from new SDK v2 format")
                         
                         for tool in tools:
                             if "name" not in tool:
@@ -493,6 +493,9 @@ class ToolRegistry(dict):
                         print("[ToolRegistry] Auto-start skipped: manager script not found")
                 except Exception as auto_e:
                     print(f"[ToolRegistry] Auto-start failed: {auto_e}")
+        
+        # Print summary of loaded tools
+        print(f"[ToolRegistry] MCP loading complete. Total tools in registry: {len(self)}")
 
     def _register(self, meta: Dict[str, Any],
                   explicit=False, runner_override: Callable | None = None,
