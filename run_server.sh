@@ -38,4 +38,4 @@ echo "🌐 Server will be available at: http://localhost:8000"
 echo ""
 
 # Run Uvicorn server using module notation (more robust)
-uvicorn core.ui_server.server:app --host 0.0.0.0 --port 8000 --reload
+uvicorn core.ui_server.server:app --host 0.0.0.0 --port 8000
