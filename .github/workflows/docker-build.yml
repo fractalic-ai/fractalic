@@ -3,8 +3,14 @@ name: Build and Test Docker Container
 on:
   push:
     branches: [ main, develop ]
+    paths-ignore:
+      - 'README.md'
+      - '*.md'
   pull_request:
     branches: [ main ]
+    paths-ignore:
+      - 'README.md'
+      - '*.md'
   release:
     types: [ published ]
 
