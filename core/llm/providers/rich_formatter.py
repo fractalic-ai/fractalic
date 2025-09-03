@@ -40,10 +40,9 @@ class RichFormatter:
             # Check if this is a tool call or response message
             if content.startswith("> TOOL CALL") or content.startswith("> TOOL RESPONSE"):
                 formatted_content = self._format_tool_message(content)
-                self.console.print(formatted_content, highlight=False, end=end,
-                                 soft_wrap=True)
+                self.console.print(formatted_content, end=end, soft_wrap=True)
             else:
-                self.console.print(content, highlight=False, end=end,
+                self.console.print(content, highlight=False, markup=False, end=end,
                                  soft_wrap=True)
 
     def status(self, message: str):
@@ -56,25 +55,33 @@ class RichFormatter:
     
     def _format_tool_message(self, content: str) -> str:
         """Format tool call/response messages with special colors"""
-        lines = content.split('\n')
-        formatted_lines = []
+        from rich.text import Text
+        from rich.console import Console
         
-        for line in lines:
+        lines = content.split('\n')
+        text_obj = Text()
+        
+        for i, line in enumerate(lines):
+            if i > 0:  # Add newline for all lines except the first
+                text_obj.append('\n')
+                
             if line.startswith("> TOOL CALL") or line.startswith("> TOOL RESPONSE"):
                 # Extract the main part and ID part
                 if ", id: " in line:
                     main_part, id_part = line.split(", id: ", 1)
-                    # Format: blue for "> TOOL CALL/RESPONSE", dark gray italic for "id: ..."
-                    formatted_line = f"[bold blue]{main_part}[/bold blue], [dim italic]id: {id_part}[/dim italic]"
+                    # Add the main part with blue formatting
+                    text_obj.append(main_part, style="bold blue")
+                    # Add the ID part with dim italic formatting
+                    text_obj.append(", id: ", style="default")
+                    text_obj.append(id_part, style="dim italic")
                 else:
                     # Fallback if no ID found
-                    formatted_line = f"[bold blue]{line}[/bold blue]"
-                formatted_lines.append(formatted_line)
+                    text_obj.append(line, style="bold blue")
             else:
-                # Keep other lines unchanged
-                formatted_lines.append(line)
+                # Keep other lines unchanged, but escape any potential markup
+                text_obj.append(line, style="default")
         
-        return '\n'.join(formatted_lines)
+        return text_obj
     
     def format_json_clean(self, json_str: str) -> str:
         """Format JSON string with proper indentation, no colors (for context)"""

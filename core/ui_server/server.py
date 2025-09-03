@@ -1,6 +1,11 @@
 # server.py
 import asyncio
 import sys
+import time
+import threading
+import uuid
+import aiohttp
+import shutil
 from fastapi import FastAPI, HTTPException, Query, Request, Response
 from fastapi.responses import PlainTextResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
@@ -925,68 +930,128 @@ async def run_fractalic(request: Request):
     command = f'"{python_exe}" "{fractalic_path}" "{file_path}"'
 
     async def stream_fractalic():
-        # Set up UTF-8 environment for the subprocess
-        env = os.environ.copy()
-        env.update({
-            'PYTHONIOENCODING': 'utf-8',
-            'LC_ALL': 'en_US.UTF-8',
-            'LANG': 'en_US.UTF-8'
-        })
-        
-        process = await asyncio.create_subprocess_shell(
-            command,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-            cwd=root_dir,
-            env=env
-        )
-
-        # Stream stdout with UTF-8-safe chunking to preserve Rich ANSI and encoding
-        buffer = b''
-        while True:
-            chunk = await read_utf8_safe_chunk(process.stdout, 1024)
-            if not chunk:
-                break
+        process = None
+        try:
+            # Set up UTF-8 environment for the subprocess
+            env = os.environ.copy()
+            env.update({
+                'PYTHONIOENCODING': 'utf-8',
+                'LC_ALL': 'en_US.UTF-8',
+                'LANG': 'en_US.UTF-8'
+            })
             
-            # Add to buffer and yield complete chunk
-            buffer += chunk
-            try:
-                decoded_chunk = buffer.decode('utf-8', errors='strict')
-                yield decoded_chunk
-                buffer = b''  # Clear buffer after successful decode
-            except UnicodeDecodeError:
-                # If we still can't decode, yield with error replacement
-                # This handles edge cases where the chunk boundary still splits characters
-                decoded_chunk = buffer.decode('utf-8', errors='replace')
-                yield decoded_chunk
-                buffer = b''
+            process = await asyncio.create_subprocess_shell(
+                command,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                cwd=root_dir,
+                env=env
+            )
 
-        # Yield any remaining buffer content
-        if buffer:
-            yield buffer.decode('utf-8', errors='replace')
+            # Function to check if process is still alive
+            def is_process_alive():
+                return process and process.returncode is None
 
-        # Stream any stderr after stdout
-        stderr_buffer = b''
-        while True:
-            chunk = await read_utf8_safe_chunk(process.stderr, 1024)
-            if not chunk:
-                break
-            
-            stderr_buffer += chunk
-            try:
-                decoded_chunk = stderr_buffer.decode('utf-8', errors='strict')
-                yield decoded_chunk
-                stderr_buffer = b''
-            except UnicodeDecodeError:
-                decoded_chunk = stderr_buffer.decode('utf-8', errors='replace')
-                yield decoded_chunk
-                stderr_buffer = b''
+            # Stream stdout with UTF-8-safe chunking to preserve Rich ANSI and encoding
+            buffer = b''
+            while is_process_alive():
+                try:
+                    # Use a timeout to avoid blocking forever
+                    chunk = await asyncio.wait_for(
+                        read_utf8_safe_chunk(process.stdout, 1024), 
+                        timeout=1.0
+                    )
+                    if not chunk:
+                        break
+                    
+                    # Add to buffer and yield complete chunk
+                    buffer += chunk
+                    try:
+                        decoded_chunk = buffer.decode('utf-8', errors='strict')
+                        yield decoded_chunk
+                        buffer = b''  # Clear buffer after successful decode
+                    except UnicodeDecodeError:
+                        # If we still can't decode, yield with error replacement
+                        # This handles edge cases where the chunk boundary still splits characters
+                        decoded_chunk = buffer.decode('utf-8', errors='replace')
+                        yield decoded_chunk
+                        buffer = b''
+                        
+                except asyncio.TimeoutError:
+                    # Check if process is still running, if not break
+                    if not is_process_alive():
+                        break
+                    continue
+                except Exception as e:
+                    # Process might have terminated unexpectedly
+                    if is_process_alive():
+                        yield f"\n[Error reading stdout: {str(e)}]\n"
+                    break
 
-        # Yield any remaining stderr buffer
-        if stderr_buffer:
-            yield stderr_buffer.decode('utf-8', errors='replace')
+            # Yield any remaining buffer content
+            if buffer:
+                yield buffer.decode('utf-8', errors='replace')
 
-        await process.wait()
+            # Stream any stderr after stdout
+            stderr_buffer = b''
+            while is_process_alive():
+                try:
+                    # Use a timeout for stderr as well
+                    chunk = await asyncio.wait_for(
+                        read_utf8_safe_chunk(process.stderr, 1024), 
+                        timeout=1.0
+                    )
+                    if not chunk:
+                        break
+                    
+                    stderr_buffer += chunk
+                    try:
+                        decoded_chunk = stderr_buffer.decode('utf-8', errors='strict')
+                        yield decoded_chunk
+                        stderr_buffer = b''
+                    except UnicodeDecodeError:
+                        decoded_chunk = stderr_buffer.decode('utf-8', errors='replace')
+                        yield decoded_chunk
+                        stderr_buffer = b''
+                        
+                except asyncio.TimeoutError:
+                    if not is_process_alive():
+                        break
+                    continue
+                except Exception as e:
+                    if is_process_alive():
+                        yield f"\n[Error reading stderr: {str(e)}]\n"
+                    break
+
+            # Yield any remaining stderr buffer
+            if stderr_buffer:
+                yield stderr_buffer.decode('utf-8', errors='replace')
+
+            # Wait for process to complete and get exit code
+            if process:
+                exit_code = await process.wait()
+                if exit_code != 0:
+                    yield f"\n[Process exited with code {exit_code}]\n"
+                else:
+                    yield f"\n[Process completed successfully]\n"
+
+        except Exception as e:
+            yield f"\n[Fatal error in fractalic execution: {str(e)}]\n"
+        finally:
+            # Cleanup: terminate process if it's still running
+            if process and process.returncode is None:
+                try:
+                    process.terminate()
+                    await asyncio.wait_for(process.wait(), timeout=5.0)
+                except asyncio.TimeoutError:
+                    # Force kill if terminate doesn't work
+                    try:
+                        process.kill()
+                        await process.wait()
+                    except:
+                        pass
+                except:
+                    pass
 
     return StreamingResponse(stream_fractalic(), media_type="text/plain")
 
@@ -1000,7 +1065,6 @@ async def tools_schema(tools_dir: str = Query("tools", description="Path to the 
     Autodiscover tools from the specified tools_dir and return their schema in OpenAI/MCP-compatible JSON format.
     """
     try:
-        import time
         current_time = time.time()
         
         # Check if we have a cached schema for this tools_dir
