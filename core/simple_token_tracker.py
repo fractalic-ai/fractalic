@@ -30,6 +30,8 @@ class SimpleTokenTracker:
         self.last_call_data = None  # Store last call data for manual display
         self.processed_calls = set()  # Track processed call IDs to avoid duplicates
         self.current_model = None  # Track the current model being used
+        self.debug_mode = False  # Enable for debugging token tracking issues
+        self.turn_high_watermarks = {}  # Track highest token counts per turn
         
     def start_file(self, filename: str) -> None:
         """
@@ -79,11 +81,21 @@ class SimpleTokenTracker:
             turn_info: Optional information about tool turns (e.g., "turn 1/3")
             actual_cost: Actual cost from LiteLLM response
         """
-        # Create unique call ID to avoid double-counting from streaming callbacks
-        call_id = f"{filename}:{input_tokens}:{output_tokens}:{turn_info}:{actual_cost}"
-        if call_id in self.processed_calls:
+        # Create unique call ID based on core parameters (excluding cost to handle multiple callbacks)
+        base_call_id = f"{filename}:{input_tokens}:{output_tokens}:{turn_info}"
+        
+        # Debug logging for tracking issues
+        if self.debug_mode:
+            print(f"[DEBUG] Token call: {base_call_id}, cost={actual_cost}, already_processed={base_call_id in self.processed_calls}")
+        
+        # Check if we've already processed this exact call (by tokens/turn, not cost)
+        if base_call_id in self.processed_calls:
+            if self.debug_mode:
+                print(f"[DEBUG] Skipping duplicate token call: {base_call_id}")
             return  # Skip duplicate
-        self.processed_calls.add(call_id)
+        
+        # Mark as processed using base ID (without cost)
+        self.processed_calls.add(base_call_id)
         
         self._record_call_data(filename, input_tokens, output_tokens, turn_info, actual_cost)
         self.print_status(filename, input_tokens, output_tokens, turn_info)
@@ -99,21 +111,63 @@ class SimpleTokenTracker:
             turn_info: Optional information about tool turns (e.g., "turn 1/3")
             actual_cost: Actual cost from LiteLLM response
         """
-        # Create unique call ID to avoid double-counting from streaming callbacks
-        call_id = f"{filename}:{input_tokens}:{output_tokens}:{turn_info}:{actual_cost}"
-        if call_id in self.processed_calls:
-            return  # Skip duplicate
-        self.processed_calls.add(call_id)
+        # Find the current active run key for this filename
+        if filename in self.file_run_counters:
+            run_number = self.file_run_counters[filename]
+            current_file_key = f"{filename} (run: {run_number})"
+        else:
+            # File not initialized, skip recording (shouldn't happen)
+            return
+            
+        if current_file_key not in self.filestats:
+            # File not initialized properly, skip recording
+            return
+            
+        # Create unique turn ID to track turn baselines
+        turn_id = f"{filename}:{turn_info}"
         
-        self._record_call_data(filename, input_tokens, output_tokens, turn_info, actual_cost)
-        # Store last call data for manual display later
-        self.last_call_data = {
-            'filename': filename,
-            'input_tokens': input_tokens,
-            'output_tokens': output_tokens,
-            'turn_info': turn_info,
-            'actual_cost': actual_cost
-        }
+        # Get baseline stats for this turn (where the turn started from)
+        if turn_id not in self.turn_high_watermarks:
+            # First callback for this turn - record the baseline
+            self.turn_high_watermarks[turn_id] = {
+                'baseline_input': self.filestats[current_file_key]["file_input_tokens"],
+                'baseline_output': self.filestats[current_file_key]["file_output_tokens"],
+                'latest_input': input_tokens,
+                'latest_output': output_tokens
+            }
+        else:
+            # Subsequent callback - update latest values
+            self.turn_high_watermarks[turn_id]['latest_input'] = input_tokens
+            self.turn_high_watermarks[turn_id]['latest_output'] = output_tokens
+        
+        # Calculate delta from the baseline for this turn
+        baseline = self.turn_high_watermarks[turn_id]
+        delta_input = max(0, baseline['latest_input'] - baseline['baseline_input'])
+        delta_output = max(0, baseline['latest_output'] - baseline['baseline_output'])
+        
+        # Update file stats to reflect current cumulative values
+        self.filestats[current_file_key]["file_input_tokens"] = baseline['baseline_input'] + delta_input
+        self.filestats[current_file_key]["file_output_tokens"] = baseline['baseline_output'] + delta_output
+        
+        # Update global stats to reflect current cumulative values
+        expected_global_input = baseline['baseline_input'] + delta_input
+        expected_global_output = baseline['baseline_output'] + delta_output
+        
+        # Only update globals if they're different (to avoid double-counting)
+        if self.global_input_tokens != expected_global_input or self.global_output_tokens != expected_global_output:
+            # Adjust globals by the difference
+            self.global_input_tokens = expected_global_input
+            self.global_output_tokens = expected_global_output
+            
+        # Store last call data for manual display (only if we have actual new tokens)
+        if delta_input > 0 or delta_output > 0:
+            self.last_call_data = {
+                'filename': filename,
+                'input_tokens': delta_input,
+                'output_tokens': delta_output,
+                'turn_info': turn_info,
+                'actual_cost': actual_cost
+            }
         
     def _record_call_data(self, filename: str, input_tokens: int, output_tokens: int, turn_info: str, actual_cost: float) -> None:
         """Internal method to record call data without display."""
@@ -160,11 +214,25 @@ class SimpleTokenTracker:
         self.filestats[current_file_key]["file_output_cost"] += estimated_output_cost
         
         # Update global stats
+        old_global_input = self.global_input_tokens
+        old_global_output = self.global_output_tokens
+        
         self.global_input_tokens += input_tokens
         self.global_output_tokens += output_tokens
         self.global_cost += actual_cost
         self.global_input_cost += estimated_input_cost
         self.global_output_cost += estimated_output_cost
+        
+        # Debug massive token jumps (only if debug mode enabled)
+        if self.debug_mode and (input_tokens > 50000 or (old_global_input > 0 and input_tokens > old_global_input)):
+            print(f"\n[TOKEN ANOMALY DETECTED]")
+            print(f"  Previous global: {old_global_input}")
+            print(f"  Adding: {input_tokens}")
+            print(f"  New global: {self.global_input_tokens}")
+            print(f"  File: {filename}, Turn: {turn_info}")
+            print(f"  Call stack:")
+            import traceback
+            traceback.print_stack(limit=10)
     
     def get_model_context_size(self, model: str) -> Optional[int]:
         """

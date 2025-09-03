@@ -90,11 +90,19 @@ Watch this video with quick project overview and 101 concepts how to use it (pic
 - 📖 **Integrated Markdown Viewer: Markdown viewer in UI**
 
 ## Upcoming Roadmap
-- [ ] **LiteLLM Support:** Add any model available on the market.
-- [ ] **Context State Player:** Trace and replay each context change.
-- [ ] **Session Snapshot Migration:** Migrate from Git to zip format – remove Git library dependencies to resolve Windows 11 issues and provide complete state tracking.
-- [ ] **System Context Direct Setting:** Enable direct system context adjustments at runtime.
-- [ ] **And Many More...**
+
+### OAuth Improvements (Current Branch)
+Implemented:
+- Provider reuse & client_info persistence.
+- Redirect cooldown (90s) to prevent multiple auth windows.
+- auth_pending signaling for replicate service.
+- /oauth/status endpoints for monitoring.
+- Concurrency guard & stale token purge pre-check.
+
+Planned Next (tracked in Linear):
+- Automatic refresh grant invocation before 401.
+- Shared in-flight future for parallel OAuth-triggered operations (dedupe).
+- Enhanced /oauth/status including expiry ETA.
 
 # Installation
 

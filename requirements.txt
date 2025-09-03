@@ -15,6 +15,12 @@ Pillow==11.1.0
 PyYAML==6.0.2
 rich==13.9.4
 toml==0.10.2
-mcp>=1.8.0
+# Pin MCP below 1.12 due to streamable-http performance regression (see upstream issue)
+mcp==1.11.0
+fastmcp>=2.10.0
 tiktoken
+httpx>=0.27.0
+
+# Added for MCP manager SDK v2 (OAuth URL validation etc.)
+pydantic>=2.7.0
 

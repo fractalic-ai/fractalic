@@ -1,6 +1,22 @@
 # fractalic: excluding settings.toml file
 settings.toml
 
+# OAuth tokens and sensitive authentication data
+oauth_tokens.json
+oauth_tokens_simple.json
+oauth_tokens.json.backup
+oauth_tokens.json.fixed
+oauth_tokens.json.repair
+oauth_redirect_state.json
+*.oauth_tokens.json
+
+# Development and debugging utilities
+utils/oauth_debug/
+debug_*.py
+analyze_*.py
+inspect_*.py
+diagnose_*.py
+
 # Tutorials and examples (user-generated content) - COMPLETELY EXCLUDED
 tutorials/
 *.ctx
@@ -35,6 +51,7 @@ tutorials/context-test/
 tutorials/context-test-v002/
 tutorials/lyricstest/
 tutorials/token-tracking-test/
+tutorials/tools-test/
 
 # Build artifacts and temporary directories
 # These should never be in the main repo - they belong in temp build directories
@@ -219,3 +236,5 @@ DBG_TOOLS.json
 *.pyc
 .idea/
 .vscode/
+tutorials/mcp-integration-tests/
+CLAUDE.md

@@ -55,12 +55,13 @@ def fractalic_cost_callback(kwargs, completion_response, start_time, end_time):
                     filename = metadata.get("filename", filename)
                     turn_info = metadata.get("turn_info", turn_info)
             
-            
             # Capture the model being used
             model = kwargs.get("model", "unknown")
             token_tracker.current_model = model
             
             # Record in token tracker with actual cost but WITHOUT display (we'll show it at the right time)
+            # NOTE: LiteLLM reports TOTAL tokens for the entire conversation, not per-call incremental tokens
+            # Our deduplication logic in record_llm_call_with_cost_silent should handle this properly
             token_tracker.record_llm_call_with_cost_silent(filename, input_tokens, output_tokens, turn_info, response_cost)
             
     except Exception as e:
@@ -455,6 +456,12 @@ class liteclient:
         self.ui = ConsoleManager()
         self.exec = ToolExecutor(self.registry, self.ui, self._on_tool_response)  # registry replaces toolkit
         self.schema = self.registry.generate_schema()  # registry replaces toolkit
+        # Debug: Show how many tools were loaded
+        if self.schema:
+            services = set(tool["function"].get("_service", "unknown") for tool in self.schema)
+            print(f"[DEBUG] Loaded {len(self.schema)} tools from services: {sorted(services)}")
+        else:
+            print("[DEBUG] Warning: No tools loaded in schema!")
         self.tool_loop_ast = None  # Will be set by execution context
 
     def _on_tool_response(self, tool_name: str, args_json: str, result: str):
@@ -592,6 +599,11 @@ class liteclient:
         model_name = op.get("model", self.model).lower()
         if not any(provider in model_name for provider in ["vertex", "gemini", "google"]):
             params["stream_options"] = {"include_usage": True}  # Enable usage tracking in streams
+        # Flag for Gemini/Vertex style models
+        gemini_like_model = any(k in model_name for k in ["gemini", "vertex", "google"])
+        # Track if we've already downgraded streaming for this call (generic, not just Gemini)
+        gemini_stream_downgraded = False  # kept for backward compatibility naming
+        streaming_downgraded = False      # new generic flag
 
         # Remove or fix unsupported params for O-series models (e.g., o4-mini)
         model_name = op.get("model", self.model)
@@ -618,15 +630,29 @@ class liteclient:
             filtered_schema = []
             
             for tool in self.schema:
-                tool_name = tool["function"]["name"]
-                
-                # Check if this tool has MCP metadata and matches the server name
-                if hasattr(self, 'registry') and self.registry:
-                    for manifest in self.registry._manifests:
-                        if (manifest.get("name") == tool_name and 
-                            manifest.get("_service", "").lower() == mcp_server_name.lower()):
-                            filtered_schema.append(tool)
-                            break
+                # Check if this tool matches the server name
+                tool_service = tool["function"].get("_service", "")
+                if tool_service.lower() == mcp_server_name.lower():
+                    # Clean the tool by removing internal metadata before sending to API
+                    clean_tool = {
+                        "type": "function",
+                        "function": {
+                            "name": tool["function"]["name"],
+                            "description": tool["function"]["description"],
+                            "parameters": tool["function"]["parameters"]
+                        }
+                    }
+                    filtered_schema.append(clean_tool)
+            
+            # Validate that tools were found when explicitly requested
+            if not filtered_schema:
+                available_services = set()
+                for tool in self.schema:
+                    service = tool["function"].get("_service", "unknown")
+                    available_services.add(service)
+                error_msg = f"No tools found for MCP service '{mcp_server_name}'. "
+                error_msg += f"Available services: {sorted(available_services)}"
+                raise ValueError(error_msg)
             
             params["tools"] = filtered_schema
             params["stream"] = True  # Enable streaming for tool calls too
@@ -644,13 +670,10 @@ class liteclient:
                             # MCP server filter
                             mcp_server_name = filter_item[4:]  # Remove the mcp/ prefix
                             
-                            # Check if this tool has MCP metadata and matches the server name
-                            if hasattr(self, 'registry') and self.registry:
-                                for manifest in self.registry._manifests:
-                                    if (manifest.get("name") == tool_name and 
-                                        manifest.get("_service", "").lower() == mcp_server_name.lower()):
-                                        should_include = True
-                                        break
+                            # Check if this tool matches the server name
+                            tool_service = tool["function"].get("_service", "")
+                            if tool_service.lower() == mcp_server_name.lower():
+                                should_include = True
                         else:
                             # Regular tool name filter
                             if tool_name == filter_item:
@@ -658,6 +681,17 @@ class liteclient:
                 
                 if should_include:
                     filtered_schema.append(tool)
+            
+            # Validate that tools were found when explicitly requested
+            if not filtered_schema:
+                requested_items = tools_param if isinstance(tools_param, list) else [tools_param]
+                requested_str = ", ".join(str(item) for item in requested_items)
+                available_tools = [tool["function"]["name"] for tool in self.schema]
+                available_services = set(tool["function"].get("_service", "unknown") for tool in self.schema)
+                error_msg = f"No tools found matching: {requested_str}. "
+                error_msg += f"Available tools: {len(available_tools)} tools from services: {sorted(available_services)}"
+                raise ValueError(error_msg)
+            
             params["tools"] = filtered_schema
             params["stream"] = True  # Enable streaming for tool calls too
         elif isinstance(tools_param, str):
@@ -666,6 +700,16 @@ class liteclient:
                 tool for tool in self.schema 
                 if tool["function"]["name"] == tools_param
             ]
+            
+            # Validate that tools were found when explicitly requested
+            if not filtered_schema:
+                available_tools = [tool["function"]["name"] for tool in self.schema]
+                error_msg = f"Tool '{tools_param}' not found. "
+                error_msg += f"Available tools: {available_tools[:10]}" if available_tools else "No tools available in registry."
+                if len(available_tools) > 10:
+                    error_msg += f" (and {len(available_tools) - 10} more)"
+                raise ValueError(error_msg)
+            
             params["tools"] = filtered_schema
             params["stream"] = True  # Enable streaming for tool calls too
 
@@ -730,70 +774,84 @@ class liteclient:
                     attempt = 0
                     last_exception = None
                     
+                    # Initialize variables that will be used after the retry loop
+                    content = ""
+                    tool_calls = []
+                    usage_info = None
+                    
                     while attempt <= max_retries:
                         try:
                             # Update metadata with current turn info for callback
                             turn_info = f"(turn {turn_count + 1}/{max_turns})" if max_turns > 1 else ""
                             params["metadata"]["turn_info"] = turn_info
-                            
                             rsp = completion(**params)
-                            
-                            # Use appropriate stream processor based on whether tools are available
                             usage_info = None
-                            if has_tools:
-                                # Use tool call stream processor for better tool call handling
-                                tcsp = ToolCallStreamProcessor(self.ui, params["stop"])
-                                stream_response, usage_info = tcsp.process(rsp)
-                                
-                                # Extract content and tool calls from the reconstructed message
-                                if hasattr(stream_response, 'choices') and stream_response.choices:
-                                    msg = stream_response.choices[0].message
-                                    content = msg.content or ""
-                                    tool_calls = msg.tool_calls or []
+                            if params.get("stream"):
+                                # Existing streaming path
+                                if has_tools:
+                                    tcsp = ToolCallStreamProcessor(self.ui, params["stop"])
+                                    stream_response, usage_info = tcsp.process(rsp)
+                                    if hasattr(stream_response, 'choices') and stream_response.choices:
+                                        msg = stream_response.choices[0].message
+                                        content = msg.content or ""
+                                        tool_calls = msg.tool_calls or []
+                                    else:
+                                        content = ""
+                                        tool_calls = []
                                 else:
-                                    content = ""
+                                    sp = StreamProcessor(self.ui, params["stop"])
+                                    content, usage_info = sp.process(rsp)
                                     tool_calls = []
                             else:
-                                # Use simple stream processor for content-only responses
-                                sp = StreamProcessor(self.ui, params["stop"])
-                                content, usage_info = sp.process(rsp)
-                                tool_calls = []
-                            
-                            # If we get here successfully, break out of retry loop
-                            break
-                            
+                                # Non-stream fallback path (graceful downgrade)
+                                if hasattr(rsp, 'usage') and rsp.usage:
+                                    usage_info = rsp.usage
+                                elif isinstance(rsp, dict) and rsp.get('usage'):
+                                    usage_info = rsp['usage']
+                                if hasattr(rsp, 'choices'):
+                                    choice0 = rsp.choices[0]
+                                    msg = getattr(choice0, 'message', None) or getattr(choice0, 'delta', None)
+                                elif isinstance(rsp, dict):
+                                    msg = (rsp.get('choices') or [{}])[0].get('message') or {}
+                                else:
+                                    msg = {}
+                                if isinstance(msg, dict):
+                                    content = msg.get('content') or ''
+                                    tool_calls = msg.get('tool_calls') or []
+                                else:
+                                    content = getattr(msg, 'content', '') or ''
+                                    tool_calls = getattr(msg, 'tool_calls', []) or []
+                                if content:
+                                    self.ui.show("", content)
+                            break  # Success
                         except Exception as e:
                             last_exception = e
                             attempt += 1
-                            
-                            # Check if this is a retryable streaming error
                             error_str = str(e).lower()
                             is_streaming_error = (
-                                "streaming error" in error_str or
+                                "stream" in error_str or
                                 "error parsing chunk" in error_str or
                                 "apiconnectionerror" in error_str or
+                                "jsondecodeerror" in error_str or
                                 "json.decoder.jsondecodeerror" in error_str
                             )
-                            
-                            if is_streaming_error and attempt <= max_retries:
+                            # Generic graceful downgrade: ANY failure on streaming path -> retry once non-stream
+                            if params.get("stream") and not streaming_downgraded:
+                                self.ui.error(f"Streaming attempt failed, retrying with streaming disabled: {e}")
+                                params["stream"] = False
+                                streaming_downgraded = True
+                                gemini_stream_downgraded = True  # maintain old flag semantics
+                                continue
+                            # If still streaming (shouldn't happen after downgrade) and we have retries left
+                            if params.get("stream") and is_streaming_error and attempt <= max_retries:
                                 self.ui.error(f"Streaming error (attempt {attempt}/{max_retries + 1}): {e}")
                                 import time
-                                time.sleep(1)  # Brief delay before retry
+                                time.sleep(1)
                                 continue
                             else:
-                                # Non-retryable error or max retries exceeded
+                                # Non-stream failure or no retries left
+                                self.ui.error(f"LLM call failed after downgrade (attempt {attempt}): {e}")
                                 break
-                    
-                    # If we exhausted retries, handle the final error
-                    if attempt > max_retries and last_exception:
-                        self.ui.error(f"Streaming error after {max_retries + 1} attempts: {last_exception}")
-                        error_partial = ""
-                        if 'tcsp' in locals():
-                            error_partial = tcsp.last_chunk
-                        elif 'sp' in locals():
-                            error_partial = sp.last_chunk
-                        raise self.LLMCallException(f"Streaming error after {max_retries + 1} attempts: {last_exception}", partial_result=error_partial) from last_exception
-                            
                 except TimeoutError as e:
                     self.ui.error("Streaming call timed out after 5 minutes")
                     error_partial = ""
