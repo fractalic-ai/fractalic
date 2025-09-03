@@ -599,6 +599,11 @@ class liteclient:
         model_name = op.get("model", self.model).lower()
         if not any(provider in model_name for provider in ["vertex", "gemini", "google"]):
             params["stream_options"] = {"include_usage": True}  # Enable usage tracking in streams
+        # Flag for Gemini/Vertex style models
+        gemini_like_model = any(k in model_name for k in ["gemini", "vertex", "google"])
+        # Track if we've already downgraded streaming for this call (generic, not just Gemini)
+        gemini_stream_downgraded = False  # kept for backward compatibility naming
+        streaming_downgraded = False      # new generic flag
 
         # Remove or fix unsupported params for O-series models (e.g., o4-mini)
         model_name = op.get("model", self.model)
@@ -779,65 +784,74 @@ class liteclient:
                             # Update metadata with current turn info for callback
                             turn_info = f"(turn {turn_count + 1}/{max_turns})" if max_turns > 1 else ""
                             params["metadata"]["turn_info"] = turn_info
-                            
                             rsp = completion(**params)
-                            
-                            # Use appropriate stream processor based on whether tools are available
                             usage_info = None
-                            if has_tools:
-                                # Use tool call stream processor for better tool call handling
-                                tcsp = ToolCallStreamProcessor(self.ui, params["stop"])
-                                stream_response, usage_info = tcsp.process(rsp)
-                                
-                                # Extract content and tool calls from the reconstructed message
-                                if hasattr(stream_response, 'choices') and stream_response.choices:
-                                    msg = stream_response.choices[0].message
-                                    content = msg.content or ""
-                                    tool_calls = msg.tool_calls or []
+                            if params.get("stream"):
+                                # Existing streaming path
+                                if has_tools:
+                                    tcsp = ToolCallStreamProcessor(self.ui, params["stop"])
+                                    stream_response, usage_info = tcsp.process(rsp)
+                                    if hasattr(stream_response, 'choices') and stream_response.choices:
+                                        msg = stream_response.choices[0].message
+                                        content = msg.content or ""
+                                        tool_calls = msg.tool_calls or []
+                                    else:
+                                        content = ""
+                                        tool_calls = []
                                 else:
-                                    content = ""
+                                    sp = StreamProcessor(self.ui, params["stop"])
+                                    content, usage_info = sp.process(rsp)
                                     tool_calls = []
                             else:
-                                # Use simple stream processor for content-only responses
-                                sp = StreamProcessor(self.ui, params["stop"])
-                                content, usage_info = sp.process(rsp)
-                                tool_calls = []
-                            
-                            # If we get here successfully, break out of retry loop
-                            break
-                            
+                                # Non-stream fallback path (graceful downgrade)
+                                if hasattr(rsp, 'usage') and rsp.usage:
+                                    usage_info = rsp.usage
+                                elif isinstance(rsp, dict) and rsp.get('usage'):
+                                    usage_info = rsp['usage']
+                                if hasattr(rsp, 'choices'):
+                                    choice0 = rsp.choices[0]
+                                    msg = getattr(choice0, 'message', None) or getattr(choice0, 'delta', None)
+                                elif isinstance(rsp, dict):
+                                    msg = (rsp.get('choices') or [{}])[0].get('message') or {}
+                                else:
+                                    msg = {}
+                                if isinstance(msg, dict):
+                                    content = msg.get('content') or ''
+                                    tool_calls = msg.get('tool_calls') or []
+                                else:
+                                    content = getattr(msg, 'content', '') or ''
+                                    tool_calls = getattr(msg, 'tool_calls', []) or []
+                                if content:
+                                    self.ui.show("", content)
+                            break  # Success
                         except Exception as e:
                             last_exception = e
                             attempt += 1
-                            
-                            # Check if this is a retryable streaming error
                             error_str = str(e).lower()
                             is_streaming_error = (
-                                "streaming error" in error_str or
+                                "stream" in error_str or
                                 "error parsing chunk" in error_str or
                                 "apiconnectionerror" in error_str or
+                                "jsondecodeerror" in error_str or
                                 "json.decoder.jsondecodeerror" in error_str
                             )
-                            
-                            if is_streaming_error and attempt <= max_retries:
+                            # Generic graceful downgrade: ANY failure on streaming path -> retry once non-stream
+                            if params.get("stream") and not streaming_downgraded:
+                                self.ui.error(f"Streaming attempt failed, retrying with streaming disabled: {e}")
+                                params["stream"] = False
+                                streaming_downgraded = True
+                                gemini_stream_downgraded = True  # maintain old flag semantics
+                                continue
+                            # If still streaming (shouldn't happen after downgrade) and we have retries left
+                            if params.get("stream") and is_streaming_error and attempt <= max_retries:
                                 self.ui.error(f"Streaming error (attempt {attempt}/{max_retries + 1}): {e}")
                                 import time
-                                time.sleep(1)  # Brief delay before retry
+                                time.sleep(1)
                                 continue
                             else:
-                                # Non-retryable error or max retries exceeded
+                                # Non-stream failure or no retries left
+                                self.ui.error(f"LLM call failed after downgrade (attempt {attempt}): {e}")
                                 break
-                    
-                    # If we exhausted retries, handle the final error
-                    if attempt > max_retries and last_exception:
-                        self.ui.error(f"Streaming error after {max_retries + 1} attempts: {last_exception}")
-                        error_partial = ""
-                        if 'tcsp' in locals():
-                            error_partial = tcsp.last_chunk
-                        elif 'sp' in locals():
-                            error_partial = sp.last_chunk
-                        raise self.LLMCallException(f"Streaming error after {max_retries + 1} attempts: {last_exception}", partial_result=error_partial) from last_exception
-                            
                 except TimeoutError as e:
                     self.ui.error("Streaming call timed out after 5 minutes")
                     error_partial = ""
