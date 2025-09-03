@@ -1,8 +1,8 @@
 # fractalic: excluding settings.toml file
 settings.toml
 
-# Tutorials and examples (user-generated content)
-# tutorials/
+# Tutorials and examples (user-generated content) - COMPLETELY EXCLUDED
+tutorials/
 *.ctx
 *.trc
 .gitignore
