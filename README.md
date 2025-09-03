@@ -4,6 +4,48 @@
 
 Program AI in plain language (any language). That's it.
 
+## 🧪 Diff Formatting Test
+
+Testing GitHub's diff syntax highlighting capabilities:
+
+### Code Changes Example
+```diff
+@@ FastMCP SDK v2 Migration @@
+- Old MCP implementation with slow performance
++ New FastMCP SDK v2 with 280x performance improvement
++ OAuth 2.0 integration with automatic token refresh
++ Intelligent caching system for tool retrieval
+```
+
+### Configuration Changes
+```diff
+# mcp_servers.json
+{
+-  "old_server": {
+-    "command": "legacy_mcp_server"
+-  }
++  "fastmcp_server": {
++    "command": "python",
++    "args": ["mcp_manager/fastmcp_manager.py"],
++    "oauth": true,
++    "caching": true
++  }
+}
+```
+
+### API Endpoints Comparison
+```diff
+# Before v0.1.0
+- GET /tools           # Slow, no caching
+- POST /call/{tool}    # Basic tool calling
+
+# After v0.1.0  
++ GET /tools/{service}  # Fast, cached responses
++ POST /toggle/{service} # Service management
++ GET /status?include_tools_info=true # Enhanced status
++ WebSocket /ws/stream  # Real-time streaming
+```
+
 ![alt text](<docs/images/fractalic_hero.png>)
 
 ## Vision 🚀
