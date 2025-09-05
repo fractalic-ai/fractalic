@@ -24,48 +24,47 @@ import warnings
 from core.plugins.tool_registry import ToolRegistry    # NEW import
 from .rich_formatter import RichFormatter              # Rich functionality moved here
 from core.simple_token_tracker import token_tracker   # Simple token tracking
+import litellm  # ensure available for token_counter
+
+# Cache for tool schema token counts: {(model, tool_hash): token_count}
+_TOOL_SCHEMA_TOKEN_CACHE = {}
 
 # Custom callback for token and cost tracking
+# NOTE: Heuristic tool-schema augmentation removed per request – now records raw LiteLLM numbers only.
 def fractalic_cost_callback(kwargs, completion_response, start_time, end_time):
-    """Custom LiteLLM callback to capture actual token usage and costs"""
     try:
-        # Get actual cost from LiteLLM (may be None or missing)
         response_cost = kwargs.get("response_cost") or 0.0
-        
-        # Get usage data from response
-        usage = completion_response.usage if hasattr(completion_response, 'usage') else None
-        if usage:
-            input_tokens = usage.prompt_tokens
-            output_tokens = usage.completion_tokens
-            # Get filename from operation context - try multiple sources
-            filename = "unknown"
-            turn_info = ""
-            
-            # Try metadata first
-            metadata = kwargs.get("metadata", {})
-            if metadata:
-                filename = metadata.get("filename", filename)
-                turn_info = metadata.get("turn_info", turn_info)
-            
-            # Try litellm_params as backup
-            if filename == "unknown":
-                litellm_params = kwargs.get("litellm_params", {})
-                if "metadata" in litellm_params:
-                    metadata = litellm_params["metadata"]
-                    filename = metadata.get("filename", filename)
-                    turn_info = metadata.get("turn_info", turn_info)
-            
-            # Capture the model being used
-            model = kwargs.get("model", "unknown")
-            token_tracker.current_model = model
-            
-            # Record in token tracker with actual cost but WITHOUT display (we'll show it at the right time)
-            # NOTE: LiteLLM reports TOTAL tokens for the entire conversation, not per-call incremental tokens
-            # Our deduplication logic in record_llm_call_with_cost_silent should handle this properly
-            token_tracker.record_llm_call_with_cost_silent(filename, input_tokens, output_tokens, turn_info, response_cost)
-            
-    except Exception as e:
-        # Don't break execution if callback fails
+        usage = getattr(completion_response, 'usage', None)
+        if not usage:
+            return
+
+        reported_input_tokens = getattr(usage, 'prompt_tokens', 0)
+        reported_output_tokens = getattr(usage, 'completion_tokens', 0)
+
+        filename = "unknown"
+        turn_info = ""
+        metadata = kwargs.get("metadata", {}) or {}
+        if metadata:
+            filename = metadata.get("filename", filename)
+            turn_info = metadata.get("turn_info", turn_info)
+        if filename == "unknown":
+            litellm_params = kwargs.get("litellm_params", {}) or {}
+            meta2 = litellm_params.get("metadata") or {}
+            filename = meta2.get("filename", filename)
+            turn_info = meta2.get("turn_info", turn_info)
+
+        model = kwargs.get("model", "unknown")
+        token_tracker.current_model = model
+
+        # Record raw numbers (no heuristic adjustments)
+        token_tracker.record_llm_call_with_cost_silent(
+            filename,
+            reported_input_tokens,
+            reported_output_tokens,
+            turn_info,
+            response_cost
+        )
+    except Exception:
         pass
 
 # Set our custom callback
