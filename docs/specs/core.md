@@ -152,6 +152,7 @@ Here's a detailed look at each standard Fractalic operation:
     | `stop-sequences` | No | List[String] | List of strings where the model should stop generation (for Anthropic models it maps to `stop_sequences` parameter). | - |
     | `tools` | No | String/Array | Specify which tools to use: 'none' for no tools (default), 'all' for all tools, an array of specific tool names, or an array mixing tool names and '@mcpname' patterns to include all tools from specific MCP servers (e.g., ['tool1', '@playwright-mcp', 'tool2']). When set to 'none', streaming mode is automatically enabled. | "none" |
     | `tools-turns-max` | No | Integer | Maximum number of tool calls allowed for this @llm operation. If set, overrides the default or global tool call limit for this operation only. | - |
+    | `context` | No | String (auto\|none) | Controls implicit preceding-context injection when only `prompt` is provided. `auto` (default) includes preceding blocks/headings; `none` disables adding any preceding context so only the literal `prompt` (and any explicit `block` content if supplied) is sent. | `auto` |
 *   **Constraint:** You must provide *at least one* of `prompt` or `block`.
 *   **Example:**
     ```yaml
@@ -169,6 +170,7 @@ Here's a detailed look at each standard Fractalic operation:
     2.  **Assemble Prompt Content:** Determines the content to send to the LLM based on the `prompt` and `block` parameters:
         *   **`block` only:** Retrieves the content of the specified block(s) from the current AST. This content *alone* forms the prompt context provided to the LLM.
         *   **`prompt` only:** Retrieves the content of *all blocks preceding the `@llm` operation* in the current AST. This accumulated preceding content is provided as context, followed by the literal `prompt` text.
+        *   **`prompt` only + `context: none`:** Skips implicit preceding content; only the literal `prompt` text is sent.
         *   **Both `block` and `prompt`:** Retrieves the content of the specified `block`(s) from the current AST. This specific block content is provided as context, followed by the literal `prompt` text.
     3.  **Prepare API Call:** Identifies the LLM provider, model, and temperature (using defaults or the provided overrides). Includes any specified `media` file references.
     4.  **Call LLM:** Sends the assembled prompt content (and media, if applicable) to the designated LLM API.

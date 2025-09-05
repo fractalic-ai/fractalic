@@ -130,6 +130,11 @@ operations:
       tools-turns-max:
         type: integer
         description: "Maximum number of tool calls allowed for this @llm operation. If set, overrides the default or global tool call limit for this operation only."
+      context:
+        type: string
+        enum: ["auto", "none"]
+        default: "auto"
+        description: "Context assembly mode: auto (default) includes preceding blocks when only prompt is provided; none disables implicit preceding-context injection."
     anyOf:
       - required: ["prompt"]
       - required: ["block"]

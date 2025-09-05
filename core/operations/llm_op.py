@@ -323,6 +323,7 @@ def process_llm(ast: AST, current_node: Node, call_tree_node=None, committed_fil
     params = current_node.params or {}
     prompt = params.get('prompt')
     block_params = params.get('block', {})
+    context_mode = params.get('context', 'auto')  # new context control
 
     # New optional field
     model = params.get('model')
@@ -434,16 +435,16 @@ def process_llm(ast: AST, current_node: Node, call_tree_node=None, committed_fil
 
     # Add context if no blocks are explicitly specified 
     elif prompt:
-        # Keep existing prompt_parts logic
-        context = get_previous_headings(current_node)
-        if context:
-            prompt_parts.append(context)
+        # Only add implicit preceding context when context_mode != 'none'
+        if context_mode != 'none':
+            context = get_previous_headings(current_node)
+            if context:
+                prompt_parts.append(context)
             
-        # Add heading messages  
-        heading_messages = get_previous_heading_messages(current_node)
-        messages.extend(heading_messages)
-        # if Config.DEBUG and heading_messages:
-        #    console.print(f"[yellow]Added {len(heading_messages)} previous heading messages[/yellow]")
+            # Add heading messages  
+            heading_messages = get_previous_heading_messages(current_node)
+            messages.extend(heading_messages)
+        # else: skip adding any preceding context
 
     # Add prompt if specified (always last)
     if prompt:
