@@ -11,7 +11,7 @@ Legend: [v] completed / migrated, [x] pending migration, [~] in progress
 - [v] 6. Advanced LLM Features (`advanced-llm-features.md`)
 - [v] 7. Context Management (`context-management.md`)
 - [v] 8. File & Import Semantics (`file-import-semantics.md`)
-- [x] 9. Shell Integration Patterns
+- [v] 9. Shell Integration Patterns (`shell-integration-patterns.md`)
 - [x] 10. Agent & Modular Workflows
 - [x] 11. Configuration
 - [x] 12. MCP Integration
@@ -34,7 +34,7 @@ Legend: [v] completed / migrated, [x] pending migration, [~] in progress
 - [Advanced LLM Features](advanced-llm-features.md)
 - [Context Management](context-management.md)
 - [File & Import Semantics](file-import-semantics.md)
-- Shell Integration Patterns (pending file)
+- [Shell Integration Patterns](shell-integration-patterns.md)
 - Agent & Modular Workflows (pending file)
 - Configuration (pending file)
 - MCP Integration (pending file)
