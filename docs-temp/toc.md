@@ -8,8 +8,8 @@ Legend: [v] completed / migrated, [x] pending migration, [~] in progress
 - [v] 3. Core Concepts (`core-concepts.md`)
 - [v] 4. Syntax Reference (`syntax-reference.md`)
 - [v] 5. Operations Reference (`operations-reference.md`)
-- [x] 6. Advanced LLM Features
-- [x] 7. Context Management
+- [v] 6. Advanced LLM Features (`advanced-llm-features.md`)
+- [v] 7. Context Management (`context-management.md`)
 - [x] 8. File & Import Semantics
 - [x] 9. Shell Integration Patterns
 - [x] 10. Agent & Modular Workflows
@@ -31,8 +31,8 @@ Legend: [v] completed / migrated, [x] pending migration, [~] in progress
 - [Core Concepts](core-concepts.md)
 - [Syntax Reference](syntax-reference.md)
 - [Operations Reference](operations-reference.md)
-- Advanced LLM Features (pending file)
-- Context Management (pending file)
+- [Advanced LLM Features](advanced-llm-features.md)
+- [Context Management](context-management.md)
 - File & Import Semantics (pending file)
 - Shell Integration Patterns (pending file)
 - Agent & Modular Workflows (pending file)

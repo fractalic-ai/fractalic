@@ -65,9 +65,8 @@ Forms:
 - Multiple via array:
 ```yaml
 block:
-  block_uri:
-    - research/*
-    - constraints
+  - research/*
+  - decisions
 ```
 Notes: Order preserved; forward references allowed; missing block → error.
 
@@ -133,9 +132,8 @@ Multiple blocks:
 @llm
 prompt: "Compare the two sections."
 block:
-  block_uri:
-    - old-version/*
-    - new-version/*
+  - old-version/*
+  - new-version/*
 ```
 
 ## 4.9 Common Pitfalls

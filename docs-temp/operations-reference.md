@@ -55,9 +55,8 @@ Prompt + blocks (blocks concatenated first, then prompt):
 @llm
 prompt: "Compare the two alternatives above and recommend one."
 block:
-  block_uri:
-    - option-a/*
-    - option-b/*
+  - option-a/*
+  - option-b/*
 ```
 Raw JSON output (no wrapper heading):
 ```markdown
@@ -262,9 +261,8 @@ With block inputs:
 @run
 file: agents/merge.md
 block:
-  block_uri:
-    - draft-a/*
-    - draft-b/*
+  - draft-a/*
+  - draft-b/*
 use-header: "# Unified Draft"
 ```
 Requires callee to contain an `@return` for deterministic output.
@@ -335,8 +333,10 @@ Initial text.
 @llm
 prompt: "Improve clarity of draft above."
 block:
-  block_uri: draft
+  draft
 mode: replace
+to:
+  block_uri: draft  # Explicit in-place refinement target
 ```
 Test then summarize:
 ```markdown

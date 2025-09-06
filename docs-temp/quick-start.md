@@ -86,4 +86,4 @@ use-header: "# Verification"
 | Port already in use | Existing process | Free port / change config |
 
 ## 2.9 Next Steps
-Proceed to Core Concepts for deeper mental model.
+Proceed to Core Concepts for deeper foundational understanding.

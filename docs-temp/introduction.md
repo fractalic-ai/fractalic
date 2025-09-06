@@ -3,7 +3,7 @@
 ### What is Fractalic?
 Fractalic is a plain‑language programming environment for building AI workflows and agents using ordinary Markdown plus lightweight YAML operation blocks. Instead of wiring nodes in a UI or writing imperative Python scripts, you express intent in structured text. Fractalic interprets your document as a living execution context: headings become knowledge blocks; special `@operation` blocks perform actions (LLM calls, shell commands, imports, executing sub‑workflows, returning results). The document evolves as operations run—new blocks are appended, replaced, or refined—so you can literally “grow” an AI system the way you draft a document.
 
-Key mental model: A Fractalic file = (Ordered Knowledge Blocks) + (Operation Blocks that transform / extend context) → Final Returned Result.
+Key idea: A Fractalic file = (Ordered Knowledge Blocks) + (Operation Blocks that transform / extend context) → Final Returned Result.
 
 ### Core Philosophy (Plain-Language Programming, Context as a First-Class Object)
 Below each guiding principle you get a tiny, copyable example.
@@ -52,6 +52,8 @@ Initial placeholder.
 prompt: "Summarize key risks."
 use-header: "# Risk Summary"
 mode: append
+to:
+  block_uri: analysis
 ```
 Append keeps the original; `replace` would overwrite `# Analysis` content.
 
