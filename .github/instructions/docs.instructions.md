@@ -1,3 +1,7 @@
+---
+applyTo: "docs/**/*.md,docs-temp/**/*.md"
+description: "Fractalic documentation authoring constraints"
+---
 # Fractalic Documentation Authoring Guide
 
 This guide defines how to write, structure, and format Fractalic documentation.
