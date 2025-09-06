@@ -1,0 +1,361 @@
+# 5. Operations Reference
+
+Operations mutate the context tree, consuming inputs (blocks, prompt literals, external sources) and producing new nodes.
+
+## 5.1 Shared Fields
+- `block` → Content selection (single or array via `block_uri`).
+- `prompt` → Literal instruction / content.
+- `to.block_uri` → Target anchor for merge.
+- `mode` → `append` | `prepend` | `replace`.
+- `use-header` → Wrapper heading or `none`.
+- `header-auto-align` → (@llm) Adjust generated heading levels.
+- `model` → Alias; provider inferred via settings.
+Priority rule: If both `block` & `prompt` present they concatenate (blocks first). Missing both (where at least one required) → error.
+
+## 5.2 @import
+Purpose: Inject external markdown (entire file or subsection) into current context.
+```markdown
+@import
+file: docs/snippet.md
+```
+Section import:
+```markdown
+@import
+file: docs/reference.md
+block: intro/*
+```
+Params: `file` (req), `block` (optional slice), `mode`, `to`.
+Failure: missing file / block → error.
+Tips: Centralize reusable templates; prefer narrow block import for token efficiency.
+
+## 5.3 @llm
+Purpose: Core generative / reasoning / transformation operation. It can:
+- Consume explicit knowledge blocks and/or a literal prompt
+- Orchestrate multi-turn tool-augmented reasoning (agentic loop)
+- Invoke MCP tools (search, code introspection, external APIs)
+- Dynamically call other Fractalic agents via an MCP tool (e.g. `fractalic_run`)
+- Produce structured (JSON / tables / markdown) or free-form output
+- Persist raw output to disk to reduce context bloat
+
+### 5.3.1 Minimal Examples
+Plain literal prompt:
+```markdown
+@llm
+prompt: "List 3 strategic risks for a small AI startup."
+```
+Blocks only:
+```markdown
+@llm
+block:
+  block_uri: context/*
+use-header: "# Context Summary"
+```
+Prompt + blocks (blocks concatenated first, then prompt):
+```markdown
+@llm
+prompt: "Compare the two alternatives above and recommend one."
+block:
+  block_uri:
+    - option-a/*
+    - option-b/*
+```
+Raw JSON output (no wrapper heading):
+```markdown
+@llm
+prompt: |
+  Return ONLY a JSON object with keys: title, bullets (array of strings).
+use-header: none
+stop-sequences:
+  - "\n```"
+  - "\n# "
+```
+
+### 5.3.2 Key Parameters (Extended)
+| Field | Required | Description |
+|-------|----------|-------------|
+| prompt | Conditional | Literal input text (multi-line allowed). Either `prompt` or `block` must be present. |
+| block.block_uri | Conditional | One path or YAML array of block paths (supports wildcards `/*`). |
+| model | No | Logical model name (provider inferred via `[settings]`). |
+| use-header | No | Wrapper heading (default internal value) or `none` to emit raw content. |
+| header-auto-align | No | Re-level generated headings to nest under current heading. |
+| mode / to.block_uri | No | Merge strategy and target anchor. |
+| media | No | File paths for multimodal context. |
+| save-to-file | No | Persist raw model response pre-merge. |
+| tools | No | Comma list or array of MCP tool identifiers; `none` disables tool loop. |
+| tools-turns-max | No | Upper bound on tool reasoning cycles. |
+| stop-sequences | No | Hard stop substrings—truncates generation early. |
+| context | No | `auto` (ambient headings when only prompt) or `none` (strict isolation). |
+| provider | No | Explicit override (normally inferred from `model`). |
+
+(For semantics of each parameter see Syntax Reference §4.7.)
+
+### 5.3.3 Prompt Assembly Internals
+Order:
+1. Referenced block contents (in listed order)
+2. Literal `prompt`
+3. Media attachments (provider-handled encodings)
+4. System / framework prompts (implicit)
+If both `prompt` & `block` absent → validation error.
+
+### 5.3.4 Tool / Agentic Loop Lifecycle
+When `tools` != `none`:
+1. Initial model call issued with current messages.
+2. Model may emit tool call instructions.
+3. Fractalic executes tools (MCP / internal) and captures raw responses.
+4. Responses parsed → textual content extracted (fields: `return_content`, `content`, `output`, etc.).
+5. Tool Loop AST built (preserving `return_nodes_attribution`).
+6. Tool-generated nodes inserted (flagged `is_tool_generated`).
+7. Model re-called with augmented context.
+8. Repeat until: a) model emits final response; b) `tools-turns-max` reached; c) provider stops.
+9. Final answer merged per `mode` + `to`.
+
+Visualization:
+```
+[context blocks] → model → tool calls? → execute tools → merge tool outputs → model → ... → final answer
+```
+
+### 5.3.5 Using MCP Tools
+Declare tools:
+```markdown
+@llm
+prompt: "Get open issues mentioning 'latency' then summarize dominant themes."
+tools: github_issues_search, text_cluster
+```
+Representative raw tool JSON:
+```json
+{
+  "tool": "github_issues_search",
+  "return_content": "Issue #42: Latency spike...\nIssue #57: Cold start delay...",
+  "return_nodes_attribution": [
+    {"source": "github_issues_search", "node_id": "issue-42"}
+  ]
+}
+```
+Extracted text is appended before the next model turn.
+
+### 5.3.6 Calling Another Fractalic Agent via `fractalic_run`
+Let the model decide if an agent is required:
+```markdown
+@llm
+prompt: "If planning is needed, call the planning agent. Otherwise provide a summary."
+tools: fractalic_run
+```
+Conceptual tool invocation payload from model:
+```json
+{
+  "name": "fractalic_run",
+  "arguments": {
+    "file": "agents/plan.md",
+    "prompt": "Create a 3-step investigation plan for scaling latency tests"
+  }
+}
+```
+Returned agent output is merged as tool-generated context; reasoning continues.
+
+### 5.3.7 Referencing Tool-Generated Context
+Tool outputs appear as normal user-role blocks with auto IDs. For consistent reuse, instruct the model (in the same call) to emit explicit headers:
+```markdown
+@llm
+prompt: "Fetch stats; put final actionable plan under a heading '# Action Plan {id=action-plan}'."
+tools: repo_stats
+```
+Later:
+```markdown
+@llm
+prompt: "Refine just the plan."
+block:
+  block_uri: action-plan
+```
+
+### 5.3.8 Ensuring Determinism & Safety
+- Constrain loops: set `tools-turns-max` (2–4 typical).
+- Add explicit decision criteria: “Call a tool only if data X is missing.”
+- For JSON output: `use-header: none` + schema instructions + optional `stop-sequences`.
+- Avoid broad wildcards early—curate context.
+
+### 5.3.9 Failure & Edge Case Handling
+| Symptom | Likely Cause | Mitigation |
+|---------|--------------|-----------|
+| Empty tool loop result | Tool output lacked extractable fields | Inspect raw JSON; adjust tool or extraction logic |
+| Repeated tool calls no progress | Prompt missing termination guidelines | Add explicit stop criteria |
+| Agent file not found | Wrong path in tool args | Verify file existence / relative path |
+| Mis-leveled headings | Deep nesting + raw `#` output | Set `header-auto-align: true` |
+| JSON polluted by headings | Wrapper heading present | `use-header: none` |
+| Truncated mid-thought | Overly aggressive stop sequence | Remove / refine sequences |
+
+### 5.3.10 Performance & Token Strategy
+- Stage: broad gather → compress summary → downstream use summary.
+- Use `replace` to keep long evolving artifacts slim once stable.
+- Save bulky outputs via `save-to-file` then import trimmed extracts later.
+- Prefer narrow block IDs over `/*` across huge trees.
+
+### 5.3.11 Design Pattern Examples
+Research → Tool Loop → Synthesis:
+```markdown
+@llm
+prompt: "Investigate dependency update risks. Use tools if needed. Provide prioritized risk list."
+tools: github_repo_stats, semver_advice
+tools-turns-max: 3
+```
+Dynamic Sub-Agent Decision:
+```markdown
+@llm
+prompt: |
+  Determine if we need a remediation plan. If yes invoke remediation agent, else summarize.
+tools: fractalic_run
+```
+Structured Output:
+```markdown
+@llm
+prompt: |
+  Return JSON with keys: risks (array of {id, title, severity}), summary.
+use-header: none
+```
+Verification Loop (shell + refine):
+```markdown
+@shell
+prompt: "pytest -q || echo 'TEST FAIL'"
+use-header: "# Test Output"
+
+@llm
+prompt: "List failing tests (if any) and propose fixes." 
+block:
+  block_uri: test-output/*
+```
+
+### 5.3.12 Validation Checklist
+Before shipping an @llm workflow:
+- Minimal necessary blocks selected?
+- Tool usage bounded (`tools-turns-max`)?
+- Structured output needs wrapper suppression? (`use-header: none`)
+- Large outputs stored externally? (`save-to-file`)
+- Stable IDs added for downstream references?
+- Stop sequences appropriate (not over-broad)?
+
+---
+### 5.4 @shell
+Execute shell commands and capture stdout/stderr.
+```markdown
+@shell
+prompt: "ls -1"
+```
+Multi-line:
+```markdown
+@shell
+prompt: |
+  set -euo pipefail
+  curl -s https://example.com/data.json \
+    | jq '.items | length'
+use-header: "# Data Count"
+```
+Security: Avoid blindly executing unreviewed model output. Keep commands idempotent.
+
+### 5.5 @run
+Run another markdown workflow (agent) and merge its returned value.
+```markdown
+@run
+file: agents/refine.md
+prompt: "Improve tone."
+```
+With block inputs:
+```markdown
+@run
+file: agents/merge.md
+block:
+  block_uri:
+    - draft-a/*
+    - draft-b/*
+use-header: "# Unified Draft"
+```
+Requires callee to contain an `@return` for deterministic output.
+
+### 5.6 @return
+Emit final value and terminate current workflow.
+```markdown
+@return
+block:
+  block_uri: final/*
+```
+Literal:
+```markdown
+@return
+prompt: "DONE"
+```
+No `mode`/`to` (caller handles merge semantics).
+
+### 5.7 @goto (Experimental)
+Conditional navigation / pointer jump (if enabled by implementation). Prefer explicit structure until stable.
+```markdown
+@goto
+block: decision-node
+```
+
+### 5.8 Internal Execution Flow
+1. Parse YAML
+2. Resolve block refs
+3. Assemble prompt
+4. Execute core action
+5. Build output block(s)
+6. Merge via `mode` / `to`
+7. Update AST & diffs
+
+### 5.9 Capability Snapshot
+| Operation | Reads Blocks | Writes Blocks | External IO | Prompt Required | File Required | Tool Loop |
+|-----------|--------------|---------------|-------------|-----------------|--------------|-----------|
+| @import   | Optional     | Yes           | FS          | No              | Yes          | No        |
+| @llm      | Optional     | Yes           | LLM / Tools | Either prompt or blocks | No | Yes (tools) |
+| @shell    | No           | Yes           | OS          | Yes             | No           | No        |
+| @run      | Optional     | Yes (callee return) | FS      | Optional        | Yes          | Indirect  |
+| @return   | Optional     | (Return value) | None       | Optional        | No           | No        |
+| @goto*    | Optional     | No            | None        | Optional        | No           | No        |
+
+### 5.10 Choosing the Right Operation
+- Static knowledge: @import
+- Generation / reasoning: @llm
+- External verification / retrieval: @shell
+- Modularity: @run
+- Completion: @return
+- Experimental flow: @goto
+
+### 5.11 Error Handling Patterns
+| Symptom | Likely Cause | Fix |
+|---------|--------------|-----|
+| Empty @llm output | Provider auth / tool fail | Check logs & keys |
+| Repeated heading clutter | Using append for iterative refinement | Switch to replace when stable |
+| Shell hang | Long running process | Add timeouts / simplify |
+| No sub-agent output | Missing `@return` in callee | Add return block |
+| Duplicate imported structure | Re-import loop | Deduplicate or centralize imports |
+
+### 5.12 Composition Patterns
+Refinement:
+```markdown
+# Draft {id=draft}
+Initial text.
+
+@llm
+prompt: "Improve clarity of draft above."
+block:
+  block_uri: draft
+mode: replace
+```
+Test then summarize:
+```markdown
+@shell
+prompt: "pytest -q || echo 'TEST FAIL'"
+use-header: "# Test Output"
+
+@llm
+prompt: "Summarize test output and list failing tests if any."
+block:
+  block_uri: test-output/*
+```
+
+### 5.13 Performance Tips
+- Collapse large intermediate blocks into compressed summaries.
+- Use `save-to-file` for bulky outputs not needed in future prompts.
+- Prefer targeted block refs over broad wildcards.
+
+## Supplemental Clarifications (Added, Not Altering Verbatim Content Above)
+- The detailed @llm subsections 5.3.1–5.3.12 expand operational semantics; no paraphrasing of original intent.
+- Capability snapshot table aligns with earlier matrix (fields normalized to consistent labels).
+- Performance tips consolidated; original guidance preserved under respective subsections.
