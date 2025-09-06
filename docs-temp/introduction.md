@@ -36,8 +36,7 @@ List the core must‑have features.
 prompt: "Create an outline using only the requirements."
 block:
   block_uri: reqs
-to:
-  block_uri: draft
+to: draft
 mode: replace
 ```
 The model never sees future sections you haven’t referenced.
@@ -52,8 +51,7 @@ Initial placeholder.
 prompt: "Summarize key risks."
 use-header: "# Risk Summary"
 mode: append
-to:
-  block_uri: analysis
+to: analysis
 ```
 Append keeps the original; `replace` would overwrite `# Analysis` content.
 

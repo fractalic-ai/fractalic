@@ -335,8 +335,7 @@ prompt: "Improve clarity of draft above."
 block:
   draft
 mode: replace
-to:
-  block_uri: draft  # Explicit in-place refinement target
+to: draft  # In-place refinement target
 ```
 Test then summarize:
 ```markdown

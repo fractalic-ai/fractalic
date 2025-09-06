@@ -138,7 +138,9 @@ Inline Summarization Pattern:
 prompt: |
   Use tools only if data missing.
   After each tool result: update '# Data Summary {id=data-summary}' (<=80 tokens). Discard raw bulk.
-tools: repo_stats, issue_search
+tools:
+  - repo_stats
+  - issue_search
 tools-turns-max: 2
 ```
 Result: One compact summary instead of accumulating raw clutter.
@@ -206,10 +208,9 @@ Refine while preserving structure:
 @llm
 prompt: "Improve tone. Keep bullet order & counts."
 block:
-  block_uri: exec-summary
+  exec-summary
 mode: replace
-to:
-  block_uri: exec-summary
+to: exec-summary
 ```
 
 ## 7.12 Quick Checklist (Before Big Run)
@@ -294,7 +295,9 @@ Prompt Pattern (embedded distillation):
 prompt: |
   Use tools only if a fact is missing.
   After each tool call: update '# Source Notes {id=source-notes}' with concise bullet facts (no duplicates). Remove the raw bulk.
-tools: repo_stats, issue_search
+tools:
+  - repo_stats
+  - issue_search
 tools-turns-max: 3
 ```
 Outcome: A single evolving curated block instead of a pile of raw fragments.

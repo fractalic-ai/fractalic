@@ -38,8 +38,7 @@ prompt: "Refine ONLY the plan keeping step count fixed. Improve clarity only."
 block:
   - plan-v1/*
 mode: replace
-to:
-  block_uri: plan-v1  # Explicitly target same block for in-place refinement
+to: plan-v1  # In-place refinement
 ```
 
 ---
@@ -87,7 +86,8 @@ Router Decision Example:
 @llm
 prompt: |
   Decide: if task mentions "deploy" run deploy agent else run default agent. Respond with JUST the agent call arguments.
-tools: fractalic_run
+tools:
+  - fractalic_run
 ```
 
 ---
