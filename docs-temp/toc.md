@@ -10,7 +10,7 @@ Legend: [v] completed / migrated, [x] pending migration, [~] in progress
 - [v] 5. Operations Reference (`operations-reference.md`)
 - [v] 6. Advanced LLM Features (`advanced-llm-features.md`)
 - [v] 7. Context Management (`context-management.md`)
-- [x] 8. File & Import Semantics
+- [v] 8. File & Import Semantics (`file-import-semantics.md`)
 - [x] 9. Shell Integration Patterns
 - [x] 10. Agent & Modular Workflows
 - [x] 11. Configuration
@@ -33,7 +33,7 @@ Legend: [v] completed / migrated, [x] pending migration, [~] in progress
 - [Operations Reference](operations-reference.md)
 - [Advanced LLM Features](advanced-llm-features.md)
 - [Context Management](context-management.md)
-- File & Import Semantics (pending file)
+- [File & Import Semantics](file-import-semantics.md)
 - Shell Integration Patterns (pending file)
 - Agent & Modular Workflows (pending file)
 - Configuration (pending file)
