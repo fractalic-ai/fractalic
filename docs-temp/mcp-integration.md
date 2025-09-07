@@ -158,7 +158,9 @@ The manager uses short-lived connections per call to avoid resource accumulation
 - Automatic token refresh when expired
 - Graceful fallback when authentication fails
 
-OAuth tokens are persisted in the FastMCP client cache directory (`~/.fastmcp/oauth-mcp-client-cache/`) in your user home directory. Files are keyed by the OAuth server's base URL. This cache is shared across all applications using FastMCP and persists between application runs.
+**Important for Docker Deployments**: OAuth tokens are stored in the user's home directory (`~/.fastmcp/oauth-mcp-client-cache/`) by default. This creates a deployment challenge because Docker containers don't have access to your local OAuth tokens. Currently, FastMCP does not provide a configuration option to change this cache directory location. This means OAuth-enabled MCP services will require re-authentication each time a Docker container starts fresh.
+
+For production deployments, consider using MCP services with embedded authentication tokens in URLs rather than OAuth flows, or ensure OAuth token persistence through Docker volume mounts if needed.
 
 **Service Status**: The manager provides real-time status through `/status/complete` endpoint, showing which services are connected, tool counts, and any errors.
 
