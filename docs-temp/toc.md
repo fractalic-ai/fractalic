@@ -16,7 +16,7 @@ Legend: [v] completed / migrated, [x] pending migration, [~] in progress
 - [v] 11. Configuration (`configuration.md`)
 - [v] 12. MCP Integration (`mcp-integration.md`)
 - [v] 13. Git-Backed Sessions (`git-backed-sessions.md`)
-- [x] 14. UI Server & API
+- [v] 14. UI Server & API (`ui-server-api.md`)
 - [x] 15. Publisher & Deployment
 - [x] 16. Security & Best Practices
 - [x] 17. Troubleshooting
@@ -38,7 +38,7 @@ Legend: [v] completed / migrated, [x] pending migration, [~] in progress
 - [Configuration](configuration.md)
 - [MCP Integration](mcp-integration.md)
 - [Git-Backed Sessions](git-backed-sessions.md)
-- UI Server & API (pending file)
+- [UI Server & API](ui-server-api.md)
 - Publisher & Deployment (pending file)
 - Security & Best Practices (pending file)
 - Troubleshooting (pending file)
