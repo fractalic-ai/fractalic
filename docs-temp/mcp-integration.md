@@ -126,15 +126,36 @@ tools-turns-max: 2
 
 This gives the AI access only to tools from the memory server, not all available tools.
 
-**All MCP Tools**: Use `tools: [mcp]` to enable all MCP tools, or combine with local tools:
+**All Tools (Built-in + All MCP)**: Use `tools: all` (a bare string, not an array) to expose every registered tool. This includes all built-in/local tools plus every tool from every enabled MCP service. Use sparingly—broad exposure increases cost surface and risk of irrelevant tool calls.
+
+**Single Service Shorthand**: Set `tools: mcp/<service-name>` (string form) to include all tools from exactly one MCP service. Example:
 
 ```markdown
 @llm
-prompt: "Search for information and analyze it"
-tools:
-  - mcp
-  - local_analyzer
+prompt: "List current stored memory keys"
+tools: mcp/memory-stdio-server
 ```
+
+**Multiple Services and Specific Tools**: Provide an array mixing service filters (`mcp/service-name`) and explicit tool names. Example:
+
+```markdown
+@llm
+prompt: "Search the web then store a fact in memory and summarize"
+tools:
+  - mcp/web-search          # all tools from web-search service
+  - mcp/memory-stdio-server # all memory tools
+  - summarize_document      # a specific local tool by exact name
+```
+
+Resolution logic:
+1. Each list entry that starts with `mcp/` expands to all tools from that service.
+2. Each plain name is matched exactly to a single tool function.
+3. Duplicates are removed.
+4. If no matches are found for any requested item, an error is raised with available services/tools context.
+
+**Not Supported**: `tools: [mcp]` or `tools: mcp` (without a `/service`) is NOT a valid pattern—there is no shorthand meaning “all MCP tools only.” Use `tools: all` if you truly need the full set, or enumerate specific services with `mcp/<service>` filters for tighter control.
+
+Practical recommendation: Prefer explicit service scopes (e.g. `mcp/memory-stdio-server`) over `all` for observability, predictability, and token efficiency.
 
 ## 12.7 Tool Execution Flow
 When your AI selects a tool:
