@@ -12,8 +12,8 @@ Legend: [v] completed / migrated, [x] pending migration, [~] in progress
 - [v] 7. Context Management (`context-management.md`)
 - [v] 8. File & Import Semantics (`file-import-semantics.md`)
 - [v] 9. Shell Integration Patterns (`shell-integration-patterns.md`)
-- [x] 10. Agent & Modular Workflows
-- [x] 11. Configuration
+- [v] 10. Agent & Modular Workflows (`agent-modular-workflows.md`)
+- [v] 11. Configuration (`configuration.md`)
 - [x] 12. MCP Integration
 - [x] 13. Token & Performance Tracking
 - [x] 14. Git-Backed Sessions
@@ -35,8 +35,8 @@ Legend: [v] completed / migrated, [x] pending migration, [~] in progress
 - [Context Management](context-management.md)
 - [File & Import Semantics](file-import-semantics.md)
 - [Shell Integration Patterns](shell-integration-patterns.md)
-- Agent & Modular Workflows (pending file)
-- Configuration (pending file)
+- [Agent & Modular Workflows](agent-modular-workflows.md)
+- [Configuration](configuration.md)
 - MCP Integration (pending file)
 - Token & Performance Tracking (pending file)
 - Git-Backed Sessions (pending file)
