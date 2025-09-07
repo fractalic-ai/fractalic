@@ -810,7 +810,7 @@ class ToolRegistry(dict):
                         name="Input Parameters",
                         level=1,
                         content=f"# Input Parameters\n{prompt}",
-                        id="InputParameters",
+                        id="input-parameters",
                         key=str(uuid.uuid4())[:8],
                         created_by=getattr(self._current_node, 'key', None),
                         created_by_file=getattr(self._current_node, 'created_by_file', None)

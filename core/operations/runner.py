@@ -161,7 +161,7 @@ def run(filename: str, param_node: Optional[Union[Node, AST]] = None, create_new
                     name="Input Parameters",
                     level=1,
                     content=f"{param_node.content}",
-                    id="InputParameters",
+                    id="input-parameters",
                     key=str(uuid.uuid4())[:8]
                 )
                 param_ast = AST("")
@@ -448,7 +448,7 @@ def process_run(ast: AST, current_node: Node, local_file_name, parent_operation,
             name="Input Parameters",
             level=1,
             content=parameter_value,
-            id="InputParameters",
+            id="input-parameters",
             role="user",
             key=str(uuid.uuid4())[:8],
             created_by = current_node.key, # Store the key of the operation node that triggered this response
@@ -491,7 +491,7 @@ def process_run(ast: AST, current_node: Node, local_file_name, parent_operation,
             name="Input Parameters",
             level=1,
             content=parameter_value,
-            id="InputParameters",
+            id="input-parameters",
             key=str(uuid.uuid4())[:8]
         )
 
