@@ -15,15 +15,14 @@ Legend: [v] completed / migrated, [x] pending migration, [~] in progress
 - [v] 10. Agent & Modular Workflows (`agent-modular-workflows.md`)
 - [v] 11. Configuration (`configuration.md`)
 - [v] 12. MCP Integration (`mcp-integration.md`)
-- [x] 13. Token & Performance Tracking
-- [x] 14. Git-Backed Sessions
-- [x] 15. UI Server & API
-- [x] 16. Publisher & Deployment
-- [x] 17. Security & Best Practices
-- [x] 18. Troubleshooting
-- [x] 19. Roadmap & Extensibility
-- [x] 20. Glossary
-- [x] 21. Examples Index
+- [v] 13. Git-Backed Sessions (`git-backed-sessions.md`)
+- [x] 14. UI Server & API
+- [x] 15. Publisher & Deployment
+- [x] 16. Security & Best Practices
+- [x] 17. Troubleshooting
+- [x] 18. Roadmap & Extensibility
+- [x] 19. Glossary
+- [x] 20. Examples Index
 
 ## Table of Contents
 - [Introduction](introduction.md)
@@ -38,8 +37,7 @@ Legend: [v] completed / migrated, [x] pending migration, [~] in progress
 - [Agent & Modular Workflows](agent-modular-workflows.md)
 - [Configuration](configuration.md)
 - [MCP Integration](mcp-integration.md)
-- Token & Performance Tracking (pending file)
-- Git-Backed Sessions (pending file)
+- [Git-Backed Sessions](git-backed-sessions.md)
 - UI Server & API (pending file)
 - Publisher & Deployment (pending file)
 - Security & Best Practices (pending file)
@@ -54,12 +52,3 @@ See `introduction.md` for full content. Below is a condensed overview for naviga
 Fractalic lets you express AI workflows in Markdown + YAML operation blocks. Headings become knowledge blocks; `@llm`, `@shell`, `@import`, `@run`, `@return` mutate and refine a living context tree (AST). You build, refine, modularize, and chain agents by editing documents.
 
 Core benefits: transparency (diffable evolution), composability (any file can be an agent), deterministic merge semantics, controlled context windows, seamless shell & tool integration (MCP), and rapid progressive elaboration.
-
-Next actions:
-1. Create file for Advanced LLM Features (extract deep @llm / tools parts not already in Ops Reference if further separation desired).
-2. Create Context Management doc (AST internals, selection, mutation rules).
-3. Generate remaining stubs for pending sections.
-4. Populate Glossary & Examples Index last (after terms stabilized).
-
----
-(Original large monolithic content has been modularized. Refer to git history if you need the previous inlined version.)
