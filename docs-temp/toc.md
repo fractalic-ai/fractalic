@@ -14,7 +14,7 @@ Legend: [v] completed / migrated, [x] pending migration, [~] in progress
 - [v] 9. Shell Integration Patterns (`shell-integration-patterns.md`)
 - [v] 10. Agent & Modular Workflows (`agent-modular-workflows.md`)
 - [v] 11. Configuration (`configuration.md`)
-- [x] 12. MCP Integration
+- [v] 12. MCP Integration (`mcp-integration.md`)
 - [x] 13. Token & Performance Tracking
 - [x] 14. Git-Backed Sessions
 - [x] 15. UI Server & API
@@ -37,7 +37,7 @@ Legend: [v] completed / migrated, [x] pending migration, [~] in progress
 - [Shell Integration Patterns](shell-integration-patterns.md)
 - [Agent & Modular Workflows](agent-modular-workflows.md)
 - [Configuration](configuration.md)
-- MCP Integration (pending file)
+- [MCP Integration](mcp-integration.md)
 - Token & Performance Tracking (pending file)
 - Git-Backed Sessions (pending file)
 - UI Server & API (pending file)

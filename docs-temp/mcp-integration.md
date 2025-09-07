@@ -1,0 +1,203 @@
+# 12. MCP Integration
+
+## 12.1 Purpose
+MCP Integration extends Fractalic with external tools that your AI agents can use. Instead of being limited to built-in commands, you can add search engines, databases, APIs, and custom business tools. This section explains how tools become available to `@llm` operations and how to add new ones.
+
+## 12.2 Internal Table of Contents
+- [12.1 Purpose](#121-purpose)
+- [12.2 Internal Table of Contents](#122-internal-table-of-contents)
+- [12.3 How MCP Works in Fractalic](#123-how-mcp-works-in-fractalic)
+- [12.4 The Manager System](#124-the-manager-system)
+- [12.5 Adding Your First Tool](#125-adding-your-first-tool)
+- [12.6 Tool Execution Flow](#126-tool-execution-flow)
+- [12.7 Managing Services](#127-managing-services)
+- [12.8 Common Issues & Solutions](#128-common-issues--solutions)
+- [12.9 Performance Tips](#129-performance-tips)
+- [12.10 See Also](#1210-see-also)
+
+## 12.3 How MCP Works in Fractalic
+Fractalic uses one MCP Manager that acts as a central hub for all external tool capabilities. The manager is a standalone server that exposes tools, prompts, and resources through a REST API. It handles the complexity of connecting to different types of MCP servers while presenting a unified interface.
+
+The flow works as follows:
+1. MCP Manager starts automatically with Fractalic (runs on port 5859)
+2. Manager reads `mcp_servers.json` and establishes connections to configured MCP servers
+3. Each MCP server can provide tools, prompts, and resources via the MCP protocol
+4. Manager caches these capabilities and exposes them through HTTP endpoints
+5. When an `@llm` block runs with tools enabled, Fractalic fetches the unified tool catalog
+6. AI selects tools based on task requirements; calls are routed through the manager
+7. Manager handles the actual tool execution and returns results
+
+Initial startup takes a few seconds as the manager discovers and caches all available capabilities from configured servers. Subsequent operations are much faster due to intelligent caching.
+
+## 12.4 MCP Manager Features
+The MCP Manager provides several key capabilities:
+
+**Multi-Protocol Support**: Handles different MCP server types including stdio (local executables), SSE (server-sent events), and HTTP endpoints. Transport type is auto-detected based on configuration.
+
+**OAuth Integration**: Full OAuth 2.0 support with automatic token refresh for services that require authentication. When enabled, the manager handles the complete OAuth flow and maintains valid tokens.
+
+**Comprehensive Caching**: Intelligent caching system with configurable TTL for tools, prompts, resources, and service status. This dramatically reduces latency after initial discovery.
+
+**Unified API**: Exposes a clean REST API that Fractalic uses:
+- `/list_tools` - Flat list of all available tools from all servers
+- `/call/{service}/{tool}` - Execute specific tools with parameters  
+- `/status/complete` - Full system status with embedded data
+- `/toggle/{service}` - Enable/disable services without restart
+
+**UI Integration**: The Fractalic UI can manage MCP servers directly, including adding new servers using standard Claude Desktop JSON configurations that can be copy-pasted.
+
+**Prompts and Resources**: Beyond tools, the manager also exposes prompts and resources from MCP servers, making them available for advanced workflows.
+
+## 12.5 Server Configuration
+MCP servers are configured in `mcp_servers.json`. The manager supports the standard Claude Desktop format, so existing configurations can be directly copied:
+
+```json
+{
+  "mcpServers": {
+    "memory-stdio-server": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-memory"],
+      "transport": "stdio",
+      "enabled": true
+    },
+    "web-search": {
+      "url": "https://api.example.com/mcp",
+      "oauth": true,
+      "enabled": true
+    }
+  }
+}
+```
+
+**Key fields:**
+- `command` + `args` + `env`: For stdio servers (local executables)
+- `url`: For HTTP/SSE remote servers
+- `transport`: Usually auto-detected (`stdio`, `sse`, `streamable-http`)
+- `oauth`: Enable OAuth flow for authenticated services
+- `enabled`: Control availability without deleting configuration
+
+The manager auto-detects transport type from URL patterns when not specified.
+
+## 12.5 Adding Your First Tool
+To add a new MCP server, you can use the Fractalic UI or edit the configuration file directly.
+
+**Via Fractalic UI**: The UI provides an "Add Server" interface that accepts standard Claude Desktop JSON configurations. You can copy existing server definitions and paste them directly.
+
+**Via Configuration File**: Edit `mcp_servers.json` in your project root:
+
+```json
+{
+  "mcpServers": {
+    "memory-stdio-server": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-memory"],
+      "enabled": true
+    }
+  }
+}
+```
+
+After adding a server:
+1. Save the configuration
+2. Restart the MCP Manager (or it will auto-refresh)
+3. Test with an `@llm` block that enables tools
+
+Example usage:
+```markdown
+@llm
+prompt: "Remember that today's weather was sunny and 75°F"
+tools:
+  - mcp/memory-stdio-server
+tools-turns-max: 2
+```
+
+## 12.6 Tool Naming and Selection
+Tools are exposed with a `service.tool_name` format for uniqueness. For example, the memory server's `add` tool becomes `memory-stdio-server.add`. 
+
+**Filtering by Service**: You can restrict tool access to specific services using the `mcp/service-name` pattern in your tools list:
+
+```markdown
+@llm
+prompt: "Store this information in memory"
+tools:
+  - mcp/memory-stdio-server
+tools-turns-max: 2
+```
+
+This gives the AI access only to tools from the memory server, not all available tools.
+
+**All MCP Tools**: Use `tools: [mcp]` to enable all MCP tools, or combine with local tools:
+
+```markdown
+@llm
+prompt: "Search for information and analyze it"
+tools:
+  - mcp
+  - local_analyzer
+```
+
+## 12.7 Tool Execution Flow
+When your AI selects a tool:
+
+1. AI generates function call with tool name and JSON parameters
+2. Fractalic maps the sanitized name back to service and tool components
+3. HTTP POST to manager `/call/{service}/{tool}` with arguments
+4. Manager creates short-lived connection to appropriate MCP server
+5. Tool executes and returns structured results
+6. Results are formatted and added to conversation context as tool message
+7. AI continues reasoning with new information until task complete or turn limit reached
+
+The manager uses short-lived connections per call to avoid resource accumulation and ensure clean execution.
+
+## 12.8 Managing Services
+**Enable/Disable**: Set `enabled: false` in `mcp_servers.json` to temporarily disable a service without losing its configuration. The manager will skip disabled services during discovery.
+
+**OAuth Services**: For services requiring authentication, set `oauth: true`. The manager handles the complete OAuth 2.0 flow:
+- Initial authorization redirect
+- Token exchange and storage in `~/.fastmcp/oauth-mcp-client-cache/` (user home directory)
+- Automatic token refresh when expired
+- Graceful fallback when authentication fails
+
+OAuth tokens are persisted in the FastMCP client cache directory (`~/.fastmcp/oauth-mcp-client-cache/`) in your user home directory. Files are keyed by the OAuth server's base URL. This cache is shared across all applications using FastMCP and persists between application runs.
+
+**Service Status**: The manager provides real-time status through `/status/complete` endpoint, showing which services are connected, tool counts, and any errors.
+
+**Hot Reload**: Configuration changes are detected automatically in most cases. For immediate effect, restart the manager or use the UI toggle functions.
+
+## 12.9 Logging and Debugging
+Enable detailed logging by setting environment variables:
+```bash
+export MCP_DEBUG=1
+export FRACTALIC_TRACE_TOKENS=1
+```
+
+This provides insights into:
+- Service connection attempts and failures
+- Tool discovery and caching behavior
+- OAuth token lifecycle events
+- Performance metrics and timing
+
+Common log messages help identify configuration issues or service problems.
+
+## 12.10 Common Issues & Solutions
+**No tools appear**: Verify MCP Manager is running on port 5859. Check `settings.toml` points to correct manager URL (`http://127.0.0.1:5859`).
+
+**Service won't start**: Check command syntax and paths in `mcp_servers.json`. For stdio servers, verify the executable is available. Test commands manually first.
+
+**Slow initial response**: First tool discovery takes time as the manager queries all enabled services and builds the cache. Subsequent calls are fast.
+
+**Tool execution fails**: Check tool parameters match expected schema. Enable debug logging to see detailed error messages.
+
+**OAuth authentication issues**: Verify service supports OAuth and redirect URLs are configured correctly. Check token refresh logic in debug logs.
+
+## 12.11 Performance Optimization
+- Only enable servers you actively use to reduce discovery overhead
+- Use specific service filtering (`mcp/service-name`) rather than enabling all tools
+- Set conservative `tools-turns-max` values (2-3) to prevent runaway loops
+- Summarize large tool outputs in follow-up operations to manage context size
+- Monitor cache hit rates in debug logs to ensure optimal performance
+
+## 12.12 See Also
+- [Configuration](configuration.md) - MCP manager connection settings
+- [Advanced LLM Features](advanced-llm-features.md) - Tool loop patterns and optimization
+- [Operations Reference](operations-reference.md) - Complete `@llm` operation syntax
