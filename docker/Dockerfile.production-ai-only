@@ -25,9 +25,9 @@ WORKDIR /fractalic
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Create necessary directories and set ownership
-RUN mkdir -p /fractalic/logs /payload && \
+RUN mkdir -p /fractalic/logs /fractalic/oauth-cache /payload && \
     chown -R appuser:appuser /fractalic /payload && \
-    chmod -R 755 /fractalic/logs /payload
+    chmod -R 755 /fractalic/logs /fractalic/oauth-cache /payload
 
 # Copy production supervisor configuration
 COPY fractalic/docker/supervisord-production.conf /etc/supervisor/conf.d/supervisord.conf

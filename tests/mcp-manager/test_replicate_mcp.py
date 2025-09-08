@@ -31,7 +31,10 @@ logger = logging.getLogger(__name__)
 class SimpleTokenStorage:
     def __init__(self, service_name: str = "replicate"):
         self.service_name = service_name
-        self.tokens_file = _P(ROOT / "oauth_tokens.json")
+        # Use project oauth-cache directory instead of root oauth_tokens.json
+        oauth_cache_dir = ROOT / "oauth-cache"
+        oauth_cache_dir.mkdir(exist_ok=True)
+        self.tokens_file = oauth_cache_dir / "oauth_tokens.json"
     async def get_tokens(self) -> OAuthToken | None:
         if not self.tokens_file.exists():
             return None

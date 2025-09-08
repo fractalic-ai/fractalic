@@ -10,6 +10,9 @@ oauth_tokens.json.repair
 oauth_redirect_state.json
 *.oauth_tokens.json
 
+# OAuth cache folder
+oauth-cache/
+
 # Development and debugging utilities
 utils/oauth_debug/
 debug_*.py

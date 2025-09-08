@@ -7,8 +7,8 @@ set -e
 
 # Configuration
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-DEFAULT_SOURCE_DIR="/tmp/fractalic_oauth"
-DEFAULT_TARGET_DIR="/data/oauth"
+DEFAULT_SOURCE_DIR="$SCRIPT_DIR/oauth-cache"
+DEFAULT_TARGET_DIR="/data/oauth-cache"
 FRACTALIC_MANAGER="$SCRIPT_DIR/fractalic_mcp_manager.py"
 
 # Colors for output
@@ -66,47 +66,54 @@ if [[ ! -d "$SOURCE_DIR" ]]; then
     fi
 fi
 
-# Step 2: List current tokens
-log "Checking available OAuth tokens..."
-if python3 "$FRACTALIC_MANAGER" oauth-list --storage-dir "$SOURCE_DIR"; then
+# Step 2: List current tokens if directory exists
+if [[ -d "$SOURCE_DIR" ]] && [[ -n "$(ls -A "$SOURCE_DIR" 2>/dev/null)" ]]; then
+    log "Checking available OAuth tokens..."
+    log "Files in source directory:"
+    ls -la "$SOURCE_DIR"
     log ""
 else
-    error "Failed to list OAuth tokens"
-    exit 1
+    warn "No OAuth tokens found in $SOURCE_DIR"
+    log "You may need to run OAuth setup first."
+    log ""
 fi
 
-# Step 3: Migrate tokens
-log "Migrating OAuth tokens to deployment directory..."
-if python3 "$FRACTALIC_MANAGER" oauth-migrate "$SOURCE_DIR" "$TARGET_DIR"; then
-    success "OAuth tokens migrated successfully"
+# Step 3: Copy tokens to deployment directory
+log "Copying OAuth tokens to deployment directory..."
+if [[ ! -d "$TARGET_DIR" ]]; then
+    mkdir -p "$TARGET_DIR"
+    log "Created target directory: $TARGET_DIR"
+fi
+
+# Copy all files from source to target
+if cp -r "$SOURCE_DIR"/* "$TARGET_DIR"/ 2>/dev/null; then
+    success "OAuth tokens copied successfully"
 else
-    error "OAuth token migration failed"
-    exit 1
+    warn "No OAuth tokens found to copy, or copy failed"
 fi
 
 # Step 4: Verify migration
-log "Verifying migrated tokens..."
-if python3 "$FRACTALIC_MANAGER" oauth-list --storage-dir "$TARGET_DIR"; then
-    success "Token migration verified"
+log "Verifying copied tokens..."
+if [[ -d "$TARGET_DIR" ]] && [[ -n "$(ls -A "$TARGET_DIR" 2>/dev/null)" ]]; then
+    success "Token copy verified - files present in $TARGET_DIR"
+    log "Files in target directory:"
+    ls -la "$TARGET_DIR"
 else
-    warn "Could not verify migrated tokens"
+    warn "Target directory is empty or does not exist"
 fi
 
 log ""
-log "🎉 OAuth Migration Complete!"
+log "🎉 OAuth Token Copy Complete!"
 log ""
 log "Next steps for deployment:"
-log "1. Set environment variable: OAUTH_STORAGE_PATH=$TARGET_DIR"
-log "2. Mount $TARGET_DIR as a volume in your container"
+log "1. Copy the $TARGET_DIR to your deployment container"
+log "2. Mount $TARGET_DIR as /fractalic/oauth-cache in your container"
 log "3. Deploy your containerized Fractalic instance"
 log ""
 log "Example Docker command:"
-log "  docker run -v $TARGET_DIR:/data/oauth \\"
-log "             -e OAUTH_STORAGE_PATH=/data/oauth \\"
+log "  docker run -v $TARGET_DIR:/fractalic/oauth-cache \\"
 log "             your-fractalic-image"
 log ""
 log "Example docker-compose.yml volume:"
 log "  volumes:"
-log "    - $TARGET_DIR:/data/oauth"
-log "  environment:"
-log "    - OAUTH_STORAGE_PATH=/data/oauth"
+log "    - $TARGET_DIR:/fractalic/oauth-cache"

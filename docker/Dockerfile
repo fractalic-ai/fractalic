@@ -76,7 +76,7 @@ WORKDIR /fractalic
 # This makes Docker builds much faster since production build is unused
 
 # Create necessary directories with full permissions (development environment)
-RUN mkdir -p /fractalic/logs /tmp && \
+RUN mkdir -p /fractalic/logs /fractalic/oauth-cache /tmp && \
     chmod -R 777 /fractalic /fractalic-ui /tmp
 
 # Set timezone environment variable support (can be overridden at runtime)

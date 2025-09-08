@@ -22,6 +22,7 @@ from fastmcp.client.auth import OAuth
 
 from .mcp_config import MCPConfigLoader, ServiceConfig
 from .status_cache import StatusCache
+from .oauth_helper import get_oauth_cache_dir, create_custom_oauth_client, create_custom_token_storage
 
 logger = logging.getLogger(__name__)
 
@@ -91,7 +92,8 @@ class FastMCPManager:
                     client = Client(url)
                 else:
                     # Clean URLs likely need OAuth
-                    client = Client(url, auth='oauth')
+                    oauth_client = create_custom_oauth_client(url)
+                    client = Client(url, auth=oauth_client)
             
             # Don't cache stdio clients - return immediately for per-request usage
             return client
@@ -886,7 +888,7 @@ class FastMCPManager:
             
             url = config.spec.get('url')
             if url:
-                storage = FileTokenStorage(server_url=url)
+                storage = create_custom_token_storage(url)
                 await storage.clear()
             
             # No client cache to clear - per-request approach
@@ -921,7 +923,7 @@ class FastMCPManager:
                 # Server requires OAuth - check token status
                 from fastmcp.client.auth.oauth import FileTokenStorage
                 
-                storage = FileTokenStorage(server_url=url)
+                storage = create_custom_token_storage(url)
                 tokens = await storage.get_tokens()
                 
                 if tokens:

@@ -23,7 +23,12 @@ class SimpleTokenStorage:
     
     def __init__(self, service_name: str = "replicate"):
         self.service_name = service_name
-        self.tokens_file = Path("oauth_tokens.json")
+        # Use project oauth-cache directory
+        from pathlib import Path
+        project_root = Path(__file__).resolve().parents[2]
+        oauth_cache_dir = project_root / "oauth-cache"
+        oauth_cache_dir.mkdir(exist_ok=True)
+        self.tokens_file = oauth_cache_dir / "oauth_tokens.json"
     
     async def get_tokens(self) -> OAuthToken | None:
         """Load tokens from file"""
