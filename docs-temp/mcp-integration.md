@@ -175,11 +175,11 @@ The manager uses short-lived connections per call to avoid resource accumulation
 
 **OAuth Services**: For services requiring authentication, set `oauth: true`. The manager handles the complete OAuth 2.0 flow:
 - Initial authorization redirect
-- Token exchange and storage in `~/.fastmcp/oauth-mcp-client-cache/` (user home directory)
+- Token exchange and storage in `oauth-cache/` (project directory)
 - Automatic token refresh when expired
 - Graceful fallback when authentication fails
 
-**Important for Docker Deployments**: OAuth tokens are stored in the user's home directory (`~/.fastmcp/oauth-mcp-client-cache/`) by default. This creates a deployment challenge because Docker containers don't have access to your local OAuth tokens. Currently, FastMCP does not provide a configuration option to change this cache directory location. This means OAuth-enabled MCP services will require re-authentication each time a Docker container starts fresh.
+**Docker Deployment Compatibility**: OAuth tokens are now stored in the project's `oauth-cache/` directory, making them easily portable to Docker containers. The directory is automatically created and configured to use relative paths from the project root.
 
 For production deployments, consider using MCP services with embedded authentication tokens in URLs rather than OAuth flows, or ensure OAuth token persistence through Docker volume mounts if needed.
 
