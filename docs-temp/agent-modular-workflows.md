@@ -1,4 +1,10 @@
-# 10. Agent & Modular Workflows
+---
+title: Agent & Modular Workflows
+description: Build reusable agents and compose complex workflows using modular patterns and @run operations
+outline: deep
+---
+
+# Agent & Modular Workflows
 
 Purpose: Learn how to break complex AI workflows into manageable, reusable pieces using separate markdown files that work together. Perfect for newcomers who want to understand Fractalic's modular approach.
 

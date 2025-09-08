@@ -1,4 +1,10 @@
-# 5. Operations Reference
+---
+title: Operations Reference
+description: Complete reference for all Fractalic operations - @llm, @shell, @import, @run, and @return
+outline: deep
+---
+
+# Operations Reference
 
 Operations mutate the context tree, consuming inputs (blocks, prompt literals, external sources) and producing new nodes.
 

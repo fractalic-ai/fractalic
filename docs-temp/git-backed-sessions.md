@@ -1,4 +1,10 @@
-# 13. Git-Backed Sessions
+---
+title: Git-Backed Sessions
+description: Persist and version your Fractalic workflows using Git for collaborative development
+outline: deep
+---
+
+# Git-Backed Sessions
 
 ## 13.1 Purpose
 Fractalic automatically versions every workflow execution using git. When you run operations on Markdown documents, Fractalic commits the results, creating an auditable history of document evolution and execution state.
@@ -61,7 +67,7 @@ Each commit can include metadata about trigger files and parent operations for t
 ## 13.7 Session Branches
 Session branches are created by default for each execution using the format:
 ```
-<YYYYMMDDHHMMSS>_<hash8>_<sanitized-task-name>
+`<YYYYMMDDHHMMSS>_<hash8>_<sanitized-task-name>`
 ```
 Example: `20250908142310_a1b2c3d4_Testing-git-operations`
 
@@ -76,7 +82,7 @@ Note: When Fractalic tools execute other Fractalic files internally (like the `f
 Use standard git tools to review sessions:
 ```bash
 git log --oneline              # See commit sequence
-git show <commit-hash>         # View specific changes
+git show `<commit-hash>`         # View specific changes
 git diff HEAD~1 file.ctx       # Compare execution states
 ```
 

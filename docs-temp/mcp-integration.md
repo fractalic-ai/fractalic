@@ -1,4 +1,10 @@
-# 12. MCP Integration
+---
+title: MCP Integration
+description: Integrate Model Context Protocol servers to extend Fractalic with external tools and capabilities
+outline: deep
+---
+
+# MCP Integration
 
 ## 12.1 Purpose
 MCP Integration extends Fractalic with external tools that your AI agents can use. Instead of being limited to built-in commands, you can add search engines, databases, APIs, and custom business tools. This section explains how tools become available to `@llm` operations and how to add new ones.

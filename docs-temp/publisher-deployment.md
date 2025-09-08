@@ -1,3 +1,9 @@
+---
+title: Publisher & Deployment
+description: Deploy Fractalic workflows as remote AI services for sharing and production use
+outline: deep
+---
+
 # Publisher & Deployment
 
 > Audience: Contributors and users who want to deploy their Fractalic workflows as remote AI services. Regular users running local workflows may not need this until they want to share their AI agents with others.

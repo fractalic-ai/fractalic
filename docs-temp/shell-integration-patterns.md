@@ -1,4 +1,10 @@
-# 9. Shell Integration Patterns
+---
+title: Shell Integration Patterns
+description: Execute shell commands, manage outputs, and integrate system tools with Fractalic workflows
+outline: deep
+---
+
+# Shell Integration Patterns
 
 Purpose: Show how to run shell commands safely inside Fractalic and merge results without uncontrolled growth.
 
@@ -149,7 +155,7 @@ Need | Pattern
 ---- | -------
 One-liner | prompt: "echo 'Hi'"
 Multi-line | prompt: | (then lines)
-Snapshot refresh | mode: replace + to: <id>
+Snapshot refresh | mode: replace + to: `<id>`
 Transform shell → summary | @llm with block: shell-output-id
 Combine multiple runs | block: [ id-a, id-b ]
 Prune noise | Summarize + replace

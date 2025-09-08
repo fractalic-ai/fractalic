@@ -1,4 +1,10 @@
-# 2. Quick Start
+---
+title: Quick Start
+description: Get Fractalic running and execute your first minimal workflow in under 5 minutes
+outline: deep
+---
+
+# Quick Start
 
 ## Goal
 Get Fractalic running and execute your first minimal workflow in <5 minutes.
@@ -32,7 +38,7 @@ cd fractalic-ui
 npm install
 npm run dev
 ```
-UI default: http://localhost:3000
+UI default: `http://localhost:3000`
 
 ## 2.5 Minimal Hello World Workflow
 Create `hello.md`:

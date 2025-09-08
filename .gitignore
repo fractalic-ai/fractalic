@@ -139,6 +139,12 @@ instance/
 # Sphinx documentation
 docs/_build/
 
+# VitePress documentation
+docs-temp/.vitepress/dist/
+docs-temp/.vitepress/cache/
+docs-temp/node_modules/
+docs-temp/package-lock.json
+
 # PyBuilder
 .pybuilder/
 target/

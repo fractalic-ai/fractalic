@@ -1,4 +1,10 @@
-# 16. Creating Custom Tools
+---
+title: Creating Custom Tools
+description: Create and integrate custom tools and MCP servers to extend Fractalic capabilities
+outline: deep
+---
+
+# Creating Custom Tools
 
 Focus: How to add your own tools to Fractalic and how the tool discovery system works.
 

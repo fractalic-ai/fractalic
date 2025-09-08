@@ -1,3 +1,9 @@
+---
+title: UI Server & API
+description: Internal UI server for development and debugging (not for production use)
+outline: deep
+---
+
 # UI Server & API
 
 > Disclaimer: This UI Server is an internal development component. Regular users running Fractalic workflows (via the AI Server or production deployments) do not need it. This document is intended for contributors, advanced operators, or anyone studying Fractalic's internal architecture. Do not expose this server publicly.

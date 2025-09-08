@@ -1,0 +1,36 @@
+{
+  "name": "fractalic-docs",
+  "version": "1.0.0",
+  "description": "Documentation for Fractalic - AI workflows in Markdown",
+  "type": "module",
+  "scripts": {
+    "dev": "vitepress dev",
+    "build": "vitepress build",
+    "preview": "vitepress preview",
+    "serve": "vitepress serve",
+    "check-links": "find . -name '*.md' -not -path './.vitepress/*' -exec grep -l '\\.md' {} \\;",
+    "lint": "markdownlint-cli2 '**/*.md' '#node_modules' '#.vitepress'"
+  },
+  "devDependencies": {
+    "vitepress": "^1.0.0",
+    "markdownlint-cli2": "^0.12.1"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "keywords": [
+    "fractalic",
+    "ai",
+    "markdown",
+    "yaml",
+    "workflows",
+    "documentation",
+    "vitepress"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/fractalic-ai/fractalic.git",
+    "directory": "docs-temp"
+  },
+  "license": "MIT"
+}

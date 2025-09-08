@@ -1,4 +1,10 @@
-# 4. Syntax Reference
+---
+title: Syntax Reference
+description: Complete syntax reference for Fractalic operations, blocks, and YAML configuration
+outline: deep
+---
+
+# Syntax Reference
 
 Fractalic syntax = Standard Markdown (structure, prose) + Lightweight YAML operation blocks (actions). The interpreter walks the file linearly, builds an AST (headings, operations, generated nodes), and applies operations in order.
 

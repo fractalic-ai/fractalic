@@ -1,4 +1,10 @@
-# 6. Advanced LLM Features
+---
+title: Advanced LLM Features
+description: Advanced features for LLM operations including tool loops, streaming, JSON output, and optimization patterns
+outline: deep
+---
+
+# Advanced LLM Features
 
 Status: Stable (supplements `operations-reference.md` §5.3)
 Scope: Deep patterns for controlling, structuring, optimizing, and validating `@llm` driven workflows beyond the core syntax.
@@ -160,7 +166,7 @@ Routing Skeleton:
 ```markdown
 @llm
 prompt: |
-  If task complexity (steps > 5 or domain specialized) -> choose model "deep" else "fast". Output ONLY: model=<id>.
+  If task complexity (steps > 5 or domain specialized) -> choose model "deep" else "fast". Output ONLY: model=`<id>`.
 use-header: none
 ```
 

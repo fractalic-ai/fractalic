@@ -1,4 +1,13 @@
-# 1. Introduction
+---
+title: Introduction
+description: Learn about Fractalic - a plain-language programming environment for building AI workflows and agents using Markdown + YAML
+outline: deep
+---
+
+# Introduction
+
+### What is Fractalic?
+Fractalic is a plain‑language programming environment for building AI workflows and agents using ordinary Markdown plus lightweight YAML operation blocks. Instead of wiring nodes in a UI or writing imperative Python scripts, you express intent in structured text. Fractalic interprets your document as a living execution context: headings become knowledge blocks; special `@operation` blocks perform actions (LLM calls, shell commands, imports, executing sub‑workflows, returning results). The document evolves as operations run—new blocks are appended, replaced, or refined—so you can literally "grow" an AI system the way you draft a document.troduction
 
 ### What is Fractalic?
 Fractalic is a plain‑language programming environment for building AI workflows and agents using ordinary Markdown plus lightweight YAML operation blocks. Instead of wiring nodes in a UI or writing imperative Python scripts, you express intent in structured text. Fractalic interprets your document as a living execution context: headings become knowledge blocks; special `@operation` blocks perform actions (LLM calls, shell commands, imports, executing sub‑workflows, returning results). The document evolves as operations run—new blocks are appended, replaced, or refined—so you can literally “grow” an AI system the way you draft a document.

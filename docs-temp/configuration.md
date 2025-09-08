@@ -1,4 +1,10 @@
-# 11. Configuration
+---
+title: Configuration
+description: Configure Fractalic settings, LLM providers, and environment variables
+outline: deep
+---
+
+# Configuration
 
 Status: Stable
 

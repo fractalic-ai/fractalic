@@ -1,4 +1,10 @@
-# 8. File & Import Semantics
+---
+title: File & Import Semantics
+description: Understanding file imports, merging strategies, and workspace management in Fractalic
+outline: deep
+---
+
+# File & Import Semantics
 
 Purpose: How Fractalic loads external markdown, selectively imports blocks, and merges them into the current context without bloat.
 

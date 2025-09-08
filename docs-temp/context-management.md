@@ -1,4 +1,10 @@
-# 7. Context Management
+---
+title: Context Management
+description: Master context control with block selection, wildcards, composition patterns, and token optimization
+outline: deep
+---
+
+# Context Management
 
 Purpose: How Fractalic builds and evolves the Context Graph (structured markdown blocks) so each operation sees exactly what it needs—while you keep size, cost, and clarity under control.
 

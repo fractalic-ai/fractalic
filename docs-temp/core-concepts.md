@@ -1,4 +1,10 @@
-# 3. Core Concepts
+---
+title: Core Concepts
+description: Understanding the fundamental concepts of Fractalic - documents as programs, execution context, and block types
+outline: deep
+---
+
+# Core Concepts
 
 ## 3.1 Documents as Programs
 Markdown file = ordered set of knowledge + operation blocks. Execution walks top → bottom mutating an internal AST.
