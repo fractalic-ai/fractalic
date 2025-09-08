@@ -9,6 +9,7 @@ oauth_tokens.json.fixed
 oauth_tokens.json.repair
 oauth_redirect_state.json
 *.oauth_tokens.json
+oauth-cache/
 
 # OAuth cache folder
 oauth-cache/
