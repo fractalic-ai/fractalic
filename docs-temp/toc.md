@@ -18,11 +18,7 @@ Legend: [v] completed / migrated, [x] pending migration, [~] in progress
 - [v] 13. Git-Backed Sessions (`git-backed-sessions.md`)
 - [v] 14. UI Server & API (`ui-server-api.md`)
 - [v] 15. Publisher & Deployment (`publisher-deployment.md`)
-- [x] 16. Security & Best Practices
-- [x] 17. Troubleshooting
-- [x] 18. Roadmap & Extensibility
-- [x] 19. Glossary
-- [x] 20. Examples Index
+- [v] 16. Custom Tools & Tool Discovery (`custom-tools.md`)
 
 ## Table of Contents
 - [Introduction](introduction.md)
@@ -40,11 +36,7 @@ Legend: [v] completed / migrated, [x] pending migration, [~] in progress
 - [Git-Backed Sessions](git-backed-sessions.md)
 - [UI Server & API](ui-server-api.md)
 - [Publisher & Deployment](publisher-deployment.md)
-- Security & Best Practices (pending file)
-- Troubleshooting (pending file)
-- Roadmap & Extensibility (pending file)
-- Glossary (pending file)
-- Examples Index (pending file)
+- [Custom Tools & Tool Discovery](custom-tools.md)
 
 ## Summary Introduction (Inline Snapshot)
 See `introduction.md` for full content. Below is a condensed overview for navigation context.
