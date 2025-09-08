@@ -1,5 +1,7 @@
 # UI Server & API
 
+> Disclaimer: This UI Server is an internal development component. Regular users running Fractalic workflows (via the AI Server or production deployments) do not need it. This document is intended for contributors, advanced operators, or anyone studying Fractalic's internal architecture. Do not expose this server publicly.
+
 ## Internal TOC
 - [What is the UI Server?](#what-is-the-ui-server)
 - [When Do You Use the UI Server?](#when-do-you-use-the-ui-server)
@@ -40,23 +42,6 @@ The UI Server is a FastAPI service that handles six main areas:
 6. **Deployment Helpers** - Publish your workflows to production environments
 
 This guide covers concepts, flows, endpoints, usage patterns, optimization, and safety constraints.
-
-## Core Concepts
-
-## Internal TOC
-- [What is the UI Server?](#what-is-the-ui-server)
-- [When Do You Use the UI Server?](#when-do-you-use-the-ui-server)
-- [What Does the UI Server Do?](#what-does-the-ui-server-do)
-- [Core Concepts](#core-concepts)
-- [How It Works](#how-it-works)
-- [Starting the UI Server](#starting-the-ui-server)
-- [Key Endpoints by Function](#key-endpoints-by-function)
-- [Common Usage Examples](#common-usage-examples)
-- [Edge Cases / Pitfalls](#edge-cases--pitfalls)
-- [Performance & Optimization](#performance--optimization)
-- [Safety & Security](#safety--security)
-- [Quick Reference](#quick-reference)
-- [Cross References](#cross-references)
 
 ## Core Concepts
 
