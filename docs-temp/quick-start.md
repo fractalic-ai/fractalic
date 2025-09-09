@@ -122,13 +122,72 @@ use-header: "# Setup Confirmation"
 
 ## Understanding Your Results
 
-After running either example, you'll see your original document has grown! Fractalic added new sections with:
+After running either example, you'll see your original document has grown! Here's exactly what you'll see (highlighted lines show what Fractalic added):
 
-- **AI responses** - exactly what the language model generated
-- **Command outputs** - results from any shell commands
-- **Structured content** - everything organized with clear headings
+### First Example Results
+```yaml{9-10}
+# My First AI Assistant {id=intro}
+I want to learn how Fractalic works by creating a simple greeting program.
 
-This is the key insight: your document becomes a record of both your intentions and the AI's work. You can see the whole process, modify it, and run it again.
+@llm
+prompt: "Create a friendly greeting that mentions Fractalic and AI programming. Make it encouraging for a beginner."
+block: intro
+use-header: "# AI Generated Greeting"
+
+# AI Generated Greeting {id=ai-generated-greeting}
+Welcome to the exciting world of Fractalic! You're taking your first steps into AI programming, and that's fantastic. Fractalic makes it easy to harness the power of artificial intelligence using simple, readable instructions—you're going to love how intuitive and powerful this approach can be!
+```
+
+### Portfolio Example Results
+```yaml{11-16,25-30,36-37}
+# Website Ideas {id=ideas}
+I want to create a personal portfolio website to showcase my projects.
+
+@llm
+prompt: |
+  Based on the website goal above, create a simple list of 5 essential pages 
+  this website should have. Format as a bulleted list.
+block: ideas
+use-header: "# Recommended Pages"
+
+# Recommended Pages {id=recommended-pages}
+• Home - Landing page with brief introduction
+• About - Personal background and skills
+• Projects - Showcase of your work and achievements
+• Blog - Thoughts, tutorials, and updates
+• Contact - Ways to get in touch
+
+@llm
+prompt: |
+  For each page listed above, write a one-sentence description of what 
+  content should go there.
+block: recommended-pages/*
+use-header: "# Page Descriptions"
+
+# Page Descriptions {id=page-descriptions}
+• **Home**: A compelling landing page that immediately communicates who you are and what you do, with clear navigation to your best work.
+• **About**: Your professional story, skills, experience, and what makes you unique as a developer or creator.
+• **Projects**: Detailed case studies of your best work with screenshots, technologies used, and links to live demos or code repositories.
+• **Blog**: Industry insights, tutorials, lessons learned, and updates about your current projects to demonstrate your expertise and thought leadership.
+• **Contact**: Multiple ways for potential employers or collaborators to reach you, including email, social media, and possibly a contact form.
+
+@shell
+prompt: "mkdir -p my-portfolio && echo 'Portfolio structure created'"
+use-header: "# Setup Confirmation"
+
+# Setup Confirmation {id=setup-confirmation}
+Portfolio structure created
+```
+
+### What You're Seeing
+
+The highlighted sections show:
+- **AI responses** - exactly what the language model generated based on your prompts
+- **Command outputs** - results from shell commands (like creating directories)
+- **Structured organization** - everything gets proper headings and IDs automatically
+- **Context building** - notice how the second AI call referenced the first AI's output
+
+This is the key insight: your document becomes a living record of both your intentions and the AI's work. You can see the whole process, modify it, and run it again. Each time you execute the document, Fractalic will either update existing sections or add new ones, depending on how you configure it.
 
 ## Why This Approach Is Powerful
 
