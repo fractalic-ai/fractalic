@@ -1,16 +1,16 @@
 # Fractalic Language Specification
 
-## 1. Introduction
+## Introduction
 
 Fractalic is a system that allows you to create executable workflows directly within Markdown documents. By using a specific syntax, you can structure your documents into meaningful blocks and define operations that Fractalic will execute. These operations interact with the document's content, external tools, and control the workflow's progression. Fractalic essentially brings your Markdown documents to life, enabling automation, content generation, and complex task execution.
 
 This specification explains the language elements, concepts, and behavior of Fractalic workflows.
 
-## 2. Core Concepts
+## Core Concepts
 
 Understanding these core ideas is key to writing Fractalic workflows:
 
-### 2.1. The Document & The AST (Abstract Syntax Tree)
+### The Document & The AST (Abstract Syntax Tree)
 
 *   **Document:** Your workflow starts as a standard Markdown file (`.md`). This file contains your text, headings, and special Fractalic Operation Blocks.
 *   **AST (Abstract Syntax Tree):** When Fractalic runs your document, it creates a structured, in-memory representation called the AST. This isn't just a static copy; it's the *dynamic version* of your document during execution.
@@ -18,7 +18,7 @@ Understanding these core ideas is key to writing Fractalic workflows:
     *   Each Node holds information about its type, its text content, any parameters (if it's an Operation), its **role** (typically "user" for original content or "assistant" for generated content), and its position relative to other Nodes.
     *   Operations actively **modify the AST**. They can add new blocks, change content, or remove sections. The final state of the AST after the workflow finishes is the result.
 
-### 2.2. Blocks: The Building Units
+### Blocks: The Building Units
 
 Blocks are the fundamental pieces Fractalic recognizes in your Markdown.
 
@@ -33,7 +33,7 @@ Blocks are the fundamental pieces Fractalic recognizes in your Markdown.
     *   **Parameters:** YAML key-value pairs configure how the operation behaves. The parameter section ends at the first blank line after it starts.
     *   **Role:** Drive the workflow by interacting with the AST, files, external services, etc., based on their function and your provided parameters.
 
-### 2.3. Block IDs and Block Paths: Addressing Content
+### Block IDs and Block Paths: Addressing Content
 
 Operations need a way to refer to specific parts of the document (AST).
 
@@ -50,7 +50,7 @@ Operations need a way to refer to specific parts of the document (AST).
     *   **Resolution:** When resolving a Block Path like `parent/child`, Fractalic primarily looks for a block with the ID `child` that is nested under the block with the ID `parent` according to the document structure (heading levels). The `/*` wildcard specifically targets the *direct children* of the preceding block ID.
     *   **Empty Blocks:** If a Block Path references a valid block ID, but that block contains no text content, operations will generally treat it as providing an empty string. It typically does not cause an error, but provides no content for context building (e.g., in `@llm` or `@run`).
 
-### 2.4. Parameters and Operation Configuration
+### Parameters and Operation Configuration
 
 You control how operations work using parameters.
 
@@ -65,7 +65,7 @@ You control how operations work using parameters.
 *   **Operation Awareness:** Each Fractalic operation knows which parameters it expects, their types (text, true/false, number, list), whether they are required or optional, and any default values it can use if you don't provide a parameter. If you provide incorrect parameters (wrong type, missing required ones, unknown ones), Fractalic will report an error.
 *   **Special Parameter Interpretation:** For some parameters (like those specifying file locations or block references), Fractalic applies specific interpretation rules. For example, a string like `path/to/file.md` given to a `file` parameter will be understood as a file path, and `results/*` given to a `block` parameter will be understood as a reference to the children of the `results` block. **Note:** Relative file paths provided in parameters are typically resolved relative to the location of the Fractalic document currently being executed.
 
-### 2.5. State and Execution Context
+### State and Execution Context
 
 *   **State:** The "state" of your workflow at any moment is the current content and structure of its **AST**. Operations read and modify this state.
 *   **Execution Context:** This is the environment the workflow runs in, primarily defined by the current AST state.
@@ -73,7 +73,7 @@ You control how operations work using parameters.
     *   **Passing Context (`@run`):** You can pass information (using the `prompt` or `block` parameters of `@run`) from the calling workflow into the sub-workflow. This information typically becomes the initial content or part of the initial content in the sub-workflow's AST.
     *   **Isolation:** Changes made to the sub-workflow's AST generally don't affect the caller's AST directly. Only the *final state* of the sub-workflow's AST (what it looks like when it finishes or uses `@return`) is passed back and merged into the caller's AST.
 
-## 7. Execution Model: How Workflows Run
+## Execution Model: How Workflows Run
 
 Fractalic follows these conceptual steps to run your document:
 
@@ -97,11 +97,11 @@ Fractalic follows these conceptual steps to run your document:
 3.  **Termination:** The workflow stops when it reaches the end of the AST or encounters a `@return` operation in the top-level document.
 4.  **Result:** The final content and structure of the AST after execution constitute the workflow's outcome. This might be implicitly saved, printed, or passed to another process.
 
-## 8. Operation Specifications
+## Operation Specifications
 
 Here's a detailed look at each standard Fractalic operation:
 
-### 8.1. `@import`
+### `@import`
 
 *   **Purpose:** To bring content from another Markdown file (or specific sections of it) into your current workflow's document structure (AST). This is fundamental for reusing content, templates, or data across workflows.
 *   **Parameters:**
@@ -132,7 +132,7 @@ Here's a detailed look at each standard Fractalic operation:
     5.  **Insert Content:** The selected content (either the whole source file AST or the specific block AST fragment) is merged into the current workflow's AST at the target location using the specified `mode` (`append`, `prepend`, or `replace`). The current workflow's AST is now updated with the imported content.
     6.  Fractalic proceeds to the next operation.
 
-### 8.2. `@llm`
+### `@llm`
 
 *   **Purpose:** To interact with a configured Large Language Model (LLM). It constructs a prompt based on your parameters, sends it to the LLM, and inserts the model's response back into the workflow's AST.
 *   **Parameters:**
@@ -182,7 +182,7 @@ Here's a detailed look at each standard Fractalic operation:
     9.  **Insert Response Block:** Merges the prepared response block into the current workflow's AST at the target location using the specified `mode`.
     10. Fractalic proceeds to the next operation.
 
-### 8.3. `@run`
+### `@run`
 
 *   **Purpose:** To execute another Fractalic Markdown file as a self-contained sub-workflow. Allows breaking down complex tasks into modular, reusable components. Can pass input to the sub-workflow and merge its results back into the main workflow.
 *   **Parameters:**
@@ -221,7 +221,7 @@ Here's a detailed look at each standard Fractalic operation:
     7.  **Insert Results:** Merges the entire final AST received from the sub-workflow into the caller's AST at the target location, using the specified `mode`.
     8.  The calling workflow proceeds to the next operation.
 
-### 8.4. `@shell`
+### `@shell`
 
 *   **Purpose:** Executes a command or script in the system's shell (like Bash, Zsh, or Windows CMD/PowerShell) and captures its standard output, inserting it back into the workflow's AST. Useful for running external tools, scripts, or system commands.
 *   **Parameters:**
@@ -251,7 +251,7 @@ Here's a detailed look at each standard Fractalic operation:
     6.  **Insert Output Block:** Merges the prepared output block into the current workflow's AST at the target location using the specified `mode`.
     7.  Fractalic proceeds to the next operation.
 
-### 8.5. `@return`
+### `@return`
 
 *   **Purpose:** To explicitly stop the execution of the *current* workflow level and optionally specify exactly what content should be passed back as the result. Primarily used within sub-workflows called by `@run` to control the data returned to the caller. If used in the top-level document, it simply stops the entire workflow.
 *   **Parameters:**
@@ -278,7 +278,7 @@ Here's a detailed look at each standard Fractalic operation:
         *   If this was a sub-workflow called by `@run`, this returned AST fragment is passed back to the `@run` operation in the calling workflow for merging.
         *   If this was the top-level workflow, execution ends, and this fragment represents the final result.
 
-### 8.6. `@goto`
+### `@goto`
 
 *   **Purpose:** To unconditionally change the execution flow *within the current document*, jumping directly to a specified Heading Block ID. Allows for creating loops or conditional jumps (though explicit conditional logic isn't built-in, `goto` can be used to skip sections).
 *   **Parameters:**
@@ -299,7 +299,7 @@ Here's a detailed look at each standard Fractalic operation:
     4.  Execution continues sequentially *from the target node*.
     *   **Caution:** It is easy to create infinite loops using `@goto`. Ensure your logic provides an eventual exit path or use `run-once: true` where appropriate.
 
-## 9. Error Handling
+## Error Handling
 
 Workflows can encounter errors at different stages:
 

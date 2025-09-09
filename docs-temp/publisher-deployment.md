@@ -8,19 +8,6 @@ outline: deep
 
 > Audience: Contributors and users who want to deploy their Fractalic workflows as remote AI services. Regular users running local workflows may not need this until they want to share their AI agents with others.
 
-## Internal TOC
-- [What is Deployment?](#what-is-deployment)
-- [The Production Container](#the-production-container)
-- [How Deployment Works](#how-deployment-works)
-- [Your Scripts & Files](#your-scripts--files)
-- [The AI Server](#the-ai-server)
-- [Quick Start Examples](#quick-start-examples)
-- [Using the Web API](#using-the-web-api)
-- [Configuration Files](#configuration-files)
-- [Troubleshooting Common Issues](#troubleshooting-common-issues)
-- [Advanced Usage](#advanced-usage)
-- [Cross References](#cross-references)
-
 ## What is Deployment?
 
 Deployment transforms your local Fractalic workflow (a Markdown file with AI operations) into a remote web service that others can use. Think of it as packaging your AI agent and making it available on the internet.

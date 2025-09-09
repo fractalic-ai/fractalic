@@ -8,7 +8,7 @@ outline: deep
 
 Operations mutate the context tree, consuming inputs (blocks, prompt literals, external sources) and producing new nodes.
 
-## 5.1 Shared Fields
+## Shared Fields
 - `block` → Content selection (single or array via `block_uri`).
 - `prompt` → Literal instruction / content.
 - `to.block_uri` → Target anchor for merge.
@@ -18,7 +18,7 @@ Operations mutate the context tree, consuming inputs (blocks, prompt literals, e
 - `model` → Alias; provider inferred via settings.
 Priority rule: If both `block` & `prompt` present they concatenate (blocks first). Missing both (where at least one required) → error.
 
-## 5.2 @import
+## @import
 Purpose: Inject external markdown (entire file or subsection) into current context.
 ```markdown
 @import
@@ -34,7 +34,7 @@ Params: `file` (req), `block` (optional slice), `mode`, `to`.
 Failure: missing file / block → error.
 Tips: Centralize reusable templates; prefer narrow block import for token efficiency.
 
-## 5.3 @llm
+## @llm
 Purpose: Core generative / reasoning / transformation operation. It can:
 - Consume explicit knowledge blocks and/or a literal prompt
 - Orchestrate multi-turn tool-augmented reasoning (agentic loop)
@@ -43,7 +43,7 @@ Purpose: Core generative / reasoning / transformation operation. It can:
 - Produce structured (JSON / tables / markdown) or free-form output
 - Persist raw output to disk to reduce context bloat
 
-### 5.3.1 Minimal Examples
+### Minimal Examples
 Plain literal prompt:
 ```markdown
 @llm
@@ -75,7 +75,7 @@ stop-sequences:
   - "\n# "
 ```
 
-### 5.3.2 Key Parameters (Extended)
+### Key Parameters (Extended)
 | Field | Required | Description |
 |-------|----------|-------------|
 | prompt | Conditional | Literal input text (multi-line allowed). Either `prompt` or `block` must be present. |
@@ -94,7 +94,7 @@ stop-sequences:
 
 (For semantics of each parameter see Syntax Reference §4.7.)
 
-### 5.3.3 Prompt Assembly Internals
+### Prompt Assembly Internals
 Order:
 1. Referenced block contents (in listed order)
 2. Literal `prompt`
@@ -102,7 +102,7 @@ Order:
 4. System / framework prompts (implicit)
 If both `prompt` & `block` absent → validation error.
 
-### 5.3.4 Tool / Agentic Loop Lifecycle
+### Tool / Agentic Loop Lifecycle
 When `tools` != `none`:
 1. Initial model call issued with current messages.
 2. Model may emit tool call instructions.
@@ -119,7 +119,7 @@ Visualization:
 [context blocks] → model → tool calls? → execute tools → merge tool outputs → model → ... → final answer
 ```
 
-### 5.3.5 Using MCP Tools
+### Using MCP Tools
 Declare tools:
 ```markdown
 @llm
@@ -138,7 +138,7 @@ Representative raw tool JSON:
 ```
 Extracted text is appended before the next model turn.
 
-### 5.3.6 Calling Another Fractalic Agent via `fractalic_run`
+### Calling Another Fractalic Agent via `fractalic_run`
 Let the model decide if an agent is required:
 ```markdown
 @llm
@@ -157,7 +157,7 @@ Conceptual tool invocation payload from model:
 ```
 Returned agent output is merged as tool-generated context; reasoning continues.
 
-### 5.3.7 Referencing Tool-Generated Context
+### Referencing Tool-Generated Context
 Tool outputs appear as normal user-role blocks with auto IDs. For consistent reuse, instruct the model (in the same call) to emit explicit headers:
 ```markdown
 @llm
@@ -172,13 +172,13 @@ block:
   block_uri: action-plan
 ```
 
-### 5.3.8 Ensuring Determinism & Safety
+### Ensuring Determinism & Safety
 - Constrain loops: set `tools-turns-max` (2–4 typical).
 - Add explicit decision criteria: “Call a tool only if data X is missing.”
 - For JSON output: `use-header: none` + schema instructions + optional `stop-sequences`.
 - Avoid broad wildcards early—curate context.
 
-### 5.3.9 Failure & Edge Case Handling
+### Failure & Edge Case Handling
 | Symptom | Likely Cause | Mitigation |
 |---------|--------------|-----------|
 | Empty tool loop result | Tool output lacked extractable fields | Inspect raw JSON; adjust tool or extraction logic |
@@ -188,13 +188,13 @@ block:
 | JSON polluted by headings | Wrapper heading present | `use-header: none` |
 | Truncated mid-thought | Overly aggressive stop sequence | Remove / refine sequences |
 
-### 5.3.10 Performance & Token Strategy
+### Performance & Token Strategy
 - Stage: broad gather → compress summary → downstream use summary.
 - Use `replace` to keep long evolving artifacts slim once stable.
 - Save bulky outputs via `save-to-file` then import trimmed extracts later.
 - Prefer narrow block IDs over `/*` across huge trees.
 
-### 5.3.11 Design Pattern Examples
+### Design Pattern Examples
 Research → Tool Loop → Synthesis:
 ```markdown
 @llm
@@ -228,7 +228,7 @@ block:
   block_uri: test-output/*
 ```
 
-### 5.3.12 Validation Checklist
+### Validation Checklist
 Before shipping an @llm workflow:
 - Minimal necessary blocks selected?
 - Tool usage bounded (`tools-turns-max`)?
@@ -238,7 +238,7 @@ Before shipping an @llm workflow:
 - Stop sequences appropriate (not over-broad)?
 
 ---
-### 5.4 @shell
+## @shell
 Execute shell commands and capture stdout/stderr.
 ```markdown
 @shell
@@ -255,7 +255,7 @@ use-header: "# Data Count"
 ```
 Security: Avoid blindly executing unreviewed model output. Keep commands idempotent.
 
-### 5.5 @run
+## @run
 Run another markdown workflow (agent) and merge its returned value.
 ```markdown
 @run
@@ -273,7 +273,7 @@ use-header: "# Unified Draft"
 ```
 Requires callee to contain an `@return` for deterministic output.
 
-### 5.6 @return
+## @return
 Emit final value and terminate current workflow.
 ```markdown
 @return
@@ -287,14 +287,14 @@ prompt: "DONE"
 ```
 No `mode`/`to` (caller handles merge semantics).
 
-### 5.7 @goto (Experimental)
+## @goto (Experimental)
 Conditional navigation / pointer jump (if enabled by implementation). Prefer explicit structure until stable.
 ```markdown
 @goto
 block: decision-node
 ```
 
-### 5.8 Internal Execution Flow
+## Internal Execution Flow
 1. Parse YAML
 2. Resolve block refs
 3. Assemble prompt
@@ -303,7 +303,7 @@ block: decision-node
 6. Merge via `mode` / `to`
 7. Update AST & diffs
 
-### 5.9 Capability Snapshot
+## Capability Snapshot
 | Operation | Reads Blocks | Writes Blocks | External IO | Prompt Required | File Required | Tool Loop |
 |-----------|--------------|---------------|-------------|-----------------|--------------|-----------|
 | @import   | Optional     | Yes           | FS          | No              | Yes          | No        |
@@ -313,7 +313,7 @@ block: decision-node
 | @return   | Optional     | (Return value) | None       | Optional        | No           | No        |
 | @goto*    | Optional     | No            | None        | Optional        | No           | No        |
 
-### 5.10 Choosing the Right Operation
+## Choosing the Right Operation
 - Static knowledge: @import
 - Generation / reasoning: @llm
 - External verification / retrieval: @shell
@@ -321,7 +321,7 @@ block: decision-node
 - Completion: @return
 - Experimental flow: @goto
 
-### 5.11 Error Handling Patterns
+## Error Handling Patterns
 | Symptom | Likely Cause | Fix |
 |---------|--------------|-----|
 | Empty @llm output | Provider auth / tool fail | Check logs & keys |
@@ -330,7 +330,7 @@ block: decision-node
 | No sub-agent output | Missing `@return` in callee | Add return block |
 | Duplicate imported structure | Re-import loop | Deduplicate or centralize imports |
 
-### 5.12 Composition Patterns
+## Composition Patterns
 Refinement:
 ```markdown
 # Draft {id=draft}
@@ -355,7 +355,7 @@ block:
   block_uri: test-output/*
 ```
 
-### 5.13 Performance Tips
+## Performance Tips
 - Collapse large intermediate blocks into compressed summaries.
 - Use `save-to-file` for bulky outputs not needed in future prompts.
 - Prefer targeted block refs over broad wildcards.

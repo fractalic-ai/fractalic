@@ -6,22 +6,22 @@ outline: deep
 
 # MCP Integration
 
-## 12.1 Purpose
+## Purpose
 MCP Integration extends Fractalic with external tools that your AI agents can use. Instead of being limited to built-in commands, you can add search engines, databases, APIs, and custom business tools. This section explains how tools become available to `@llm` operations and how to add new ones.
 
-## 12.2 Internal Table of Contents
-- [12.1 Purpose](#121-purpose)
-- [12.2 Internal Table of Contents](#122-internal-table-of-contents)
-- [12.3 How MCP Works in Fractalic](#123-how-mcp-works-in-fractalic)
-- [12.4 The Manager System](#124-the-manager-system)
-- [12.5 Adding Your First Tool](#125-adding-your-first-tool)
-- [12.6 Tool Execution Flow](#126-tool-execution-flow)
-- [12.7 Managing Services](#127-managing-services)
-- [12.8 Common Issues & Solutions](#128-common-issues--solutions)
-- [12.9 Performance Tips](#129-performance-tips)
-- [12.10 See Also](#1210-see-also)
+## Internal Table of Contents
+- [Purpose](#purpose)
+- [Internal Table of Contents](#internal-table-of-contents)
+- [How MCP Works in Fractalic](#how-mcp-works-in-fractalic)
+- [The Manager System](#the-manager-system)
+- [Adding Your First Tool](#adding-your-first-tool)
+- [Tool Execution Flow](#tool-execution-flow)
+- [Managing Services](#managing-services)
+- [Common Issues & Solutions](#common-issues--solutions)
+- [Performance Tips](#performance-tips)
+- [See Also](#see-also)
 
-## 12.3 How MCP Works in Fractalic
+## How MCP Works in Fractalic
 Fractalic uses one MCP Manager that acts as a central hub for all external tool capabilities. The manager is a standalone server that exposes tools, prompts, and resources through a REST API. It handles the complexity of connecting to different types of MCP servers while presenting a unified interface.
 
 The flow works as follows:
@@ -35,7 +35,7 @@ The flow works as follows:
 
 Initial startup takes a few seconds as the manager discovers and caches all available capabilities from configured servers. Subsequent operations are much faster due to intelligent caching.
 
-## 12.4 MCP Manager Features
+## The Manager System
 The MCP Manager provides several key capabilities:
 
 **Multi-Protocol Support**: Handles different MCP server types including stdio (local executables), SSE (server-sent events), and HTTP endpoints. Transport type is auto-detected based on configuration.
@@ -54,7 +54,7 @@ The MCP Manager provides several key capabilities:
 
 **Prompts and Resources**: Beyond tools, the manager also exposes prompts and resources from MCP servers, making them available for advanced workflows.
 
-## 12.5 Server Configuration
+## Server Configuration
 MCP servers are configured in `mcp_servers.json`. The manager supports the standard Claude Desktop format, so existing configurations can be directly copied:
 
 ```json
@@ -84,7 +84,7 @@ MCP servers are configured in `mcp_servers.json`. The manager supports the stand
 
 The manager auto-detects transport type from URL patterns when not specified.
 
-## 12.5 Adding Your First Tool
+## Adding Your First Tool
 To add a new MCP server, you can use the Fractalic UI or edit the configuration file directly.
 
 **Via Fractalic UI**: The UI provides an "Add Server" interface that accepts standard Claude Desktop JSON configurations. You can copy existing server definitions and paste them directly.
@@ -117,7 +117,7 @@ tools:
 tools-turns-max: 2
 ```
 
-## 12.6 Tool Naming and Selection
+## Tool Naming and Selection
 Tools are exposed with a `service.tool_name` format for uniqueness. For example, the memory server's `add` tool becomes `memory-stdio-server.add`. 
 
 **Filtering by Service**: You can restrict tool access to specific services using the `mcp/service-name` pattern in your tools list:
@@ -163,7 +163,7 @@ Resolution logic:
 
 Practical recommendation: Prefer explicit service scopes (e.g. `mcp/memory-stdio-server`) over `all` for observability, predictability, and token efficiency.
 
-## 12.7 Tool Execution Flow
+## Tool Execution Flow
 When your AI selects a tool:
 
 1. AI generates function call with tool name and JSON parameters
@@ -176,7 +176,7 @@ When your AI selects a tool:
 
 The manager uses short-lived connections per call to avoid resource accumulation and ensure clean execution.
 
-## 12.8 Managing Services
+## Managing Services
 **Enable/Disable**: Set `enabled: false` in `mcp_servers.json` to temporarily disable a service without losing its configuration. The manager will skip disabled services during discovery.
 
 **OAuth Services**: For services requiring authentication, set `oauth: true`. The manager handles the complete OAuth 2.0 flow:
@@ -193,7 +193,7 @@ For production deployments, consider using MCP services with embedded authentica
 
 **Hot Reload**: Configuration changes are detected automatically in most cases. For immediate effect, restart the manager or use the UI toggle functions.
 
-## 12.9 Logging and Debugging
+## Logging and Debugging
 Enable detailed logging by setting environment variables:
 ```bash
 export MCP_DEBUG=1
@@ -208,7 +208,7 @@ This provides insights into:
 
 Common log messages help identify configuration issues or service problems.
 
-## 12.10 Common Issues & Solutions
+## Common Issues & Solutions
 **No tools appear**: Verify MCP Manager is running on port 5859. Check `settings.toml` points to correct manager URL (`http://127.0.0.1:5859`).
 
 **Service won't start**: Check command syntax and paths in `mcp_servers.json`. For stdio servers, verify the executable is available. Test commands manually first.
@@ -219,14 +219,14 @@ Common log messages help identify configuration issues or service problems.
 
 **OAuth authentication issues**: Verify service supports OAuth and redirect URLs are configured correctly. Check token refresh logic in debug logs.
 
-## 12.11 Performance Optimization
+## Performance Optimization
 - Only enable servers you actively use to reduce discovery overhead
 - Use specific service filtering (`mcp/service-name`) rather than enabling all tools
 - Set conservative `tools-turns-max` values (2-3) to prevent runaway loops
 - Summarize large tool outputs in follow-up operations to manage context size
 - Monitor cache hit rates in debug logs to ensure optimal performance
 
-## 12.12 See Also
+## See Also
 - [Configuration](configuration.md) - MCP manager connection settings
 - [Advanced LLM Features](advanced-llm-features.md) - Tool loop patterns and optimization
 - [Operations Reference](operations-reference.md) - Complete `@llm` operation syntax

@@ -62,6 +62,22 @@ The document evolves as operations run—new blocks are appended, replaced, or r
 - **Integration**: Seamless shell and tool integration via MCP
 - **Rapid Development**: Progressive elaboration without refactoring
 
-## Get Started
+## Getting Started
 
 Ready to build your first AI workflow? Check out the [Quick Start guide](/quick-start) or dive into [Core Concepts](/core-concepts) to understand the fundamentals.
+
+## Core Concepts
+
+## Guides
+
+## Reference
+
+## Integrations
+
+## Deployment
+
+## Advanced Topics
+
+## Contributing
+
+## Appendix

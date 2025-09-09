@@ -635,7 +635,7 @@ def main():
 
 ```python
 #!/usr/bin/env python3
-"""File processor with multiple operation modes"""
+"""File processor with various operation modes"""
 
 import argparse
 import json

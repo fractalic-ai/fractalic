@@ -6,15 +6,12 @@ outline: deep
 
 # Introduction
 
-### What is Fractalic?
-Fractalic is a plain‑language programming environment for building AI workflows and agents using ordinary Markdown plus lightweight YAML operation blocks. Instead of wiring nodes in a UI or writing imperative Python scripts, you express intent in structured text. Fractalic interprets your document as a living execution context: headings become knowledge blocks; special `@operation` blocks perform actions (LLM calls, shell commands, imports, executing sub‑workflows, returning results). The document evolves as operations run—new blocks are appended, replaced, or refined—so you can literally "grow" an AI system the way you draft a document.troduction
-
-### What is Fractalic?
+## What is Fractalic?
 Fractalic is a plain‑language programming environment for building AI workflows and agents using ordinary Markdown plus lightweight YAML operation blocks. Instead of wiring nodes in a UI or writing imperative Python scripts, you express intent in structured text. Fractalic interprets your document as a living execution context: headings become knowledge blocks; special `@operation` blocks perform actions (LLM calls, shell commands, imports, executing sub‑workflows, returning results). The document evolves as operations run—new blocks are appended, replaced, or refined—so you can literally “grow” an AI system the way you draft a document.
 
 Key idea: A Fractalic file = (Ordered Knowledge Blocks) + (Operation Blocks that transform / extend context) → Final Returned Result.
 
-### Core Philosophy (Plain-Language Programming, Context as a First-Class Object)
+## Core Philosophy (Plain-Language Programming, Context as a First-Class Object)
 Below each guiding principle you get a tiny, copyable example.
 
 #### 1. Plain-Language as Code
@@ -119,7 +116,7 @@ block:
 ```
 You always know exactly what was sent.
 
-### Key Concepts at a Glance
+## Key Concepts at a Glance
 Each concept below includes a mini example.
 
 #### Knowledge Block
@@ -233,7 +230,7 @@ Generated top header becomes level 3 (###) inside this section.
 
 ---
 
-### Comparison: Fractalic vs Traditional Scripting vs Agent Frameworks
+## Comparison: Fractalic vs Traditional Scripting vs Agent Frameworks
 | Aspect | Fractalic | Traditional Python Script | Typical Agent Framework |
 |--------|-----------|---------------------------|--------------------------|
 | Authoring Medium | Markdown + YAML ops | Imperative code | Config + code + orchestration logic |
@@ -247,7 +244,7 @@ Generated top header becomes level 3 (###) inside this section.
 
 Interpretation: Use Fractalic when you want rapid, explainable, auditable AI workflows without building a code-heavy infrastructure.
 
-### When (and When Not) to Use Fractalic
+## When (and When Not) to Use Fractalic
 Use Fractalic when:
 - You prototype or iterate AI workflows faster than traditional refactors allow.
 - Non‑developers or mixed teams must read and adjust logic directly.

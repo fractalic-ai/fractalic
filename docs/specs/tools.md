@@ -2,19 +2,19 @@
 
 ### Contents
 
-1. Why tools are first-class citizens in Fractalic
-2. How the registry builds the master tool list
-3. Two ways to publish a tool
-4. Contract for Python & Bash scripts (auto-discovery mode)
-5. End-to-end life-cycle of a tool call
-6. Using Model-Context-Protocol (MCP) servers
-7. FAQ & troubleshooting
+- Why tools are first-class citizens in Fractalic
+- How the registry builds the master tool list
+- Two ways to publish a tool
+- Contract for Python & Bash scripts (auto-discovery mode)
+- End-to-end life-cycle of a tool call
+- Using Model-Context-Protocol (MCP) servers
+- FAQ & troubleshooting
 
 > **📋 For detailed technical specifications on building autodiscoverable tools, see the [Autodiscoverable Tools Technical Specification Document (TSD)](./autodiscoverable-tools-tsd.md)**
 
 ---
 
-## 1.  Why tools are first-class citizens in Fractalic
+## Why tools are first-class citizens in Fractalic
 
 Fractalic’s workflows are driven by LLM-calls (`@llm`), which can
 **delegate subtasks**—run a shell command, fetch data, resize an image, etc.—by
@@ -31,7 +31,7 @@ Benefits:
 
 ---
 
-## 2.  How the registry builds the master tool list
+## How the registry builds the master tool list
 
 ```mermaid
 graph TD
@@ -63,14 +63,14 @@ graph TD
 
 ---
 
-## 3.  Two ways to publish a tool
+## Two ways to publish a tool
 
 | Mode                  | When to choose                                                                 | What you write                               |
 | --------------------- | ------------------------------------------------------------------------------ | -------------------------------------------- |
 | **Explicit manifest** | You want a custom name, rich type hints, or the script can’t produce `--help`. | A short YAML + any script / Python function. |
 | **Auto-discover**     | You control the script and are OK to follow the help-text contract.            | **Only the script** – no YAML required.      |
 
-### 3.1  Explicit manifest example
+### Explicit manifest example
 
 ```yaml
 # tools/img_resize.yaml
@@ -87,7 +87,7 @@ parameters:
   required: [infile, width]
 ```
 
-### 3.2  Auto-discover example
+### Auto-discover example
 
 ```python
 # tools/weather.py
@@ -117,11 +117,11 @@ print(requests.get(url, timeout=5).text)
 
 ---
 
-## 4.  Simple JSON Schema Discovery Contract
+## Simple JSON Schema Discovery Contract
 
 Fractalic uses **Simple JSON Schema Discovery** for automatic tool registration. This is the ONLY supported approach for autodiscoverable tools.
 
-### 4.1 Simple JSON Convention Requirements
+### Simple JSON Convention Requirements
 
 All autodiscoverable tools must implement the Simple JSON convention:
 
@@ -139,7 +139,7 @@ All autodiscoverable tools must implement the Simple JSON convention:
 | **Schema dump** | Support `--fractalic-dump-schema` for rich parameter definitions |
 | **UTF-8 Support** | Use `ensure_ascii=False` in `json.dumps()` |
 
-### 4.2 Simple JSON Template
+### Simple JSON Template
 
 ```python
 #!/usr/bin/env python3
@@ -190,7 +190,7 @@ if __name__ == "__main__":
     main()
 ```
 
-### 4.3 Tool Discovery Process
+### Tool Discovery Process
 
 ```mermaid
 graph TD
@@ -213,7 +213,7 @@ graph TD
 
 ---
 
-## 5.  Life-cycle of a tool call
+## Life-cycle of a tool call
 
 1. **Registry produces schema list** and passes it to LiteLLM (`tools=`).
 2. **Model replies** with
@@ -232,7 +232,7 @@ graph TD
 
 ---
 
-## 6.  MCP servers – zero-friction extension
+## MCP servers – zero-friction extension
 
 * Local and MCP tools share the **exact same manifest format**.
 
@@ -250,7 +250,7 @@ graph TD
 
 ---
 
-## 7.  FAQ & troubleshooting
+## FAQ & troubleshooting
 
 | Symptom                                               | Likely cause                                      | Fix                                                               |
 | ----------------------------------------------------- | ------------------------------------------------- | ----------------------------------------------------------------- |
@@ -261,7 +261,7 @@ graph TD
 
 ---
 
-## 8.  Common Pitfalls & Best Practices for Auto-Discoverable Tools
+## Common Pitfalls & Best Practices for Auto-Discoverable Tools
 
 ### Problems Encountered
 

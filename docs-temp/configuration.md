@@ -8,10 +8,10 @@ outline: deep
 
 Status: Stable
 
-## 11.1 Purpose
+## Purpose
 Configuration tells Fractalic which model to use, where to find API keys, what extra tools (MCP servers) are available, and which runtime switches are on. This page explains the single file you touch most: `settings.toml`. After reading you should be able to (a) start with one model, (b) add a second model for polishing, (c) inject environment variables safely, and (d) enable a debugging flag then turn it back off.
 
-## 11.2 How to Think About It
+## How to Think About It
 You have one layered system:
 1. `settings.toml` (your baseline defaults)
 2. Environment variables (quick overrides / secret injection)
@@ -20,7 +20,7 @@ If a value appears in more than one place the higher layer wins.
 
 Keep it simple early: one model table + a default. Expand only when you feel a real need (cheaper drafts, higher quality review, special proxy, etc.).
 
-## 11.3 First Run (Minimal)
+## First Run (Minimal)
 Create or copy a starter file:
 ```toml
 defaultProvider = "openrouter/openai/gpt-5-mini"
@@ -31,7 +31,7 @@ model = "openrouter/openai/gpt-5-mini"
 ```
 That is enough. Fractalic will use this model whenever an `@llm` block does not specify `model:`.
 
-## 11.4 Full File Anatomy
+## Full File Anatomy
 Top sections you may see:
 - `defaultProvider` – name of the model table to use by default.
 - `environment` – list of key/value pairs exported to the process (used by tools or shell steps).
@@ -46,7 +46,7 @@ Model table fields (you only need `apiKey` + `model` at first):
 - `contextSize`: informational (lets you remember the intended max window size; not enforced here).
 - `base_url`: set only if using a proxy or alternative gateway.
 
-## 11.5 Adding a Second Model (Draft + Polish Pattern)
+## Adding a Second Model (Draft + Polish Pattern)
 Reason: save cost by drafting with a cheaper model then refining with a higher quality one.
 ```toml
 defaultProvider = "draft"
@@ -71,13 +71,13 @@ block:
 ```
 You leave earlier calls model‑free so they use the default (`draft`).
 
-## 11.6 How Model Names Are Resolved (Practical View)
+## How Model Names Are Resolved (Practical View)
 When you specify `model: review` Fractalic looks for a table named `review` under `[settings]`. If you pass a raw provider string (like `openrouter/openai/gpt-5-mini`) it tries:
 1. Direct table name match
 2. Table whose internal `model` field matches (with minor normalization of `.` / `-` / `_`)
 If none match it lists available keys. Fix by either renaming the table or using the table’s exact alias. Keep aliases short and memorable.
 
-## 11.7 Environment Variable Injection
+## Environment Variable Injection
 You can set variables for tools (search APIs, etc.) without exporting them globally.
 ```toml
 [[environment]]
@@ -94,11 +94,11 @@ Guidelines:
 - Do not commit real secrets to git (add file to `.gitignore` if necessary).
 - For production: inject via deployment secrets or mount a file at runtime.
 
-## 11.8 Runtime Flag: `enableOperationsVisibility`
+## Runtime Flag: `enableOperationsVisibility`
 Default: `false`.
 When `true` more internal operation nodes may appear implicitly in model context (beyond headings). This can help debugging “why did it answer that?” but it increases token cost and noise. Leave it off unless investigating a selection issue. Prefer explicit `block:` references instead of relying on implicit expansion.
 
-## 11.9 MCP Manager (Tool Extension)
+## MCP Manager (Tool Extension)
 Fractalic currently expects exactly one running MCP Manager instance. It listens (by default) on port `5859` and aggregates all underlying MCP services for you. You do NOT list multiple raw MCP servers in `settings.toml`—keep a single entry pointing at the manager.
 
 Minimal configuration:
@@ -120,7 +120,7 @@ If the manager is down: tools will not load and the log will show connection att
 
 Keep it simple: one endpoint, manager handles aggregation.
 
-## 11.10 Typical Scenarios
+## Typical Scenarios
 Scenario | What You Do
 -------- | -----------
 Just installed / single model | Set `defaultProvider`, add one model table with key
@@ -129,7 +129,7 @@ Need search tool auth | Add Tavily (or similar) key via `[[environment]]`
 Debugging context selection | Temporarily set `runtime.enableOperationsVisibility = true` then revert
 Add internal proxy | Set `base_url` in the relevant model table
 
-## 11.11 Pitfalls (And Fixes)
+## Pitfalls (And Fixes)
 Problem | Cause | Fix
 ------- | ----- | ---
 “model not found” error | Alias mismatch | Use table alias not raw marketing name or add correct table
@@ -138,14 +138,14 @@ Huge token usage jump | Visibility flag left on | Turn off `enableOperationsVisi
 Inconsistent tone across passes | Different temperatures | Set polishing model `temperature = 0`
 Hard to reproduce output | Drift of defaultProvider | Pin explicit `model:` in final deterministic steps
 
-## 11.12 Cost & Performance Habits
+## Cost & Performance Habits
 - Keep only active model tables (delete unused experiments).
 - Use a cheaper default draft model + explicit high‑quality review stage.
 - Turn off debugging flags (visibility, verbose tracing) after issue resolved.
 - Summarize or replace large blocks rather than keeping long append chains (see Optimization sections elsewhere).
 - Enable token tracing only while diagnosing budget.
 
-## 11.13 Secret Handling Essentials
+## Secret Handling Essentials
 Do | Why
 -- | ---
 Keep real keys out of git | Prevent leak
@@ -154,7 +154,7 @@ Rotate after exposure | Limit blast window
 Use environment / secret store in CI | Central management
 Limit environment entries | Smaller attack surface
 
-## 11.14 Quick Checklist Before Committing
+## Quick Checklist Before Committing
 - [ ] `defaultProvider` set and works
 - [ ] All required model tables have `apiKey`
 - [ ] No real secrets appear in diff
@@ -162,7 +162,7 @@ Limit environment entries | Smaller attack surface
 - [ ] Extra experimental models removed or commented
 - [ ] Single MCP manager entry present (`http://127.0.0.1:5859` or your deployed host)
 
-## 11.15 See Also
+## See Also
 - [Syntax Reference](syntax-reference.md)
 - [Operations Reference](operations-reference.md)
 - [Advanced LLM Features](advanced-llm-features.md)

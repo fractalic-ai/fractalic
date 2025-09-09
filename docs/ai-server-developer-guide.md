@@ -2,9 +2,11 @@
 
 This guide provides technical details for developers working with the Fractalic AI Server implementation, architecture, and extending its functionality.
 
-## Architecture Overview
+## Overview
 
 The Fractalic AI Server is built as a lightweight FastAPI application that provides HTTP access to the core Fractalic execution engine.
+
+## Architecture
 
 ### Key Components
 
@@ -91,7 +93,7 @@ The `run_fractalic()` function returns a dictionary with:
 - `output`: Execution summary
 - `error`: Error message (if failed)
 
-## Development Setup
+## Local Development Setup
 
 ### Prerequisites
 
@@ -134,7 +136,7 @@ curl -X POST "http://localhost:8001/execute" \
   -d '{"filename": "/path/to/test.md"}'
 ```
 
-## Code Architecture
+## Core Modules
 
 ### Error Handling Strategy
 
@@ -195,103 +197,45 @@ if request.parameter_text:
     param_input_user_request = 'input-parameters'
 ```
 
-## Extending the Server
+## Request Lifecycle
 
-### Adding New Endpoints
+1. **Receive Request**: HTTP request received by FastAPI
+2. **Validate Request**: Pydantic model validates JSON structure
+3. **Process Request**:
+    - Check script file existence
+    - Manage working directory
+    - Inject parameters (if any)
+    - Call `run_fractalic()`
+4. **Return Response**: Send JSON response back to client
 
-```python
-@app.post("/new-endpoint")
-async def new_functionality(request: NewRequest):
-    """Add new functionality while maintaining consistency."""
-    try:
-        # Validate request
-        # Process with core engine
-        # Return formatted response
-        pass
-    except Exception as e:
-        return {"success": False, "error": str(e)}
-```
+## Adding New Operations
 
-### Custom Response Models
+To add a new operation, define a new endpoint and implement the core logic:
 
 ```python
-from pydantic import BaseModel
-from typing import Optional, List
-
-class ExtendedExecuteResponse(BaseModel):
-    success: bool
-    explicit_return: bool
-    return_content: Optional[str] = None
-    branch_name: Optional[str] = None
-    output: str
-    execution_time: Optional[float] = None
-    warnings: List[str] = []
+@app.post("/new-operation")
+async def new_operation(request: NewRequest):
+    # Validate and process request
+    # Interact with core engine
+    # Return response
+    pass
 ```
 
-### Middleware Integration
+## Tooling & Diagnostics
 
-```python
-from fastapi import Request
-import time
+### Built-in Diagnostics
 
-@app.middleware("http")
-async def add_process_time_header(request: Request, call_next):
-    start_time = time.time()
-    response = await call_next(request)
-    process_time = time.time() - start_time
-    response.headers["X-Process-Time"] = str(process_time)
-    return response
-```
+- **Health Check Endpoint**: `/health` - Returns server health status
+- **Request Logging**: Logs all incoming requests and responses
+- **Error Responses**: Detailed error messages in response JSON
 
-## Production Deployment
+### External Tools
 
-### Docker Configuration
+- **Postman**: For API testing and exploration
+- **cURL**: Command-line tool for making HTTP requests
+- **Browser**: For accessing API documentation and health check
 
-```dockerfile
-FROM python:3.11-slim
-
-WORKDIR /app
-COPY requirements.txt .
-RUN pip install -r requirements.txt
-
-COPY . .
-EXPOSE 8001
-
-CMD ["python", "ai_server/fractalic_server.py"]
-```
-
-### Environment Configuration
-
-```bash
-# Environment variables for production
-export FRACTALIC_HOST=0.0.0.0
-export FRACTALIC_PORT=8001
-export FRACTALIC_WORKERS=4
-export FRACTALIC_LOG_LEVEL=info
-```
-
-### Reverse Proxy Setup (Nginx)
-
-```nginx
-upstream fractalic_server {
-    server 127.0.0.1:8001;
-}
-
-server {
-    listen 80;
-    server_name your-domain.com;
-    
-    location / {
-        proxy_pass http://fractalic_server;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_timeout 300s;  # LLM operations can take time
-    }
-}
-```
-
-## Testing Framework
+## Testing Strategy
 
 ### Unit Tests
 
@@ -345,7 +289,7 @@ block: response
     assert "hello" in result["return_content"].lower()
 ```
 
-## Performance Considerations
+## Performance Optimization
 
 ### Optimization Strategies
 
@@ -376,7 +320,7 @@ async def log_requests(request: Request, call_next):
     return response
 ```
 
-## Security Implementation
+## Security Considerations
 
 ### Input Validation
 
@@ -410,7 +354,69 @@ async def execute_script(request: Request, execute_request: ExecuteRequest):
     # Implementation...
 ```
 
-## Debugging and Troubleshooting
+## Deployment Workflow
+
+### Docker Configuration
+
+```dockerfile
+FROM python:3.11-slim
+
+WORKDIR /app
+COPY requirements.txt .
+RUN pip install -r requirements.txt
+
+COPY . .
+EXPOSE 8001
+
+CMD ["python", "ai_server/fractalic_server.py"]
+```
+
+### Environment Configuration
+
+```bash
+# Environment variables for production
+export FRACTALIC_HOST=0.0.0.0
+export FRACTALIC_PORT=8001
+export FRACTALIC_WORKERS=4
+export FRACTALIC_LOG_LEVEL=info
+```
+
+### Reverse Proxy Setup (Nginx)
+
+```nginx
+upstream fractalic_server {
+    server 127.0.0.1:8001;
+}
+
+server {
+    listen 80;
+    server_name your-domain.com;
+    
+    location / {
+        proxy_pass http://fractalic_server;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_timeout 300s;  # LLM operations can take time
+    }
+}
+```
+
+## Observability
+
+### Logging
+
+- **Structured Logs**: JSON format logs for easy parsing
+- **Log Rotation**: Logs are rotated and compressed
+- **Log Levels**: Support for different log levels (debug, info, warning, error)
+
+### Metrics
+
+- **Request Metrics**: Count and duration of requests
+- **Error Rates**: Track 4xx and 5xx response rates
+- **Performance Metrics**: Track execution time of core operations
+
+## Troubleshooting
 
 ### Debug Mode
 

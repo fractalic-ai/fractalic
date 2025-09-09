@@ -8,7 +8,7 @@ outline: deep
 
 Focus: How to add your own tools to Fractalic and how the tool discovery system works.
 
-## 16.1 What Are Tools?
+## What Are Tools?
 
 Tools are external programs that your AI agents can call during `@llm` operations. When you write:
 
@@ -22,7 +22,7 @@ tools:
 
 Fractalic automatically discovers and calls these tools, feeding their results back to the AI model.
 
-## 16.2 Three Ways Tools Get Discovered
+## Three Ways Tools Get Discovered
 
 Fractalic finds tools from three sources (in this order):
 
@@ -32,7 +32,7 @@ Fractalic finds tools from three sources (in this order):
 
 If tools have the same name, the first one found wins.
 
-## 16.3 Your First Tool: Simple JSON Pattern
+## Your First Tool: Simple JSON Pattern
 
 The easiest way to create a tool is the "simple JSON" pattern. Your script:
 1. Receives JSON input as a command line argument
@@ -75,7 +75,7 @@ Save this file and run Fractalic - it will automatically discover `greet` as a t
 
 **Important**: Without additional schema information, the AI model will see this as a generic tool that accepts any JSON parameters. The model can still use it, but won't know what specific parameters are expected.
 
-## 16.4 Adding Schema Information (Optional)
+## Adding Schema Information (Optional)
 
 For better AI integration, you can add a schema dump handler that tells the AI exactly what parameters your tool expects:
 
@@ -117,7 +117,7 @@ With this schema dump, the AI model knows exactly what parameters to send and ho
 **Without schema dump**: Tool works but AI sees it as generic `{"additionalProperties": true}`  
 **With schema dump**: AI gets precise parameter definitions and descriptions
 
-## 16.5 Manual Control with YAML Manifests
+## Manual Control with YAML Manifests
 
 For production tools or when you need precise control, create explicit YAML manifests:
 
@@ -147,7 +147,7 @@ parameters:
 
 The corresponding Python script follows the same JSON input/output pattern as before.
 
-## 16.6 Working Directory and Environment
+## Working Directory and Environment
 
 Tools run in their own directory with environment variables from your `settings.toml`:
 
@@ -159,7 +159,7 @@ value = "ghp_your_token_here"
 
 Your tool can access this via `os.environ["GITHUB_TOKEN"]`.
 
-## 16.7 Legacy: Argparse Pattern (Still Supported)
+## Legacy: Argparse Pattern (Still Supported)
 
 Fractalic can also auto-discover traditional argparse scripts:
 
@@ -181,7 +181,7 @@ print(json.dumps(result))
 
 But the simple JSON pattern is recommended for new tools.
 
-## 16.8 Tool Discovery Process
+## Tool Discovery Process
 
 When Fractalic starts, it:
 
@@ -197,7 +197,7 @@ When Fractalic starts, it:
 
 **Key insight**: Simple JSON tools work immediately without any schema definition - the AI can call them with any parameters and your tool decides how to handle the input. Adding schema dump is optional but helps the AI use your tool more effectively.
 
-## 16.9 Testing Your Tools
+## Testing Your Tools
 
 Test tools directly before using them in Fractalic:
 
@@ -212,7 +212,7 @@ python tools/greet.py '{"name": "Alice", "style": "enthusiastic"}'
 python tools/greet.py --fractalic-dump-schema
 ```
 
-## 16.10 Checking Tool Registration
+## Checking Tool Registration
 
 See what tools Fractalic found:
 
@@ -223,7 +223,7 @@ curl 'http://localhost:8000/tools_schema/?tools_dir=tools'
 # Or check the logs when Fractalic starts
 ```
 
-## 16.11 Common Patterns
+## Common Patterns
 
 **File Processing Tool**:
 ```python
@@ -260,7 +260,7 @@ def main():
         sys.exit(1)
 ```
 
-## 16.12 Best Practices
+## Best Practices
 
 - **Keep output focused**: Return only what the AI needs, not everything available
 - **Handle errors gracefully**: Always return JSON, even for errors
@@ -269,7 +269,7 @@ def main():
 - **Be fast**: Tools that take >30 seconds may cause timeouts
 - **Stay secure**: Validate inputs, especially for file/network operations
 
-## 16.13 Troubleshooting
+## Troubleshooting
 
 | Problem | Solution |
 |---------|----------|
@@ -279,14 +279,14 @@ def main():
 | Missing from `/tools_schema/` | Check Fractalic logs for discovery errors |
 | Wrong parameters | Add explicit YAML manifest or improve schema dump |
 
-## 16.14 Next Steps
+## Next Steps
 
 - Try creating a simple tool using the JSON pattern
 - Check out [MCP Integration](mcp-integration.md) for connecting external tool ecosystems
 - See [Advanced LLM Features](advanced-llm-features.md) for tool usage patterns
 - Read [Operations Reference](operations-reference.md) for using tools in workflows
 
-## 16.15 See Also
+## See Also
 - [Operations Reference](operations-reference.md) 
 - [Advanced LLM Features](advanced-llm-features.md)
 - [MCP Integration](mcp-integration.md)

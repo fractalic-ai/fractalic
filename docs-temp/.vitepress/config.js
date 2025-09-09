@@ -44,7 +44,7 @@ export default defineConfig({
       '/': [
         {
           text: 'Getting Started',
-          collapsed: false,
+          collapsible: false,
           items: [
             { text: 'Introduction', link: '/introduction' },
             { text: 'Quick Start', link: '/quick-start' },
@@ -53,7 +53,7 @@ export default defineConfig({
         },
         {
           text: 'Reference',
-          collapsed: false,
+          collapsible: false,
           items: [
             { text: 'Syntax Reference', link: '/syntax-reference' },
             { text: 'Operations Reference', link: '/operations-reference' },
@@ -62,7 +62,7 @@ export default defineConfig({
         },
         {
           text: 'Advanced Features',
-          collapsed: true,
+          collapsible: false,
           items: [
             { text: 'Advanced LLM Features', link: '/advanced-llm-features' },
             { text: 'Context Management', link: '/context-management' },
@@ -72,7 +72,7 @@ export default defineConfig({
         },
         {
           text: 'Integration & Workflows',
-          collapsed: true,
+          collapsible: false,
           items: [
             { text: 'Shell Integration Patterns', link: '/shell-integration-patterns' },
             { text: 'Agent & Modular Workflows', link: '/agent-modular-workflows' },
@@ -82,7 +82,7 @@ export default defineConfig({
         },
         {
           text: 'Deployment & API',
-          collapsed: true,
+          collapsible: false,
           items: [
             { text: 'UI Server & API', link: '/ui-server-api' },
             { text: 'Publisher & Deployment', link: '/publisher-deployment' }

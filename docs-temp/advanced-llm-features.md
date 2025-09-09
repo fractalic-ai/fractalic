@@ -6,11 +6,11 @@ outline: deep
 
 # Advanced LLM Features
 
-Status: Stable (supplements `operations-reference.md` §5.3)
+Status: Stable (supplements `operations-reference.md`)
 Scope: Deep patterns for controlling, structuring, optimizing, and validating `@llm` driven workflows beyond the core syntax.
 
 ---
-## 6.1 Overview
+## Overview
 Fractalic treats every `@llm` invocation as a deterministic transformation over an evolving document tree. Advanced usage focuses on:
 - Precision context shaping (selective block referencing, staged compression)
 - Tool / agentic loop governance (bounded reasoning, explicit decision frames)
@@ -23,7 +23,7 @@ Fractalic treats every `@llm` invocation as a deterministic transformation over 
 Use this document as a pattern catalog; operational field definitions remain canonical in the Operations & Syntax references.
 
 ---
-## 6.2 Prompt Engineering Patterns
+## Prompt Engineering Patterns
 Pattern | Goal | Technique
 ------- | ---- | ---------
 Context Window Sculpting | Minimize noise | Reference only needed leaf blocks; avoid wide `/*` early
@@ -48,7 +48,7 @@ to: plan-v1  # In-place refinement
 ```
 
 ---
-## 6.3 Structured Output Strategies
+## Structured Output Strategies
 Technique | Notes
 --------- | -----
 `use-header: none` | Removes wrapper heading for pure machine output
@@ -69,7 +69,7 @@ stop-sequences:
 ```
 
 ---
-## 6.4 Tool / Agentic Loop Advanced Controls
+## Tool / Agentic Loop Advanced Controls
 Aspect | Pattern
 ------ | -------
 Decision Framing | Provide explicit checklist: "Call tool if ANY of: missing metric, unresolved ID, >1 conflicting claim"
@@ -80,7 +80,7 @@ Attribution IDs | Instruct tool loop to emit headings with stable `{id=...}` for
 Abort Clause | "If tool returns no actionable data, respond FINAL directly"
 
 ---
-## 6.5 Multi-Agent Composition Patterns
+## Multi-Agent Composition Patterns
 Pattern | Flow | Notes
 Planner / Executor | planner.md (@return spec) → executor consumes spec | Keeps large raw exploration isolated
 Executor / Reviewer | executor output → reviewer critiques → patch pass | Ensures quality gating
@@ -97,7 +97,7 @@ tools:
 ```
 
 ---
-## 6.6 Determinism & Reproducibility
+## Determinism & Reproducibility
 Goal | Technique
 ---- | ---------
 Minimize nondeterminism | Stable model versions, explicit temperature (if provider supports), avoid ambiguous instructions
@@ -107,7 +107,7 @@ Change Auditing | Pair large replacements with a summarized diff block for human
 Idempotent Replays | Avoid date / transient calls inside reasoning; fetch externally then import snapshot
 
 ---
-## 6.7 Token & Cost Optimization
+## Token & Cost Optimization
 Strategy | Detail
 -------- | ------
 Layered Summaries | Raw import → compressed → ultra-compact semantic index
@@ -118,7 +118,7 @@ External File Parking | `save-to-file` for bulky logs; re-import narrow extracts
 Compression Prompt | "Rewrite the following preserving all numbers & entities; max 120 tokens"
 
 ---
-## 6.8 Safety & Guardrails
+## Safety & Guardrails
 Concern | Mitigation
 ------- | ---------
 Sensitive Data Leakage | Redact via preprocessing shell step before `@llm`
@@ -136,7 +136,7 @@ block:
 ```
 
 ---
-## 6.9 Evaluation & Regression Testing
+## Evaluation & Regression Testing
 Method | Implementation
 ------ | --------------
 Golden Output Snapshots | Store canonical JSON / text; diff on regeneration
@@ -146,7 +146,7 @@ Test Harness | Shell step running unit tests produced by model before acceptance
 Drift Detection | Hash compressed summaries; change triggers deeper review
 
 ---
-## 6.10 Retrieval & External Knowledge
+## Retrieval & External Knowledge
 Need | Pattern
 ---- | -------
 Static Knowledge | `@import` curated handbook sections, not raw dumps
@@ -155,7 +155,7 @@ Lightweight RAG | Precompute embedding clusters (external), import only matched 
 Cache Layer | Store previous tool responses; fallback if rate-limited
 
 ---
-## 6.11 Model Routing & Fallback
+## Model Routing & Fallback
 Scenario | Approach
 -------- | --------
 Cheap Draft, Expensive Polish | First pass small model; second pass high-quality model referencing draft
@@ -171,7 +171,7 @@ use-header: none
 ```
 
 ---
-## 6.12 Strict JSON Mode Recipe
+## Strict JSON Mode Recipe
 1. Provide minimal schema in natural language
 2. Set `use-header: none`
 3. Provide explicit invalid examples (optional) to steer away
@@ -190,7 +190,7 @@ stop-sequences:
 ```
 
 ---
-## 6.13 Parallelization Patterns
+## Parallelization Patterns
 Use separate files / agents for independent subtasks then import results for synthesis.
 Workflow:
 1. Split tasks (A, B, C) each as `@run` or direct `@llm`
@@ -200,7 +200,7 @@ Workflow:
 Benefits: reduces cross-contamination, keeps token usage bounded.
 
 ---
-## 6.14 Debugging Tool Loops
+## Debugging Tool Loops
 Symptom | Debug Step
 ------- | ----------
 Repeated Tool Calls | Add explicit termination rule; inspect last tool result content
@@ -212,7 +212,7 @@ Unexpected Import Size | Instrument with a shell token count before invoking @ll
 Tracing Tip: Centralize debug mode that sets `tools-turns-max: 1` + adds a diagnostic block summarizing selected blocks & token counts.
 
 ---
-## 6.15 Comprehensive Checklist
+## Comprehensive Checklist
 Category | Questions
 -------- | ---------
 Context | Are only necessary blocks referenced? Any stale large blocks replaceable?
@@ -225,7 +225,7 @@ Evaluation | Golden outputs or rubric scoring present for critical workflows?
 Recovery | Fallback / retry model plan defined?
 
 ---
-## 6.16 See Also
+## See Also
 - Operations Reference (§5.3.*) for field semantics
 - Syntax Reference for YAML field grammar
 - (Upcoming) Context Management doc for AST merge & selection internals

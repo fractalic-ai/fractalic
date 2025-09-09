@@ -19,30 +19,30 @@ In short: Good context management is the difference between a drifting, expensiv
 
 ---
 ### Internal Table of Contents
-- [7.1 Context Graph & Folder Analogy](#71-context-graph--folder-analogy)
-- [7.2 Blocks, IDs & Paths](#72-blocks-ids--paths)
-- [7.3 Selecting Content (`block_uri`)](#73-selecting-content-block_uri-mechanics)
-- [7.4 Merge Strategies](#74-merge-strategies-mode--target-toblock_uri)
-- [7.5 Execution Lifecycle](#75-execution-lifecycle-what-happens-internally--simplified)
-- [7.6 Context Scoping (`context` field)](#76-context-scoping-in-llm)
-- [7.7 Tool & Agentic Loop Context](#77-tool--agentic-loop-context)
+- [Context Graph & Folder Analogy](#context-graph--folder-analogy)
+- [Blocks, IDs & Paths](#blocks-ids--paths)
+- [Selecting Content (`block_uri`)](#selecting-content-block_uri-mechanics)
+- [Merge Strategies](#merge-strategies-mode--target-toblock_uri)
+- [Execution Lifecycle](#execution-lifecycle-what-happens-internally--simplified)
+- [Context Scoping (`context` field)](#context-scoping-in-llm)
+- [Tool & Agentic Loop Context](#tool--agentic-loop-context)
   - [Dual AST (Immediate Tool Block Availability)](#dual-ast-why-new-blocks-are-instantly-selectable)
   - [Growth Control Checklist](#growth-control-checklist)
-- [7.8 Managing Size & Cost](#78-managing-size--cost-compression-strategies)
-- [7.9 Patterns & Best Practices](#79-patterns--best-practices)
-- [7.10 Common Pitfalls](#710-common-pitfalls)
-- [7.11 Examples](#711-handy-examples)
-- [7.12 Pre‑Run Checklist](#712-quick-checklist-before-big-run)
-- [7.13 Quick Reference](#713-quick-reference-table)
-- [7.14 Tool Loop Recap](#714-zero--hero-tool-loop-recap)
-- [7.15 Dual Tool Layer Explained](#715-dual-tool-layer-dual-ast--how-tool-output-becomes-usable-instantly)
-- [7.16 Visibility Control](#716-visibility-control-enableoperationsvisibility)
-- [7.17 Token Mechanics](#717-token-mechanics--growth-dynamics)
-- [7.18 Distillation Workflow](#718-distillation-workflow-from-raw--final)
+- [Managing Size & Cost (Compression Strategies)](#managing-size--cost-compression-strategies)
+- [Patterns & Best Practices](#patterns--best-practices)
+- [Common Pitfalls](#common-pitfalls)
+- [Handy Examples](#handy-examples)
+- [Quick Checklist (Before Big Run)](#quick-checklist-before-big-run)
+- [Quick Reference Table](#quick-reference-table)
+- [Zero → Hero Tool Loop Recap](#zero--hero-tool-loop-recap)
+- [Dual Tool Layer (Dual AST) – How Tool Output Becomes Usable Instantly](#dual-tool-layer-dual-ast--how-tool-output-becomes-usable-instantly)
+- [Visibility Control (`enableOperationsVisibility`)](#visibility-control-enableoperationsvisibility)
+- [Token Mechanics & Growth Dynamics](#token-mechanics--growth-dynamics)
+- [Distillation Workflow (From Raw → Final)](#distillation-workflow-from-raw--final)
 - [Cross References](#cross-references)
 
 ---
-## 7.1 Context Graph & Folder Analogy
+## Context Graph & Folder Analogy
 Fractalic turns your markdown into a Context Graph:
 - Each heading = a node (block)
 - Its body + nested headings = content / children
@@ -57,7 +57,7 @@ Folder Analogy:
 
 Both views describe an ordered, hierarchical set of addressable blocks.
 
-## 7.2 Blocks, IDs & Paths
+## Blocks, IDs & Paths
 Add an explicit ID when you intend to reuse or refine:
 ```
 # User Research Summary {id=research-summary}
@@ -68,7 +68,7 @@ Path = slash of ancestor IDs/slugs: `research-summary/findings`. Wildcards:
 - `section/*` = all direct children of `section`
 - Use explicit IDs once structure stabilizes (reduces accidental over-selection).
 
-## 7.3 Selecting Content (`block_uri` Mechanics)
+## Selecting Content (`block_uri` Mechanics)
 Ways to specify:
 ```yaml
 block:
@@ -93,7 +93,7 @@ Missing path → error (explicit feedback, no silent skipping).
 
 Guideline: Start broad while exploring → tighten to explicit IDs to reduce noise & cost.
 
-## 7.4 Merge Strategies (`mode`) + Target (`to.block_uri`)
+## Merge Strategies (`mode`) + Target (`to.block_uri`)
 After an operation produces output blocks:
 - append (default): add after existing children
 - prepend: insert before existing children
@@ -106,7 +106,7 @@ to:
 ```
 Use `replace` once a draft shape is stable to avoid unbounded growth.
 
-## 7.5 Execution Lifecycle (What Happens Internally — Simplified)
+## Execution Lifecycle (What Happens Internally — Simplified)
 1. Parse markdown → current Context Graph (AST)
 2. Parse operation YAML
 3. Resolve `block_uri` selections (and optional ambient lineage)
@@ -116,14 +116,14 @@ Use `replace` once a draft shape is stable to avoid unbounded growth.
 7. Merge via `mode`
 8. Graph updated (now selectable for future steps)
 
-## 7.6 Context Scoping in `@llm`
+## Context Scoping in `@llm`
 Field: `context`
 - auto (default): If only a prompt is given, Fractalic may include preceding headings for light grounding
 - none: Strict isolation—only explicitly selected blocks + prompt
 - Explicit `block:` selection always wins
 Use `context: none` for tests, JSON generation, or deterministic evaluation phases.
 
-## 7.7 Tool & Agentic Loop Context
+## Tool & Agentic Loop Context
 When `@llm` uses `tools:`, each tool call adds new information that the next turn will see. Without pruning, context keeps enlarging.
 
 Plain Flow:
@@ -163,7 +163,7 @@ Guiding Idea: “Tool outputs are transient scratch results that appear as norma
 - Remove obsolete exploration blocks
 - Run a clean isolated pass (`context: none`) for final structured outputs
 
-## 7.8 Managing Size & Cost (Compression Strategies)
+## Managing Size & Cost (Compression Strategies)
 Goal | Action
 ---- | ------
 Large raw tool output | Summarize → `mode: replace`
@@ -173,7 +173,7 @@ Repeated wildcards | Switch to explicit IDs
 Need deterministic final pass | Summaries only + `context: none`
 Token spike | Audit biggest blocks → compress or remove
 
-## 7.9 Patterns & Best Practices
+## Patterns & Best Practices
 Need | Pattern
 ---- | -------
 Refine safely | Draft (append) → converge (replace)
@@ -182,7 +182,7 @@ Parallel sub-work | Separate headings; later synthesis references only summaries
 Reusable artifact | Add `{id=...}` before first cross-file reuse
 Tool loop control | Provide explicit “Call a tool only if …” rule + turn cap
 
-## 7.10 Common Pitfalls
+## Common Pitfalls
 Pitfall | Why It Hurts | Fix
 ------- | ------------ | ---
 Endless append cycles | File & token bloat | Switch to replace after shape stabilizes
@@ -191,7 +191,7 @@ Huge untouched tool dumps | Token cost snowball | Summarize + replace
 Lost references after rename | Auto slug changed | Use explicit IDs early
 Bloated final model input | Unpruned exploration | Curate only needed summaries
 
-## 7.11 Handy Examples
+## Handy Examples
 Compare two options:
 ```markdown
 @llm
@@ -219,7 +219,7 @@ mode: replace
 to: exec-summary
 ```
 
-## 7.12 Quick Checklist (Before Big Run)
+## Quick Checklist (Before Big Run)
 - IDs assigned to key sections?
 - Wildcards minimized?
 - Tool outputs summarized?
@@ -227,7 +227,7 @@ to: exec-summary
 - Redundant drafts removed?
 - Need isolation (`context: none`) now?
 
-## 7.13 Quick Reference Table
+## Quick Reference Table
 Concept | Meaning
 ------- | -------
 Block | Heading + body (+ subtree)
@@ -240,7 +240,7 @@ Context Modes | auto (implicit lineage) / none (strict)
 Tool Growth | Each surviving tool block re-sent next turn
 Compression Loop | Raw → summary → final artifact
 
-## 7.14 Zero → Hero Tool Loop Recap
+## Zero → Hero Tool Loop Recap
 1. Start `@llm` with tools
 2. Tool(s) run → blocks appear
 3. Summarize/replace raw outputs
@@ -249,7 +249,7 @@ Compression Loop | Raw → summary → final artifact
 
 If you never prune, cost + noise climb. Curate early, not later.
 
-## 7.15 Dual Tool Layer (Dual AST) – How Tool Output Becomes Usable Instantly
+## Dual Tool Layer (Dual AST) – How Tool Output Becomes Usable Instantly
 When you run an `@llm` with tools, Fractalic maintains a temporary “tool layer” while the model is calling tools. As soon as a tool returns something useful, Fractalic immediately inserts that content into the main Context Graph right after the operation. You don’t do anything special—this is automatic.
 
 Why it matters:
@@ -259,7 +259,7 @@ Why it matters:
 
 Guiding Idea: “Tool outputs are transient scratch results that appear as normal blocks—curate them early.”
 
-## 7.16 Visibility Control (`enableOperationsVisibility`)
+## Visibility Control (`enableOperationsVisibility`)
 Fractalic normally feeds the model only heading blocks (and what you explicitly select). A setting `enableOperationsVisibility` can broaden this by letting additional operation nodes appear in the implicit context (e.g. non-heading structural nodes). This gives more granular historical trace—but also increases tokens.
 
 Guidelines:
@@ -269,7 +269,7 @@ Guidelines:
 
 Summary: Visibility flag = wider historical trace vs. cost. Keep lean unless you have a reason.
 
-## 7.17 Token Mechanics & Growth Dynamics
+## Token Mechanics & Growth Dynamics
 Each model turn re-sends the selected + ambient blocks. Tool loops amplify this because every new tool output that you keep alive is re-included unless you compress or remove it.
 
 Drivers of Growth:
@@ -286,7 +286,7 @@ Control Levers:
 Quick Heuristic:
 If a block won’t change again AND it’s > ~150–200 lines or very repetitive → summarize & replace.
 
-## 7.18 Distillation Workflow (From Raw → Final)
+## Distillation Workflow (From Raw → Final)
 Stage | Purpose | Your Action
 ----- | ------- | -----------
 Raw Retrieval | Gather unfiltered data via tools/import | Allow brief accumulation
@@ -312,6 +312,6 @@ Design Principle: Treat raw tool output as disposable. The value is in the disti
 
 ---
 See also:
-- [§6 Advanced LLM Features](advanced-llm-features.md)
-- [§5 Operations Reference](operations-reference.md)
-- [§4 Syntax Reference](syntax-reference.md)
+- [Advanced LLM Features](advanced-llm-features.md)
+- [Operations Reference](operations-reference.md)
+- [Syntax Reference](syntax-reference.md)

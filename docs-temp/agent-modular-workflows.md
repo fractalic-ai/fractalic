@@ -9,29 +9,29 @@ outline: deep
 Purpose: Learn how to break complex AI workflows into manageable, reusable pieces using separate markdown files that work together. Perfect for newcomers who want to understand Fractalic's modular approach.
 
 ## Table of Contents
-- [10.1 The Basics: Your First Agent](#101-the-basics-your-first-agent)
-- [10.2 Understanding @run (Manual Execution)](#102-understanding-run-manual-execution)
-- [10.3 How Information Flows Between Files](#103-how-information-flows-between-files)
-- [10.4 Using @return to Export Results](#104-using-return-to-export-results)
-- [10.5 Dynamic Agent Calling (fractalic_run tool)](#105-dynamic-agent-calling-fractalic_run-tool)
-- [10.6 Viewing Results: Session Tree & Artifacts](#106-viewing-results-session-tree--artifacts)
-- [10.7 Complete Worked Example](#107-complete-worked-example)
-- [10.8 File Organization & Best Practices](#108-file-organization--best-practices)
-- [10.9 Troubleshooting Guide](#109-troubleshooting-guide)
-- [10.10 Quick Reference](#1010-quick-reference)
+- [The Basics: Your First Agent](#the-basics-your-first-agent)
+- [Understanding @run (Manual Execution)](#understanding-run-manual-execution)
+- [How Information Flows Between Files](#how-information-flows-between-files)
+- [Using @return to Export Results](#using-return-to-export-results)
+- [Dynamic Agent Calling (fractalic_run tool)](#dynamic-agent-calling-fractalic_run-tool)
+- [Viewing Results: Session Tree & Artifacts](#viewing-results-session-tree--artifacts)
+- [Complete Worked Example](#complete-worked-example)
+- [File Organization & Best Practices](#file-organization--best-practices)
+- [Troubleshooting Guide](#troubleshooting-guide)
+- [Quick Reference](#quick-reference)
 
 ---
 ## What You'll Learn
 By the end of this guide, you'll understand how to create agent files (specialized markdown documents), connect them together, control what information flows between them, and troubleshoot common issues. Think of it like building with LEGO blocks—each agent file does one job well and you combine them to build sophisticated workflows.
 
 ---
-## 10.1 The Basics: Your First Agent
+## The Basics: Your First Agent
 
 ### What is an Agent File?
 An agent file is just a regular markdown file with some operations (like `@llm`, `@shell`) that performs a focused task. Let's create the simplest possible agent:
 
 **File: `agents/simple-summarizer.md`**
-```markdown
+```yaml
 # Simple Summarizer Agent {id=simple-summarizer}
 
 @llm
@@ -46,7 +46,7 @@ That's it! This agent takes whatever you give it, asks the AI to summarize it, a
 
 ### How to Use This Agent
 From another file (let's call it `main.md`):
-```markdown
+```yaml
 # My Main Workflow
 
 ## Some Data {id=some-data}
@@ -66,7 +66,7 @@ block: some-data
 3. The agent execution context gets an automatically created `# Input Parameters {id=input-parameters}` section at the top containing what you passed
 4. Returns the 3-bullet summary back to your main file
 
-## 10.2 Understanding @run (Manual Execution)
+## Understanding @run (Manual Execution)
 
 ### The Complete Picture
 When you write `@run`, here's the lifecycle:
@@ -78,7 +78,7 @@ When you write `@run`, here's the lifecycle:
 
 ### What the Agent File Actually Sees
 Call an agent like:
-```markdown
+```yaml
 @run
 file: agents/risk-eval.md
 prompt: |
@@ -87,14 +87,14 @@ block: commit-analysis/*
 ```
 
 Execution context (diff view showing injected content):
-```diff
-+ # Input Parameters {id=input-parameters}
-+ Focus on security issues only.
-+ 
-+ ## Commit Analysis Summary {id=commit-summary}
-+ - Added new authentication method
-+ - Updated user database schema  
-+ - Fixed SQL injection vulnerability
+```js
+# Input Parameters {id=input-parameters} // [!code highlight]
+Focus on security issues only. // [!code highlight]
+
+## Commit Analysis Summary {id=commit-summary} // [!code highlight]
+- Added new authentication method // [!code highlight]
+- Updated user database schema // [!code highlight]
+- Fixed SQL injection vulnerability // [!code highlight]
 
 # Risk Evaluation Agent {id=risk-eval}
 (... rest of the original file content ...)
@@ -106,7 +106,7 @@ Execution context (diff view showing injected content):
 - Temporary (not written to disk)
 
 ### @run Parameters Explained
-```markdown
+```yaml
 @run
 file: path/to/agent.md          # Required: which agent to run
 block: section-id/*             # Optional: what context to pass in
@@ -122,12 +122,12 @@ to: destination-section         # Optional: where to put returned results
 - Pass data + guidance: add `prompt:`
 - Control output location: add `to:`
 
-## 10.3 How Information Flows Between Files
+## How Information Flows Between Files
 
 ### Isolation Principle
 Agents ONLY see what you pass via `block:` and/or `prompt:`.
 
-```markdown
+```yaml
 # Main File
 ## Confidential Notes {id=confidential}
 Internal team discussions...
@@ -141,7 +141,7 @@ block: public-data  # Only this section is visible to the agent
 ```
 
 Multiple blocks:
-```markdown
+```yaml
 @run
 file: agents/comprehensive-analyzer.md
 block:
@@ -154,9 +154,9 @@ Wildcards:
 - `section/*` = section + descendants
 - `section` = that section only
 
-## 10.4 Using @return to Export Results
+## Using @return to Export Results
 
-```markdown
+```yaml
 @llm
 prompt: "Analyze the data and create a risk assessment."
 block: input-parameters/*
@@ -167,7 +167,7 @@ block: risk-assessment
 ```
 
 Multiple:
-```markdown
+```yaml
 @return
 block:
   - risk-assessment
@@ -176,16 +176,16 @@ block:
 ```
 
 Custom content:
-```markdown
+```yaml
 @return
 prompt: |
   # Analysis Complete
   Processing finished.
 ```
 
-## 10.5 Dynamic Agent Calling (fractalic_run tool)
+## Dynamic Agent Calling (fractalic_run tool)
 
-```markdown
+```yaml
 @llm
 prompt: |
   Analyze commit messages. If security-related changes appear, call
@@ -198,19 +198,19 @@ tools-turns-max: 2
 ```
 
 Tool result render (diff):
-```diff
-+ > TOOL RESPONSE, id: call_abc123
-+ response:
-+ content: "_IN_CONTEXT_BELOW_"
-+ 
-+ # Security Analysis Results {id=security-analysis}
-+ ## Critical Issues Found
-+ - New authentication bypass
-+ - Overly broad DB permissions
-+ 
-+ ## Recommendations
-+ - Immediate code review
-+ - Tighten role policies
+```js
+> TOOL RESPONSE, id: call_abc123 // [!code highlight]
+response: // [!code highlight]
+content: "_IN_CONTEXT_BELOW_" // [!code highlight]
+
+# Security Analysis Results {id=security-analysis} // [!code highlight]
+## Critical Issues Found // [!code highlight]
+- New authentication bypass // [!code highlight]
+- Overly broad DB permissions // [!code highlight]
+
+## Recommendations // [!code highlight]
+- Immediate code review // [!code highlight]
+- Tighten role policies // [!code highlight]
 ```
 
 Explanation of the placeholder:
@@ -219,7 +219,7 @@ Explanation of the placeholder:
 - Why it matters: When you review traces you can trust that anything after a tool response containing `_IN_CONTEXT_BELOW_` is the real material the model received / produced—not an echo.
 - Do not remove or alter this placeholder; it is part of the stable contract for rendering dynamic agent outputs.
 
-## 10.6 Viewing Results: Session Tree & Artifacts
+## Viewing Results: Session Tree & Artifacts
 `.ctx` (execution context) and `.trc` (trace) files are generated per run or tool invocation.
 
 Context file structure:
@@ -232,7 +232,7 @@ Context file structure:
 # Returned / Generated Sections
 ```
 
-## 10.7 Complete Worked Example
+## Complete Worked Example
 
 A newcomer-friendly, non-developer scenario: turning messy meeting notes into a structured weekly update using three small agents.
 
@@ -242,7 +242,7 @@ Start with raw meeting notes → extract structured topics → assess risks & ac
 ### Step 1: Create the Agent Files
 
 **File: `agents/meeting-topic-extractor.md`**
-```markdown
+```yaml
 # Meeting Topic Extractor {id=meeting-topic-extractor}
 
 @llm
@@ -260,7 +260,7 @@ block: analyzed-topics
 ```
 
 **File: `agents/risk-action-assessor.md`**
-```markdown
+```yaml
 # Risk & Action Assessor {id=risk-action-assessor}
 
 @llm
@@ -278,7 +278,7 @@ block: risks-actions
 ```
 
 **File: `agents/weekly-update-writer.md`**
-```markdown
+```yaml
 # Weekly Update Writer {id=weekly-update-writer}
 
 @llm
@@ -303,7 +303,7 @@ block: weekly-update
 ### Step 2: Orchestrator File
 
 **File: `weekly-update-workflow.md`**
-```markdown
+```yaml
 # Weekly Update Workflow {id=weekly-update-workflow}
 
 ## Raw Meeting Notes {id=raw-notes}
@@ -335,7 +335,7 @@ block: weekly-update
 ```
 
 ### Step 3: Post-Execution Diff (What You See)
-```diff
+```js
 # Weekly Update Workflow {id=weekly-update-workflow}
 
 ## Raw Meeting Notes {id=raw-notes}
@@ -344,54 +344,54 @@ block: weekly-update
 ## Extract Topics
 @run file: agents/meeting-topic-extractor.md
 
-+ # Analyzed Topics {id=analyzed-topics}
-+ ## Onboarding Delays
-+ - Region A behind schedule
-+ - Awaiting checklist draft
-+ ## Marketing Launch Timeline
-+ - Launch planning in progress
-+ ## Data Quality Cleanup
-+ - Ongoing cleanup efforts
-+ ## Vendor Contract Issue
-+ - Potential complication flagged
-+ ## Dashboard Reliability
-+ - Refresh still unreliable
-+ ## Positive Pilot Feedback
-+ - Early feedback encouraging
+# Analyzed Topics {id=analyzed-topics} // [!code highlight]
+## Onboarding Delays // [!code highlight]
+- Region A behind schedule // [!code highlight]
+- Awaiting checklist draft // [!code highlight]
+## Marketing Launch Timeline // [!code highlight]
+- Launch planning in progress // [!code highlight]
+## Data Quality Cleanup // [!code highlight]
+- Ongoing cleanup efforts // [!code highlight]
+## Vendor Contract Issue // [!code highlight]
+- Potential complication flagged // [!code highlight]
+## Dashboard Reliability // [!code highlight]
+- Refresh still unreliable // [!code highlight]
+## Positive Pilot Feedback // [!code highlight]
+- Early feedback encouraging // [!code highlight]
 
 ## Assess Risks & Actions
 @run file: agents/risk-action-assessor.md
 
-+ # Risks & Actions {id=risks-actions}
-+ ## Risks
-+ - Onboarding delay (Medium)
-+ - Vendor contract complication (Medium)
-+ - Dashboard reliability (High)
-+ ## Action Items
-+ - Prepare onboarding checklist (Owner: Onboarding Lead)
-+ - Review vendor terms (Owner: Ops)
-+ - Stabilize dashboard refresh (Owner: Eng)
-+ ## Blocked / Watch
-+ - Dashboard fix awaiting diagnostics
+# Risks & Actions {id=risks-actions} // [!code highlight]
+## Risks // [!code highlight]
+- Onboarding delay (Medium) // [!code highlight]
+- Vendor contract complication (Medium) // [!code highlight]
+- Dashboard reliability (High) // [!code highlight]
+## Action Items // [!code highlight]
+- Prepare onboarding checklist (Owner: Onboarding Lead) // [!code highlight]
+- Review vendor terms (Owner: Ops) // [!code highlight]
+- Stabilize dashboard refresh (Owner: Eng) // [!code highlight]
+## Blocked / Watch // [!code highlight]
+- Dashboard fix awaiting diagnostics // [!code highlight]
 
 ## Create Weekly Update
 @run file: agents/weekly-update-writer.md
 
-+ # Weekly Update {id=weekly-update}
-+ ## Overview
-+ Progress on multiple fronts; onboarding and dashboard stability need focus.
-+ ## Key Progress
-+ - Positive pilot feedback
-+ - Marketing prep advancing
-+ ## Risks
-+ - Dashboard reliability (High)
-+ - Vendor contract (Medium)
-+ ## Action Items
-+ - [ ] Onboarding checklist draft
-+ - [ ] Vendor terms review
-+ - [ ] Dashboard stability work
-+ ## Next Week Focus
-+ Stabilize dashboard; finalize onboarding materials.
+# Weekly Update {id=weekly-update} // [!code highlight]
+## Overview // [!code highlight]
+Progress on multiple fronts; onboarding and dashboard stability need focus. // [!code highlight]
+## Key Progress // [!code highlight]
+- Positive pilot feedback // [!code highlight]
+- Marketing prep advancing // [!code highlight]
+## Risks // [!code highlight]
+- Dashboard reliability (High) // [!code highlight]
+- Vendor contract (Medium) // [!code highlight]
+## Action Items // [!code highlight]
+- [ ] Onboarding checklist draft // [!code highlight]
+- [ ] Vendor terms review // [!code highlight]
+- [ ] Dashboard stability work // [!code highlight]
+## Next Week Focus // [!code highlight]
+Stabilize dashboard; finalize onboarding materials. // [!code highlight]
 ```
 
 ### Step 4: Artifacts
@@ -406,10 +406,10 @@ Why useful:
 - Non-technical: can be reused for any meeting
 - Easy to swap writer agent for different report formats
 
-## 10.8 File Organization & Best Practices
+## File Organization & Best Practices
 
 ### Recommended Folder Structure
-```
+```bash
 your-project/
 ├── main-workflow.md          # Entry point
 ├── agents/
@@ -450,7 +450,7 @@ your-project/
 - The tasks are tightly coupled
 - Creating separate agents would add unnecessary complexity
 
-## 10.9 Troubleshooting Guide
+## Troubleshooting Guide
 
 ### Common Error Messages and Solutions
 
@@ -508,11 +508,11 @@ your-project/
 - Limit `tools-turns-max` on dynamic calling
 - Check for redundant agent calls
 
-## 10.10 Quick Reference
+## Quick Reference
 
 ### @run Syntax (What it does and why)
 Run another markdown agent file in isolation, injecting only the blocks and/or prompt you specify so it cannot accidentally see unrelated content.
-```markdown
+```yaml
 @run
 file: path/to/agent.md          # Required
 block: section-id/*             # Optional: input data
@@ -524,7 +524,7 @@ to: destination                 # Optional: where to put results
 
 ### @return Syntax (Export only what matters)
 Return selected blocks (or custom content) so the caller receives a clean, minimal result.
-```markdown
+```yaml
 @return
 block: section-id               # Single block
 
@@ -549,7 +549,7 @@ Call another agent mid-LLM reasoning only when conditions are met. Keep turns lo
 ```
 
 ### Common Patterns (With proper spacing + explanations)
-```markdown
+```yaml
 # Simple agent call
 
 @run

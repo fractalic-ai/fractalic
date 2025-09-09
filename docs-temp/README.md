@@ -2,29 +2,9 @@
 
 This directory contains the Fractalic documentation structured for VitePress.
 
-## Development
+## Purpose
 
-### Prerequisites
-- Node.js 16+
-- npm or yarn
-
-### Setup
-```bash
-# Install dependencies
-npm install
-
-# Start development server
-npm run dev
-```
-
-### Build
-```bash
-# Build static site
-npm run build
-
-# Preview built site
-npm run preview
-```
+Documentation for Fractalic, an advanced LLM application for generating and managing fractal-like data structures.
 
 ## Structure
 
@@ -32,16 +12,7 @@ npm run preview
 - `.vitepress/config.js` - VitePress configuration
 - `*.md` - Documentation pages organized by topic
 
-## Navigation
-
-The documentation is organized into logical sections:
-- **Getting Started**: Introduction, Quick Start, Core Concepts
-- **Reference**: Syntax, Operations, Configuration
-- **Advanced Features**: Advanced LLM features, Context Management, etc.
-- **Integration & Workflows**: Shell integration, Agents, MCP, Git sessions
-- **Deployment & API**: UI Server and Publisher documentation
-
-## Content Guidelines
+## Authoring Guidelines
 
 This documentation follows the Fractalic documentation authoring constraints defined in `.github/instructions/docs.instructions.md`. Key principles:
 
@@ -51,12 +22,32 @@ This documentation follows the Fractalic documentation authoring constraints def
 - Consistent YAML examples using `|` for multi-line content
 - Cross-references to related documentation
 
-## Deployment
+## Build & Preview
 
-The documentation can be deployed to any static hosting service that supports Node.js builds:
-- Vercel
-- Netlify
-- GitHub Pages
-- etc.
+For development and previewing of the documentation site:
 
-Make sure to configure the base URL in `.vitepress/config.js` if deploying to a subdirectory.
+```bash
+# Install dependencies
+npm install
+
+# Start development server
+npm run dev
+```
+
+## Migration Plan
+
+Steps and considerations for migrating from previous versions or other systems.
+
+## Open Tasks
+
+- [ ] Review and update all links
+- [ ] Ensure all images and assets are correctly referenced
+- [ ] Validate YAML front matter in all markdown files
+
+## Contributing
+
+Guidelines for contributing to the Fractalic documentation:
+
+- Please follow the established authoring guidelines.
+- Submit all changes via pull requests.
+- Ensure your contributions are well-tested and do not break the build.

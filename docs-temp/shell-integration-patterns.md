@@ -16,19 +16,19 @@ Why it matters:
 
 ---
 ### Internal Table of Contents
-- [9.1 Basics (`@shell`)](#91-basics-shell)
-- [9.2 Minimal & Multi-Line Forms](#92-minimal--multi-line-forms)
-- [9.3 Selecting Where Output Goes (`mode`, `to`)](#93-selecting-where-output-goes-mode-to)
-- [9.4 Summarizing Outputs](#94-summarizing-outputs)
-- [9.5 Chaining Shell → LLM](#95-chaining-shell--llm)
-- [9.6 Repeated Tasks & Refresh Patterns](#96-repeated-tasks--refresh-patterns)
-- [9.7 Cost & Noise Control](#97-cost--noise-control)
-- [9.8 Common Pitfalls](#98-common-pitfalls)
-- [9.9 Quick Reference](#99-quick-reference)
+- [Basics (`@shell`)](#basics-shell)
+- [Minimal & Multi-Line Forms](#minimal--multi-line-forms)
+- [Selecting Where Output Goes (`mode`, `to`)](#selecting-where-output-goes-mode-to)
+- [Summarizing Outputs](#summarizing-outputs)
+- [Chaining Shell → LLM](#chaining-shell--llm)
+- [Repeated Tasks & Refresh Patterns](#repeated-tasks--refresh-patterns)
+- [Cost & Noise Control](#cost--noise-control)
+- [Common Pitfalls](#common-pitfalls)
+- [Quick Reference](#quick-reference)
 - [Cross References](#cross-references)
 
 ---
-## 9.1 Basics (`@shell`)
+## Basics (`@shell`)
 Run a command and capture its stdout + stderr (interleaved) as a new block.
 ```markdown
 @shell
@@ -44,13 +44,13 @@ prompt: |
 ```
 Result is inserted after the operation (default `append`).
 
-## 9.2 Minimal & Multi-Line Forms
+## Minimal & Multi-Line Forms
 Form | When
 ---- | ----
 Single line (no pipe) | Short one-liner, no special chars needing YAML escaping.
 Multi-line (`|`) | Any script with newlines, quotes, or colons.
 
-## 9.3 Selecting Where Output Goes (`mode`, `to`)
+## Selecting Where Output Goes (`mode`, `to`)
 Control how the output merges:
 - `append` (default) grows history.
 - `prepend` positions output before existing content.
@@ -64,7 +64,7 @@ mode: replace
 ```
 (Requires a heading with `{id=workspace-scan}` already defined.)
 
-## 9.4 Summarizing Outputs
+## Summarizing Outputs
 Large logs inflate later prompts. Pattern:
 ```markdown
 @shell
@@ -83,7 +83,7 @@ mode: replace
 ```
 Give the shell result block an ID (edit its heading) if you plan reuse: `# Test Run Output {id=shell-response}`.
 
-## 9.5 Chaining Shell → LLM
+## Chaining Shell → LLM
 Direct transformation:
 ```markdown
 @shell
@@ -109,7 +109,7 @@ block:
 ```
 Assign IDs to the generated shell output headings (after first run) so they can be referenced (`branch-name`, `last-commit-msg`).
 
-## 9.6 Repeated Tasks & Refresh Patterns
+## Repeated Tasks & Refresh Patterns
 Use `replace` when refreshing status snapshots:
 ```markdown
 @shell
@@ -132,7 +132,7 @@ mode: replace
 to: code-remediation-plan
 ```
 
-## 9.7 Cost & Noise Control
+## Cost & Noise Control
 Technique | Why
 --------- | ---
 Add IDs early | Makes re-selection explicit; prevents wildcard overreach.
@@ -141,7 +141,7 @@ Use `replace` on stable snapshots | Prevents endless growth.
 External file storage (future pattern) | Keep raw logs out of hot context (then import distilled form). 
 Limit breadth of scans | Narrow glob patterns to required subtrees.
 
-## 9.8 Common Pitfalls
+## Common Pitfalls
 Pitfall | Impact | Fix
 ------- | ------ | ---
 Forgetting `|` for multi-line script | YAML parse issues / truncated command | Always use `|` for multi-line.
@@ -150,7 +150,7 @@ No IDs on shell outputs | Hard to target later | Edit heading to add `{id=...}`.
 Summarizing too late | High cost paid already | Summarize immediately if large.
 Blindly capturing huge directories | Irrelevant noise | Scope commands narrowly.
 
-## 9.9 Quick Reference
+## Quick Reference
 Need | Pattern
 ---- | -------
 One-liner | prompt: "echo 'Hi'"

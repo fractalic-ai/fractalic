@@ -8,7 +8,7 @@ outline: deep
 
 Fractalic syntax = Standard Markdown (structure, prose) + Lightweight YAML operation blocks (actions). The interpreter walks the file linearly, builds an AST (headings, operations, generated nodes), and applies operations in order.
 
-## 4.1 Markdown + YAML Hybrid Structure
+## Markdown + YAML Hybrid Structure
 - Headings (`#`, `##`, `###`, …) define knowledge blocks.
 - Paragraphs, lists, code fences belong to the nearest preceding heading.
 - An operation block: a line starting with `@operationName` followed by YAML.
@@ -22,7 +22,7 @@ prompt: "List the competitors in a table."
 use-header: "# Competitor Table"
 ```
 
-## 4.2 Operation Block Anatomy
+## Operation Block Anatomy
 ```markdown
 @llm                                 # 1) Operation identifier
 prompt: |                            # 2) Literal prompt (multi-line YAML scalar)
@@ -36,7 +36,7 @@ header-auto-align: true              # 7) Re-level headings
 save-to-file: outputs/outline.md     # 8) Persist raw output
 ```
 
-## 4.3 Headers, Auto-Alignment, and use-header Strategies
+## Headers, Auto-Alignment, and use-header Strategies
 Default wrapper headings:
 | Operation | Default Wrapper |
 |-----------|-----------------|
@@ -63,7 +63,7 @@ prompt: "Return ONLY a JSON object."
 use-header: none
 ```
 
-## 4.4 Block Reference Syntax
+## Block Reference Syntax
 Forms:
 - Direct id: `vision`
 - Hierarchical path: `research/findings`
@@ -76,7 +76,7 @@ block:
 ```
 Notes: Order preserved; forward references allowed; missing block → error.
 
-## 4.5 Special Values & Merge Modes
+## Special Values & Merge Modes
 `use-header: none` suppresses wrapper.
 Merge `mode`:
 - `append` (default) add after target / op
@@ -84,14 +84,14 @@ Merge `mode`:
 - `replace` swap target content atomically
 If `to:` absent → anchor is operation position.
 
-## 4.6 Prompt Assembly Order (@llm)
+## Prompt Assembly Order (@llm)
 1. Referenced block contents (ordered)
 2. Literal `prompt`
 3. Media attachments (provider-handled)
 4. System prompts (implicit)
 Missing both `prompt` & `block` → error.
 
-## 4.7 Parameter Normalization & Model Inference
+## Parameter Normalization & Model Inference
 ### model
 Alias looked up in `[settings]` of `settings.toml`. Dots/hyphens/underscores normalized.
 ### stop-sequences
@@ -125,7 +125,7 @@ Beginner checklist:
 - Large output? Use `save-to-file`.
 - Deep nesting? `header-auto-align: true`.
 
-## 4.8 Arrays & Multi-Line Scalars
+## Arrays & Multi-Line Scalars
 ```markdown
 @shell
 prompt: |
@@ -142,7 +142,7 @@ block:
   - new-version/*
 ```
 
-## 4.9 Common Pitfalls
+## Common Pitfalls
 | Issue | Cause | Fix |
 |-------|------|-----|
 | Block not found | Typo / missing id | Verify kebab-case or add explicit `{id=...}` |
@@ -151,7 +151,7 @@ block:
 | Unexpected wrapper | Default header applied | `use-header: none` |
 | Empty response | Provider/tool error | Check logs, keys, tool outputs |
 
-## 4.10 Style Recommendations
+## Style Recommendations
 - Put large reference material in earlier knowledge blocks, keep prompts terse.
 - Prefer explicit IDs for frequently reused anchors.
 - Use wildcards sparingly—token cost scales.
