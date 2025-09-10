@@ -147,10 +147,12 @@ jobs:
         build-args: |
           BUILDKIT_INLINE_CACHE=1
           BUILD_TYPE=${{ matrix.build_type }}
+          BUILDKIT_MULTI_PLATFORM=1
+          DOCKER_BUILDKIT=1
         network: host
         provenance: false  # Disable provenance to avoid registry issues
         sbom: false       # Disable SBOM to avoid registry issues
-      timeout-minutes: 45
+      timeout-minutes: 60
 
     - name: Verify multi-arch images were built
       run: |
