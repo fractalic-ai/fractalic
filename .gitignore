@@ -11,9 +11,6 @@ oauth_redirect_state.json
 *.oauth_tokens.json
 oauth-cache/
 
-# OAuth cache folder
-oauth-cache/
-
 # Development and debugging utilities
 utils/oauth_debug/
 debug_*.py
@@ -141,6 +138,13 @@ instance/
 
 # Sphinx documentation
 docs/_build/
+
+# VitePress documentation
+docs-temp/
+docs/.vitepress/dist/
+docs/.vitepress/cache/
+docs/node_modules/
+docs/package-lock.json
 
 # PyBuilder
 .pybuilder/
