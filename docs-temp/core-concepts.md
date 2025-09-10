@@ -131,15 +131,15 @@ The operation's output gets inserted back into your document under a clear headi
 Here's a simple example showing the complete flow:
 
 ```js
-# Website Ideas {id=ideas}
+# Website Ideas
 I want to create a portfolio website to showcase my design work.
 
 @llm
 prompt: "Based on the website goal above, suggest 5 essential pages"
-blocks: ideas
+blocks: website-ideas
 use-header: "# Suggested Pages"
 
-# Suggested Pages {id=suggested-pages} // [!code highlight]
+# Suggested Pages // [!code highlight]
 1. Home - Welcome visitors with your best work preview // [!code highlight]
 2. Portfolio - Showcase your design projects with case studies // [!code highlight]
 3. About - Tell your story and share your design philosophy // [!code highlight]
@@ -157,32 +157,32 @@ This adds new content after the target location. It's perfect for building up in
 
 **Before execution:**
 ```js
-# Research Notes {id=notes}
+# Research Notes
 Initial findings about user behavior.
 
 @llm
 prompt: "Add insights about mobile usage patterns"
-blocks: notes
+blocks: research-notes
 mode: append
-to: notes
+to: research-notes
 ```
 
 **After execution:**
 ```js
-# Research Notes {id=notes}
+# Research Notes
 Initial findings about user behavior.
 
-## Mobile Usage Insights  // [!code highlight]
+# Mobile Usage Insights // [!code highlight]
 Mobile users prefer simple navigation with large touch targets. They typically // [!code highlight]
 browse during commutes and expect fast loading times. Content should be // [!code highlight]
 scannable with clear headings and minimal scrolling required. // [!code highlight]
 
 @llm
 prompt: "Add insights about mobile usage patterns"
-blocks: notes
+blocks: research-notes
 mode: append
-to: notes
-use-header: "## Mobile Usage Insights "
+to: research-notes
+use-header: "# Mobile Usage Insights"
 ```
 
 **Replace Mode**
@@ -190,29 +190,32 @@ This completely replaces the target content with new content. Use this when you 
 
 **Before execution:**
 ```js
-# Draft Summary {id=summary}
+# Draft Summary
 This is a rough first draft that needs improvement.
 
 @llm
 prompt: "Rewrite this summary to be more professional"
-blocks: summary
+blocks: draft-summary
 mode: replace
-to: summary
+to: draft-summary
 ```
 
 **After execution:**
 ```js
-# Draft Summary {id=summary} // [!code highlight]
+# Draft Summary // [!code highlight]
 This comprehensive analysis demonstrates key insights and strategic recommendations based on our thorough research findings. // [!code highlight]
 
 @llm
 prompt: "Rewrite this summary to be more professional"
-blocks: summary
+blocks: draft-summary
 mode: replace
-to: summary
+to: draft-summary
+use-header: "# Draft Summary"
 ```
 
-Notice how the original content "This is a rough first draft that needs improvement." was completely replaced with the new, more professional version. The heading stayed the same, but everything under it was rewritten.
+Notice how the original content "This is a rough first draft that needs improvement." was completely replaced with the new, more professional version. The heading stayed the same, but everything under it was rewritten. 
+
+> Note: If you omit use-header in an @llm operation, Fractalic wraps the output in a default section titled "# LLM Response block". Set a custom title with use-header, or disable the wrapper with use-header: none.
 
 **Choosing Where Results Go**
 The `to:` parameter specifies where to place results. If you omit it, results appear right after the operation. For clarity and control:
@@ -291,7 +294,7 @@ This operation sends content to an AI language model and inserts the response ba
 
 **Before execution:**
 ```js
-# User Feedback Analysis {id=feedback}
+# User Feedback Analysis
 Users complained about slow loading times and confusing navigation.
 The checkout process has too many steps.
 
@@ -299,13 +302,13 @@ The checkout process has too many steps.
 prompt: |
   Analyze the user feedback above and identify the top 3 pain points.
   Suggest one improvement for each pain point.
-blocks: feedback
+blocks: user-feedback-analysis
 use-header: "# Feedback Analysis"
 ```
 
 **After execution:**
 ```js
-# User Feedback Analysis {id=feedback}
+# User Feedback Analysis
 Users complained about slow loading times and confusing navigation.
 The checkout process has too many steps.
 
@@ -313,10 +316,10 @@ The checkout process has too many steps.
 prompt: |
   Analyze the user feedback above and identify the top 3 pain points.
   Suggest one improvement for each pain point.
-blocks: feedback
+blocks: user-feedback-analysis
 use-header: "# Feedback Analysis"
 
-# Feedback Analysis {id=feedback-analysis} // [!code highlight]
+# Feedback Analysis // [!code highlight]
 Based on the user feedback, here are the top 3 pain points and improvements: // [!code highlight]
  // [!code highlight]
 1. **Slow loading times** - Implement image compression and lazy loading // [!code highlight]
@@ -349,7 +352,7 @@ Let's check how many Python files we have in this project.
 prompt: "find . -name '*.py' | wc -l"
 use-header: "# Python File Count"
 
-# Python File Count {id=python-file-count} // [!code highlight]
+# Python File Count // [!code highlight]
 42 // [!code highlight]
 ```
 
@@ -393,40 +396,40 @@ This operation runs another Fractalic document as a mini-workflow, passing it so
 
 **Before execution:**
 ```js
-# Research Data {id=raw-data}
+# Research Data
 Survey responses: 850 participants, 73% satisfaction rate
 Performance metrics: 2.3s average load time, 94% uptime
 User behavior: 65% mobile usage, 45% return visitors
 
-# Methodology {id=methodology}
+# Methodology
 Data collected over 30 days using anonymous tracking and user surveys.
 
 @run
 file: agents/research-summarizer.md
 blocks: 
-  - raw-data
+  - research-data
   - methodology
 use-header: "# Research Summary"
 ```
 
 **After execution (the research-summarizer.md workflow processes the data and returns a summary):**
 ```js
-# Research Data {id=raw-data}
+# Research Data
 Survey responses: 850 participants, 73% satisfaction rate
 Performance metrics: 2.3s average load time, 94% uptime
 User behavior: 65% mobile usage, 45% return visitors
 
-# Methodology {id=methodology}
+# Methodology
 Data collected over 30 days using anonymous tracking and user surveys.
 
 @run
 file: agents/research-summarizer.md
 blocks: 
-  - raw-data
+  - research-data
   - methodology
 use-header: "# Research Summary"
 
-# Research Summary {id=research-summary} // [!code highlight]
+# Research Summary // [!code highlight]
 **Key Findings:** // [!code highlight]
 - Strong user satisfaction (73%) with room for improvement // [!code highlight]
 - Performance meets standards but load time could be optimized // [!code highlight]
@@ -440,32 +443,213 @@ use-header: "# Research Summary"
 
 The sub-workflow processes your raw data and methodology, then returns a structured summary with findings and recommendations.
 
-### **`@return`: Ending a Workflow with Specific Output**
+#### How the called workflow sees inputs
+- Selected `blocks:` are combined (in the listed order) and PREPENDED to the top of the called file.
+- If you also pass a `prompt:`, it is appended after those blocks as a small input section.
+- The prompt gets a wrapper heading by default ("# Input Parameters"). Set a custom one with `use-header`, or remove it with `use-header: none`.
+- These prepended sections become normal blocks the called workflow can reference by their kebab-case slugs (e.g., `research-data`, `input-parameters`). No other caller content is included automatically.
 
-This operation stops the current workflow and returns specific content. It's essential in sub-workflows (called by @run) to specify what gets sent back to the caller.
-
-**Inside a sub-workflow file (like agents/research-summarizer.md):**
-```js
-# Analysis Process {id=analysis}
-Processing survey data and performance metrics...
-
-# Final Summary {id=final-summary}
-**Key Findings:**
-- Strong user satisfaction (73%) with room for improvement
-- Performance meets standards but load time could be optimized
-- Mobile-first approach essential given 65% mobile usage
-
-**Recommendations:**
-- Focus on mobile experience optimization
-- Investigate load time reduction opportunities
-- Develop retention strategies for the 55% of new visitors
-
-@return
-blocks: final-summary
-use-header: "# Results"
+Caller snippet:
+```yaml
+@run
+file: agents/research-summarizer.md
+blocks:
+  - research-data
+prompt: "Summarize concisely for executives"
+use-header: "# Run Input"
 ```
 
-When another document calls this workflow with `@run`, only the "Final Summary" section gets sent back to the caller. The "Analysis Process" section stays internal to this workflow. This lets you build specialized, reusable workflows that can be called from multiple documents while keeping their internal processing details separate from their outputs.
+Callee (top of agents/research-summarizer.md) before execution:
+```js
+# Research Summarizer
+... existing content ...
+```
+
+Callee after the call (what gets prepended):
+```js
+# Research Data // [!code highlight]
+...copied content from caller... // [!code highlight]
+
+# Run Input // [!code highlight]
+Summarize concisely for executives // [!code highlight]
+
+# Research Summarizer
+... existing content ...
+```
+
+Default header behavior and order
+- Blocks only (no prompt): the selected blocks are prepended at the very top.
+- Prompt only (no blocks): a default "# Input Parameters" section is prepended with your prompt content.
+- Both blocks and prompt: blocks appear first, then the default input section.
+
+Case A — Blocks only
+Caller snippet:
+```yaml
+@run
+file: agents/research-summarizer.md
+blocks:
+  - research-data
+```
+
+Callee after injection (top of file):
+```js
+# Research Data // [!code highlight]
+...copied content from caller... // [!code highlight]
+
+# Research Summarizer
+... existing content ...
+```
+
+Case B — Prompt only
+Caller snippet:
+```yaml
+@run
+file: agents/research-summarizer.md
+prompt: "Summarize concisely for executives"
+```
+
+Callee after injection (top of file):
+```js
+# Input Parameters // [!code highlight]
+Summarize concisely for executives // [!code highlight]
+
+# Research Summarizer
+... existing content ...
+```
+
+Case C — Blocks + Prompt (no custom header)
+Caller snippet:
+```yaml
+@run
+file: agents/research-summarizer.md
+blocks:
+  - research-data
+prompt: "Summarize concisely for executives"
+```
+
+Callee after injection (top of file):
+```js
+# Research Data // [!code highlight]
+...copied content from caller... // [!code highlight]
+
+# Input Parameters // [!code highlight]
+Summarize concisely for executives // [!code highlight]
+
+# Research Summarizer
+... existing content ...
+```
+
+Case D — Multiple blocks order
+Caller snippet:
+```yaml
+@run
+file: agents/research-summarizer.md
+blocks:
+  - research-data
+  - methodology
+```
+
+Callee after injection (top of file):
+```js
+# Research Data // [!code highlight]
+...copied content from caller... // [!code highlight]
+
+# Methodology // [!code highlight]
+...copied content from caller... // [!code highlight]
+
+# Research Summarizer
+... existing content ...
+```
+
+Tip: You can change or remove the wrapper for the prompt section using `use-header` (e.g., `use-header: "# Run Input"` or `use-header: none`).
+
+See also:
+- Agentic workflows and composition: [Agent Modular Workflows](./agent-modular-workflows.md)
+- Full parameter list and behaviors: [Operations Reference § @run](./operations-reference.md)
+
+### `@return`: Selecting what the caller receives
+Use `@return` inside a called workflow to specify exactly what is returned to the caller. Without `@return`, the entire processed document is returned. With `@return`, only the selected content (blocks and/or a prompt) is returned.
+
+Example A — Return a specific block (callee selects the block)
+Callee snippet (agents/research-summarizer.md):
+```js
+# Findings
+Top-level insights from analysis...
+
+@return
+block: findings
+```
+
+Caller after `@run` receives:
+```js
+# Findings // [!code highlight]
+Top-level insights from analysis... // [!code highlight]
+```
+
+Example B — Return multiple blocks in order
+Callee snippet:
+```yaml
+@return
+blocks:
+  - findings
+  - recommendations
+```
+
+Caller after `@run` receives (order preserved):
+```js
+# Findings // [!code highlight]
+... // [!code highlight]
+
+# Recommendations // [!code highlight]
+... // [!code highlight]
+```
+
+Example C — Return prompt only (default header)
+Callee snippet:
+```yaml
+@return
+prompt: "A concise executive summary"
+```
+
+Caller after `@run` receives:
+```js
+# Return block // [!code highlight]
+A concise executive summary // [!code highlight]
+```
+
+Example D — Custom or no header for returned prompt
+Callee snippet (custom header):
+```yaml
+@return
+prompt: "Three bullet points"
+use-header: "# Executive Summary"
+```
+
+Caller after `@run` receives:
+```js
+# Executive Summary // [!code highlight]
+Three bullet points // [!code highlight]
+```
+
+Callee snippet (no header):
+```yaml
+@return
+prompt: "Three bullet points"
+use-header: none
+```
+
+Caller after `@run` receives:
+```js
+Three bullet points // [!code highlight]
+```
+
+Notes
+- When returning blocks, original headings are preserved.
+- When returning a prompt, the default wrapper heading is "# Return block"; customize with `use-header` or remove with `use-header: none`.
+- Use `blocks:` to return multiple sections; their order is preserved.
+
+See also:
+- Full parameter list and behaviors: [Operations Reference § @return](./operations-reference.md)
 
 ## How Tool Output Becomes Part of Your Document
 One of the key features of Fractalic is that when AI models or shell commands produce output, that output doesn't just disappear—it becomes a permanent, labeled part of your document that you can reference later.
@@ -489,7 +673,7 @@ Let's see what files we have in this project.
 prompt: "ls -la"
 use-header: "# Directory Contents"
 
-# Directory Contents {id=directory-contents} // [!code highlight]
+# Directory Contents // [!code highlight]
 total 48 // [!code highlight]
 drwxr-xr-x  12 user  staff   384 Sep 10 14:30 . // [!code highlight]
 drwxr-xr-x   5 user  staff   160 Sep 10 14:25 .. // [!code highlight]
@@ -507,7 +691,7 @@ prompt: "Analyze the file structure above and suggest improvements"
 blocks: directory-contents
 use-header: "# Structure Analysis"
 
-# Structure Analysis {id=structure-analysis} // [!code highlight]
+# Structure Analysis // [!code highlight]
 Based on the directory listing, this appears to be a well-organized project: // [!code highlight]
  // [!code highlight]
 **Strengths:** // [!code highlight]
