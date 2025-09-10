@@ -47,7 +47,7 @@ Operations are the "action" part of your document. While knowledge blocks store 
 
 Example (minimal):
 ```markdown
-# Goal {id=goal}
+# Goal
 Describe a simple greeting.
 
 @llm
@@ -75,19 +75,19 @@ Now you can reference this block simply as `project` instead of `my-complex-proj
 
 **Nested Paths:** When you have headings inside other headings, you can reference them using paths:
 ```markdown
-# Research {id=research}
-## Market Analysis {id=market}
-## User Studies {id=users}
+# Research
+## Market Analysis
+## User Studies
 ```
 
-You can reference the market analysis section as `research/market`. This path structure helps you organize complex documents with many sections.
+You can reference the market analysis section as `research/market-analysis`. This path structure helps you organize complex documents with many sections.
 
 **Wildcards for Whole Branches:** Sometimes you want to reference a section and everything inside it. Use the `/*` syntax:
 ```markdown
 blocks: research/*
 ```
 
-This selects the "research" heading plus both "market" and "users" subsections. It's useful when you want an AI to consider all related information together.
+This selects the "Research" heading plus both "Market Analysis" and "User Studies" subsections. It's useful when you want an AI to consider all related information together.
 
 ## How to Select Blocks
 When writing operations, you tell Fractalic which blocks to use as context. There are two clean ways to do this:
@@ -118,6 +118,9 @@ When Fractalic encounters an operation like `@llm`, it needs to gather the right
 - First, collecting any blocks you specified (like `blocks: research/*`)
 - Then, adding your prompt text at the end
 - Finally, if you didn't specify any blocks, it might automatically include content from earlier in the document (you can turn this off if needed)
+
+> **Note:** Specifying `blocks:` disables automatic context inclusion.  
+> When you explicitly list blocks in an operation, Fractalic will *only* use those blocks as context for the AI or tool. Earlier content in your document will not be included automatically. This gives you precise control, but means you must select all relevant information yourself.
 
 **Step 3: Executing the Operation**
 Fractalic runs the operation—sending text to an AI model, executing a shell command, importing a file, or running another workflow.
@@ -363,8 +366,7 @@ We need to include our standard project introduction.
 
 @import
 file: templates/project-header.md
-blocks: introduction
-use-header: "# Project Overview"
+block: introduction
 ```
 
 **After execution (assuming templates/project-header.md contains the introduction section):**
@@ -374,17 +376,16 @@ We need to include our standard project introduction.
 
 @import
 file: templates/project-header.md
-blocks: introduction
-use-header: "# Project Overview"
+block: introduction
 
-# Project Overview {id=project-overview} // [!code highlight]
+# Introduction // [!code highlight]
 This project follows our standard development workflow with automated testing, // [!code highlight]
 continuous integration, and comprehensive documentation. All team members // [!code highlight]
 should familiarize themselves with the coding standards and review process // [!code highlight]
 outlined in this guide. // [!code highlight]
 ```
 
-This pulls the "introduction" section from your template file and inserts it cleanly into your current document.
+This imports the "introduction" section from your template file and inserts it directly after the `@import` operation.
 
 ### **`@run`: Executing Sub-Workflows**
 
