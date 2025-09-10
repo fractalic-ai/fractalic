@@ -208,6 +208,83 @@ The highlighted green lines show everything that Fractalic added to your documen
 - **Visible process** - you can see exactly how the AI reasoned through each step  
 - **Iterative refinement** - change any instruction and re-run to see different results
 
+## Using Tools and MCP (Agentic Loop)
+Tools let the AI look things up or perform actions. Many tools are provided by MCP servers. When you add `tools:` to an `@llm` operation, you enable an agentic loop: the AI can call those tools across one or more turns (bounded by `tools-turns-max`). Tool outputs are auto-inserted into your document; you never paste them manually.
+
+Tool Example — Web Search with Multiple Tools
+**Before execution:**
+```js
+# Topic {id=topic}
+Research Rust async ecosystem highlights.
+
+@llm
+prompt: |
+  Find 3 recent highlights about the Rust async ecosystem.
+  Cite sources inline. Keep it concise.
+blocks: topic
+tools:
+  - web_search
+tools-turns-max: 2
+use-header: "# Research Highlights"
+```
+
+**After execution:**
+```js
+# Topic {id=topic}
+Research Rust async ecosystem highlights.
+
+@llm
+prompt: |
+  Find 3 recent highlights about the Rust async ecosystem.
+  Cite sources inline. Keep it concise.
+blocks: topic
+tools:
+  - web_search
+tools-turns-max: 2
+use-header: "# Research Highlights"
+
+> TOOL CALL, id: call_web_search_1 // [!code highlight]
+tool: web_search // [!code highlight]
+args: // [!code highlight]
+{ // [!code highlight]
+  "query": "Rust async ecosystem highlights", // [!code highlight]
+  "limit": 5 // [!code highlight]
+} // [!code highlight]
+
+> TOOL RESPONSE, id: call_web_search_1 // [!code highlight]
+response: // [!code highlight]
+{ // [!code highlight]
+  "results": [ // [!code highlight]
+    { // [!code highlight]
+      "title": "Tokio 1.x Performance Improvements", // [!code highlight]
+      "url": "https://tokio.rs/blog/tokio-1-performance", // [!code highlight]
+      "content": "Major I/O driver optimizations..." // [!code highlight]
+    }, // [!code highlight]
+    { // [!code highlight]
+      "title": "Async-std Ecosystem Updates", // [!code highlight]
+      "url": "https://async.rs/blog/ecosystem-parity", // [!code highlight]
+      "content": "Key crate compatibility achieved..." // [!code highlight]
+    } // [!code highlight]
+  ] // [!code highlight]
+} // [!code highlight]
+
+# Research Highlights {id=research-highlights} // [!code highlight]
+- Tokio 1.x introduces improved I/O driver performance (source: https://tokio.rs/blog/tokio-1-performance) // [!code highlight]
+- Async-std gains ecosystem parity in key crates (source: https://async.rs/blog/ecosystem-parity) // [!code highlight]
+- New tracing tools simplify async debugging across the ecosystem // [!code highlight]
+```
+
+
+
+
+Notes
+- Each surviving tool block is resent next AI turn (token cost grows if you keep long raw outputs).
+- Set `tools-turns-max` to bound the loop; summarize early and replace large raw outputs once stable.
+- Tool outputs are auto-inserted; you never merge them manually.
+- Tool logs show the tool invoked and the arguments used; generated sections appear below. See [Agent Modular Workflows](./agent-modular-workflows.md) for details.
+
+See also: [Agent Modular Workflows](./agent-modular-workflows.md)
+
 ## Why This Changes Everything
 
 Most AI tools make you start from scratch every time. With Fractalic:
@@ -265,6 +342,4 @@ Check out [Operations Reference](./operations-reference.md) to see everything Fr
 ### 5. Build Something Real
 Start with a task you actually want to accomplish—maybe automating something at work, organizing research, or creating content. Fractalic is designed to handle real-world problems.
 
-**Remember**: Fractalic grows with you. Start simple with natural language instructions, and gradually add sophistication as you learn. The best part? Everything stays readable and modifiable—no mysterious code to maintain, just clear English instructions that anyone can understand and improve.
-
-Ready to turn your ideas into intelligent, self-documenting programs? Create your first `.md` file and start writing!
+**Remember**: Fractalic grows with you. Start simple with natural language instructions, and gradually add sophistication as you learn. The best part? Everything stays readable and modifiable—no mysterious code to maintain, just clear English instructions
