@@ -140,10 +140,11 @@ instance/
 docs/_build/
 
 # VitePress documentation
-docs-temp/.vitepress/dist/
-docs-temp/.vitepress/cache/
-docs-temp/node_modules/
-docs-temp/package-lock.json
+docs-temp/
+docs/.vitepress/dist/
+docs/.vitepress/cache/
+docs/node_modules/
+docs/package-lock.json
 
 # PyBuilder
 .pybuilder/
