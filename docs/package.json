@@ -5,7 +5,8 @@
   "type": "module",
   "scripts": {
     "dev": "vitepress dev",
-    "build": "vitepress build",
+    "build": "NODE_ENV=production vitepress build",
+    "build:local": "vitepress build",
     "preview": "vitepress preview",
     "serve": "vitepress serve",
     "check-links": "find . -name '*.md' -not -path './.vitepress/*' -exec grep -l '\\.md' {} \\;",

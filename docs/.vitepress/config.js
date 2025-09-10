@@ -3,7 +3,7 @@ import { defineConfig } from 'vitepress'
 export default defineConfig({
   title: 'Fractalic Documentation',
   description: 'AI workflows in Markdown + YAML operation blocks',
-  base: '/',
+  base: process.env.NODE_ENV === 'production' ? '/docs/' : '/',
   lang: 'en-US',
   lastUpdated: true,
   
