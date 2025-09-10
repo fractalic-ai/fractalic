@@ -23,16 +23,23 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@v4
       
+    - name: Verify docs structure
+      run: |
+        echo "📁 Checking docs directory structure..."
+        ls -la docs/
+        echo "📦 Checking for package files..."
+        ls -la docs/package*.json || echo "❌ Package files not found"
+        
     - name: Setup Node.js
       uses: actions/setup-node@v4
       with:
         node-version: ${{ env.NODE_VERSION }}
-        cache: 'npm'
-        cache-dependency-path: docs/package-lock.json
         
     - name: Install dependencies
       working-directory: docs
-      run: npm ci
+      run: |
+        echo "📦 Installing dependencies..."
+        npm ci
         
     - name: Build documentation
       working-directory: docs
@@ -140,8 +147,6 @@ jobs:
       uses: actions/setup-node@v4
       with:
         node-version: ${{ env.NODE_VERSION }}
-        cache: 'npm'
-        cache-dependency-path: docs/package-lock.json
         
     - name: Install dependencies
       working-directory: docs
