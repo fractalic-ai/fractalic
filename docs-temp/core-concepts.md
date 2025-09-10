@@ -152,6 +152,7 @@ When an operation produces output, Fractalic needs to know where to put it and h
 **Append Mode (Default)**
 This adds new content after the target location. It's perfect for building up information over time:
 
+**Before execution:**
 ```js
 # Research Notes {id=notes}
 Initial findings about user behavior.
@@ -161,11 +162,24 @@ prompt: "Add insights about mobile usage patterns"
 blocks: notes
 mode: append
 to: notes
+```
 
+**After execution:**
+```js
 # Research Notes {id=notes}
 Initial findings about user behavior.
 
-Additional insights: Mobile users prefer... // [!code highlight]
+## Mobile Usage Insights  // [!code highlight]
+Mobile users prefer simple navigation with large touch targets. They typically // [!code highlight]
+browse during commutes and expect fast loading times. Content should be // [!code highlight]
+scannable with clear headings and minimal scrolling required. // [!code highlight]
+
+@llm
+prompt: "Add insights about mobile usage patterns"
+blocks: notes
+mode: append
+to: notes
+use-header: "## Mobile Usage Insights "
 ```
 
 **Replace Mode**
@@ -200,21 +214,13 @@ Notice how the original content "This is a rough first draft that needs improvem
 **Choosing Where Results Go**
 The `to:` parameter specifies where to place results. If you omit it, results appear right after the operation. For clarity and control:
 
-```yaml
-@llm
-prompt: "Generate conclusion"
-blocks: analysis/*
-mode: append
-to: final-report
-```
-
 ## Controlling What AI Sees (Context Management)
 One of Fractalic's strengths is giving you precise control over what information the AI receives. This matters for both quality (focused context produces better results) and cost (less text means lower API bills).
 
 **Tight Control with Block Selection**
 The cleanest approach is to explicitly specify which blocks to include:
 
-```markdown
+```yaml
 @llm
 prompt: "Create a marketing strategy based on this research"
 blocks: 
@@ -227,20 +233,30 @@ The AI will see only the content from those specific blocks, plus your prompt. N
 **Automatic Context Inclusion**
 If you provide only a prompt (no blocks), Fractalic may automatically include content from earlier in your document. This can be convenient but sometimes gives the AI too much irrelevant information:
 
-```markdown
+```yaml
+# This block would be included automatically
+This section contains information that Fractalic will
+add to the AI context by default.
+
+# This block would be included automatically too
+This section also gets included automatically, providing
+additional details for the AI to consider.
+
 @llm
 prompt: "Summarize the key findings"
-# This might include ALL previous content automatically
 ```
 
 **Disabling Automatic Context**
 For maximum control, you can turn off automatic context inclusion:
 
-```markdown
+```yaml
+# Now ONLY your prompt goes to the AI
+This block will not be included in the next @llm operation
+because the context is set to none.
+
 @llm
 prompt: "Generate a simple greeting"
 context: none
-# Now ONLY your prompt goes to the AI
 ```
 
 **Quote Headers Properly**
@@ -266,94 +282,241 @@ This gives the AI the full picture when it needs to reason about relationships b
 
 > **Note:** This section provides a quick overview of each operation. For complete syntax details, parameters, and advanced usage, see the [Operations Reference](./operations-reference.md).
 
-**`@llm`: Getting AI to Read and Write**
+### **`@llm`: Getting AI to Read and Write**
 
 This operation sends content to an AI language model and inserts the response back into your document. It's the most common operation because it lets you generate text, analyze information, or get creative suggestions.
 
-Example usage:
-```yaml
+**Before execution:**
+```js
+# User Feedback Analysis {id=feedback}
+Users complained about slow loading times and confusing navigation.
+The checkout process has too many steps.
+
 @llm
 prompt: |
   Analyze the user feedback above and identify the top 3 pain points.
   Suggest one improvement for each pain point.
-blocks: user-feedback/*
+blocks: feedback
 use-header: "# Feedback Analysis"
 ```
 
-The AI will read all the user feedback sections, process your instructions, and create a new section with its analysis.
+**After execution:**
+```js
+# User Feedback Analysis {id=feedback}
+Users complained about slow loading times and confusing navigation.
+The checkout process has too many steps.
 
-**`@shell`: Running Commands and Capturing Output**
+@llm
+prompt: |
+  Analyze the user feedback above and identify the top 3 pain points.
+  Suggest one improvement for each pain point.
+blocks: feedback
+use-header: "# Feedback Analysis"
+
+# Feedback Analysis {id=feedback-analysis} // [!code highlight]
+Based on the user feedback, here are the top 3 pain points and improvements: // [!code highlight]
+ // [!code highlight]
+1. **Slow loading times** - Implement image compression and lazy loading // [!code highlight]
+2. **Confusing navigation** - Redesign menu structure with clear categories // [!code highlight]
+3. **Complex checkout** - Reduce to 2-step process with guest checkout option // [!code highlight]
+```
+
+The AI reads your feedback, analyzes it, and creates a structured response with specific recommendations.
+
+### **`@shell`: Running Commands and Capturing Output**
 
 This operation executes commands on your computer and adds the output to your document. Use it to run scripts, check file systems, call APIs, or integrate with any command-line tool.
 
-Example usage:
-```yaml
+**Before execution:**
+```js
+# Project Analysis
+Let's check how many Python files we have in this project.
+
 @shell
 prompt: "find . -name '*.py' | wc -l"
 use-header: "# Python File Count"
 ```
 
-This counts Python files in your project and adds the result to your document.
+**After execution:**
+```js
+# Project Analysis
+Let's check how many Python files we have in this project.
 
-**`@import`: Bringing in External Content**
+@shell
+prompt: "find . -name '*.py' | wc -l"
+use-header: "# Python File Count"
+
+# Python File Count {id=python-file-count} // [!code highlight]
+42 // [!code highlight]
+```
+
+The shell command runs and captures its output directly in your document, creating a permanent record of what you discovered.
+
+### **`@import`: Bringing in External Content**
 
 This operation reads content from other files and inserts it into your current document. You can import entire files or just specific sections.
 
-Example usage:
-```yaml
+**Before execution:**
+```js
+# Project Setup
+We need to include our standard project introduction.
+
 @import
 file: templates/project-header.md
 blocks: introduction
 use-header: "# Project Overview"
 ```
 
-This finds the "introduction" section in your template file and brings it into your current document.
+**After execution (assuming templates/project-header.md contains the introduction section):**
+```js
+# Project Setup
+We need to include our standard project introduction.
 
-**`@run`: Executing Sub-Workflows**
+@import
+file: templates/project-header.md
+blocks: introduction
+use-header: "# Project Overview"
+
+# Project Overview {id=project-overview} // [!code highlight]
+This project follows our standard development workflow with automated testing, // [!code highlight]
+continuous integration, and comprehensive documentation. All team members // [!code highlight]
+should familiarize themselves with the coding standards and review process // [!code highlight]
+outlined in this guide. // [!code highlight]
+```
+
+This pulls the "introduction" section from your template file and inserts it cleanly into your current document.
+
+### **`@run`: Executing Sub-Workflows**
 
 This operation runs another Fractalic document as a mini-workflow, passing it some context and getting back results. Think of it as calling a specialized function that lives in its own file.
 
-Example usage:
-```yaml
+**Before execution:**
+```js
+# Research Data {id=raw-data}
+Survey responses: 850 participants, 73% satisfaction rate
+Performance metrics: 2.3s average load time, 94% uptime
+User behavior: 65% mobile usage, 45% return visitors
+
+# Methodology {id=methodology}
+Data collected over 30 days using anonymous tracking and user surveys.
+
 @run
 file: agents/research-summarizer.md
 blocks: 
-  - raw-data/*
+  - raw-data
   - methodology
 use-header: "# Research Summary"
 ```
 
-This sends your raw data and methodology to a specialized summarizer workflow and includes its output in your document.
+**After execution (the research-summarizer.md workflow processes the data and returns a summary):**
+```js
+# Research Data {id=raw-data}
+Survey responses: 850 participants, 73% satisfaction rate
+Performance metrics: 2.3s average load time, 94% uptime
+User behavior: 65% mobile usage, 45% return visitors
 
-**`@return`: Ending a Workflow with Specific Output**
+# Methodology {id=methodology}
+Data collected over 30 days using anonymous tracking and user surveys.
+
+@run
+file: agents/research-summarizer.md
+blocks: 
+  - raw-data
+  - methodology
+use-header: "# Research Summary"
+
+# Research Summary {id=research-summary} // [!code highlight]
+**Key Findings:** // [!code highlight]
+- Strong user satisfaction (73%) with room for improvement // [!code highlight]
+- Performance meets standards but load time could be optimized // [!code highlight]
+- Mobile-first approach essential given 65% mobile usage // [!code highlight]
+ // [!code highlight]
+**Recommendations:** // [!code highlight]
+- Focus on mobile experience optimization // [!code highlight]
+- Investigate load time reduction opportunities // [!code highlight]
+- Develop retention strategies for the 55% of new visitors // [!code highlight]
+```
+
+The sub-workflow processes your raw data and methodology, then returns a structured summary with findings and recommendations.
+
+### **`@return`: Ending a Workflow with Specific Output**
 
 This operation stops the current workflow and returns specific content. It's essential in sub-workflows (called by @run) to specify what gets sent back to the caller.
 
-Example usage:
-```yaml
+**Inside a sub-workflow file (like agents/research-summarizer.md):**
+```js
+# Analysis Process {id=analysis}
+Processing survey data and performance metrics...
+
+# Final Summary {id=final-summary}
+**Key Findings:**
+- Strong user satisfaction (73%) with room for improvement
+- Performance meets standards but load time could be optimized
+- Mobile-first approach essential given 65% mobile usage
+
+**Recommendations:**
+- Focus on mobile experience optimization
+- Investigate load time reduction opportunities
+- Develop retention strategies for the 55% of new visitors
+
 @return
 blocks: final-summary
 use-header: "# Results"
 ```
 
-This ends the workflow and returns only the "final-summary" block to whoever called this workflow.
+When another document calls this workflow with `@run`, only the "Final Summary" section gets sent back to the caller. The "Analysis Process" section stays internal to this workflow. This lets you build specialized, reusable workflows that can be called from multiple documents while keeping their internal processing details separate from their outputs.
 
 ## How Tool Output Becomes Part of Your Document
 One of the key features of Fractalic is that when AI models or shell commands produce output, that output doesn't just disappear—it becomes a permanent, labeled part of your document that you can reference later.
 
-For example, when you run this operation:
-```yaml
+**Before execution:**
+```js
+# Directory Analysis
+Let's see what files we have in this project.
+
 @shell
 prompt: "ls -la"
 use-header: "# Directory Contents"
 ```
 
-Fractalic doesn't just show you the directory listing temporarily. Instead, it creates a new section in your document called "Directory Contents" containing the output. Later, you can reference this section in other operations:
+**After execution:**
+```js
+# Directory Analysis
+Let's see what files we have in this project.
 
-```yaml
+@shell
+prompt: "ls -la"
+use-header: "# Directory Contents"
+
+# Directory Contents {id=directory-contents} // [!code highlight]
+total 48 // [!code highlight]
+drwxr-xr-x  12 user  staff   384 Sep 10 14:30 . // [!code highlight]
+drwxr-xr-x   5 user  staff   160 Sep 10 14:25 .. // [!code highlight]
+-rw-r--r--   1 user  staff  1234 Sep 10 14:30 README.md // [!code highlight]
+-rw-r--r--   1 user  staff   567 Sep 10 14:29 package.json // [!code highlight]
+drwxr-xr-x   8 user  staff   256 Sep 10 14:28 src // [!code highlight]
+drwxr-xr-x   4 user  staff   128 Sep 10 14:27 docs // [!code highlight]
+```
+
+Now you can reference this output in future operations:
+
+```js
 @llm
 prompt: "Analyze the file structure above and suggest improvements"
 blocks: directory-contents
+use-header: "# Structure Analysis"
+
+# Structure Analysis {id=structure-analysis} // [!code highlight]
+Based on the directory listing, this appears to be a well-organized project: // [!code highlight]
+ // [!code highlight]
+**Strengths:** // [!code highlight]
+- Clear separation with `src/` and `docs/` directories // [!code highlight]
+- Standard files like README.md and package.json are present // [!code highlight]
+ // [!code highlight]
+**Suggestions:** // [!code highlight]
+- Consider adding a `tests/` directory for test files // [!code highlight]
+- Add a `.gitignore` file to exclude build artifacts // [!code highlight]
+- Include a `scripts/` directory for automation tools // [!code highlight]
 ```
 
 This creates a complete audit trail of what happened, when, and what the results were. You can see the entire chain of reasoning and data in one place, which is invaluable for debugging, collaboration, and understanding how you arrived at your final results.
@@ -399,48 +562,33 @@ to: rough-draft
 **Disable Headers for Structured Output**
 When you need clean JSON or other structured data, turn off the automatic heading:
 
-```markdown
+**Before execution:**
+```js
+# API Design
+We need to define the structure for our user API response.
+
 @llm
 prompt: "Return ONLY a JSON object with keys: title, summary, tags"
 use-header: none
 ```
 
-## When NOT to Use Certain Features
-Understanding limitations helps you avoid common pitfalls:
+**After execution:**
+```js
+# API Design
+We need to define the structure for our user API response.
 
-**Don't Overuse Wildcards**
-While `research/*` is powerful for comprehensive analysis, avoid it when you only need specific pieces:
-
-```markdown
-# Good: Specific selection
-blocks: research/conclusion
-
-# Avoid when unnecessary: Everything under research
-blocks: research/*  # Could include irrelevant subsections
-```
-
-**Don't Append Forever**
-Repeatedly appending small changes creates clutter and wastes tokens. Switch to replace mode once content stabilizes:
-
-```markdown
-# Early exploration: append is fine
-mode: append
-
-# Later refinement: use replace
-mode: replace
-to: target-section
-```
-
-**Don't Rely on Implicit Context for Critical Operations**
-When precision matters, explicitly control what the AI sees:
-
-```markdown
-# Precise control
 @llm
-prompt: "Generate only a title"
-context: none  # No automatic context
-# Only your prompt goes to the AI
+prompt: "Return ONLY a JSON object with keys: title, summary, tags"
+use-header: none
+
+{ // [!code highlight]
+  "title": "User Profile API", // [!code highlight]
+  "summary": "Endpoint for retrieving user profile information", // [!code highlight]
+  "tags": ["user", "profile", "api", "get"] // [!code highlight]
+} // [!code highlight]
 ```
+
+Notice how the JSON appears directly without any heading wrapper, making it easy to copy or process programmatically.
 
 ## Quick Success Checklist
 Before running your Fractalic document, check these items:
