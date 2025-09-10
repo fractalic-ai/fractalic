@@ -6,48 +6,57 @@ outline: deep
 
 # Quick Start
 
-Welcome to Fractalic! Think of it as a way to write computer programs using plain English in simple documents. Instead of learning complex programming languages, you'll write what you want in regular Markdown files, and Fractalic will make it happen.
+Welcome to Fractalic! Imagine if you could write instructions in plain English and have an AI assistant carry them out automatically, all while keeping a perfect record of what happened. That's exactly what Fractalic does—it turns simple documents into powerful AI programs.
 
 ## What You'll Learn
 By the end of this guide, you'll understand how to:
 - Set up Fractalic and get it running
-- Write your first "AI program" in plain English
-- See how the computer executes your instructions step by step
-- Understand why this approach is powerful for working with AI
+- Write your first "AI program" using nothing but plain English
+- Watch your document come alive as AI executes your instructions
+- Understand why this document-based approach changes everything
 
 ## How Fractalic Works (The Big Picture)
 
-Imagine writing a recipe, but instead of just instructions for cooking, you're writing instructions for an AI assistant. Each step in your "recipe" can:
+Think of Fractalic as a smart notebook that can actually *do* things. You write what you want in a regular Markdown document, and Fractalic reads it like a recipe, executing each instruction step by step.
 
-- **Ask an AI** to analyze, write, or solve something
-- **Run computer commands** to check results or get data  
-- **Import knowledge** from other documents or files
-- **Return specific results** to share with others
+Here's what makes it special:
 
-The magic happens because Fractalic treats your document like a living workspace. As each instruction runs, it adds new content to your document. You can see the AI's responses, the output from commands, and how everything builds up step by step.
+**Your Document Becomes a Living Program**  
+Unlike traditional programming where you write code in one place and see results somewhere else, Fractalic adds AI responses and results directly into your document. You can literally watch your document grow as the AI works.
+
+**Four Types of Instructions You Can Give:**
+- **@llm** - "Hey AI, read this section and write me something"
+- **@shell** - "Run this command on my computer and show me the output"  
+- **@import** - "Bring knowledge from another document into this one"
+- **@return** - "Save this result so other documents can use it"
+
+**Everything Builds On Everything**  
+Each instruction can reference the results of previous instructions. The AI can read what it just wrote, shell commands can use AI-generated file names, and everything flows together naturally.
 
 ## Quick Setup (Choose Your Path)
 
-### Option 1: Docker (Easiest - Recommended)
-If you have Docker installed, this gets everything running in one command:
+Getting Fractalic running is straightforward—pick the option that works best for you:
+
+### Option 1: Docker (Easiest - Works Everywhere)
+If you have Docker on your computer, this gets everything running with one command:
 
 ```bash
-docker run -d --name fractalic \
-  --network bridge \
-  -p 3000:3000 -p 8000:8000 -p 8001:8001 -p 5859:5859 \
-  -v /var/run/docker.sock:/var/run/docker.sock \
-  --env HOST=0.0.0.0 \
+docker run -d --name fractalic 
+  --network bridge 
+  -p 3000:3000 -p 8000:8000 -p 8001:8001 -p 5859:5859 
+  -v /var/run/docker.sock:/var/run/docker.sock 
+  --env HOST=0.0.0.0 
   ghcr.io/fractalic-ai/fractalic:main
 ```
 
-Then open your web browser to `http://localhost:3000`
+Then open your web browser to `http://localhost:3000` and you're ready to go!
 
 ### Option 2: GitHub Codespaces (Zero Installation)
-Click this button to run Fractalic in your browser with zero setup:
+Don't want to install anything? Click this button to run Fractalic in your browser:
 [![Open in GitHub Codespaces](https://github.com/codespaces/badge.svg)](https://codespaces.new/fractalic-ai/fractalic)
 
 ### Option 3: Local Development
-If you want to run Fractalic directly on your computer:
+If you prefer to run everything directly on your computer:
 
 **What you need:**
 - Python 3.11 or newer
@@ -63,11 +72,11 @@ pip install -r requirements.txt
 ./run_server.sh
 ```
 
-This starts Fractalic's backend. You can use it directly from the command line, or add the web interface by following the UI setup in the README.
+This starts Fractalic's engine. You can use it from the command line or add the web interface following the instructions in the README.
 
 ## Your First AI Program
 
-Let's create a simple Fractalic document that demonstrates the core concepts. Create a new file called `my-first-program.md`:
+Let's create a simple Fractalic document that shows you exactly how this works. Create a new file called `my-first-program.md`:
 
 ```markdown
 # My First AI Assistant {id=intro}
@@ -75,20 +84,22 @@ I want to learn how Fractalic works by creating a simple greeting program.
 
 @llm
 prompt: "Create a friendly greeting that mentions Fractalic and AI programming. Make it encouraging for a beginner."
-block: intro
+blocks: intro
 use-header: "# AI Generated Greeting"
 ```
 
-**What this does:**
-1. Creates a knowledge block called "intro" with your description
-2. Tells the AI (`@llm`) to read that block and create a greeting
-3. Puts the AI's response in a new section called "AI Generated Greeting"
+**Here's what's happening:**
+1. **Knowledge Block**: The heading `# My First AI Assistant {id=intro}` creates a "knowledge block" that contains your description
+2. **AI Instruction**: `@llm` tells Fractalic "use the AI to do something"
+3. **The Task**: The `prompt` explains exactly what you want the AI to create
+4. **The Context**: `blocks: intro` tells the AI to read the intro section first
+5. **The Output**: `use-header` creates a new section with the AI's response
 
-When you run this, Fractalic will add the AI's response right into your document!
+When you run this document, Fractalic will add the AI's greeting right into your file!
 
 ## A More Practical Example
 
-Here's a slightly more complex example that shows how Fractalic can help you with real tasks:
+Here's a more interesting example that shows how Fractalic instructions can build on each other:
 
 ```markdown
 # Website Ideas {id=ideas}
@@ -98,14 +109,14 @@ I want to create a personal portfolio website to showcase my projects.
 prompt: |
   Based on the website goal above, create a simple list of 5 essential pages 
   this website should have. Format as a bulleted list.
-block: ideas
+blocks: ideas
 use-header: "# Recommended Pages"
 
 @llm
 prompt: |
   For each page listed above, write a one-sentence description of what 
   content should go there.
-block: recommended-pages/*
+blocks: recommended-pages
 use-header: "# Page Descriptions"
 
 @shell
@@ -113,33 +124,35 @@ prompt: "mkdir -p my-portfolio && echo 'Portfolio structure created'"
 use-header: "# Setup Confirmation"
 ```
 
-**What happens here:**
-1. You describe your goal (portfolio website)
-2. First AI call creates a list of essential pages
-3. Second AI call describes what goes on each page (notice it references the previous AI's output)
-4. Shell command creates a folder for your project
-5. Each step builds on the previous ones
+**Notice the flow:**
+1. **You describe your goal** (portfolio website)
+2. **First AI call** reads your goal and creates a list of pages
+3. **Second AI call** reads the list from step 2 and describes each page
+4. **Shell command** creates a folder for your project
+5. **Each step builds on the previous ones** - this is the power of Fractalic!
 
-## Understanding Your Results
+The AI in step 2 doesn't just use your original idea—it actually reads the page list that the first AI created. This is how you can chain together complex workflows using simple English instructions.
 
-After running either example, you'll see your original document has grown! Here's exactly what you'll see (highlighted lines show what Fractalic added):
+## Watching Your Document Come Alive
+
+After running either example, you'll see something magical happen—your document will have grown! The content that was generated gets added right into your file. Here's exactly what you'll see:
 
 ### First Example Results
-```yaml{9-10}
+```js
 # My First AI Assistant {id=intro}
 I want to learn how Fractalic works by creating a simple greeting program.
 
 @llm
 prompt: "Create a friendly greeting that mentions Fractalic and AI programming. Make it encouraging for a beginner."
-block: intro
+blocks: intro
 use-header: "# AI Generated Greeting"
 
-# AI Generated Greeting {id=ai-generated-greeting}
-Welcome to the exciting world of Fractalic! You're taking your first steps into AI programming, and that's fantastic. Fractalic makes it easy to harness the power of artificial intelligence using simple, readable instructions—you're going to love how intuitive and powerful this approach can be!
+# AI Generated Greeting {id=ai-generated-greeting} // [!code highlight]
+Welcome to the exciting world of Fractalic! You're taking your first steps into AI programming, and that's fantastic. Fractalic makes it easy to harness the power of artificial intelligence using simple, readable instructions—you're going to love how intuitive and powerful this approach can be! // [!code highlight]
 ```
 
 ### Portfolio Example Results
-```yaml{11-16,25-30,36-37}
+```js
 # Website Ideas {id=ideas}
 I want to create a personal portfolio website to showcase my projects.
 
@@ -147,75 +160,111 @@ I want to create a personal portfolio website to showcase my projects.
 prompt: |
   Based on the website goal above, create a simple list of 5 essential pages 
   this website should have. Format as a bulleted list.
-block: ideas
+blocks: ideas
 use-header: "# Recommended Pages"
 
-# Recommended Pages {id=recommended-pages}
-• Home - Landing page with brief introduction
-• About - Personal background and skills
-• Projects - Showcase of your work and achievements
-• Blog - Thoughts, tutorials, and updates
-• Contact - Ways to get in touch
+# Recommended Pages {id=recommended-pages} // [!code highlight]
+• Home - Landing page with brief introduction // [!code highlight]
+• About - Personal background and skills // [!code highlight]
+• Projects - Showcase of your work and achievements // [!code highlight]
+• Blog - Thoughts, tutorials, and updates // [!code highlight]
+• Contact - Ways to get in touch // [!code highlight]
 
 @llm
 prompt: |
   For each page listed above, write a one-sentence description of what 
   content should go there.
-block: recommended-pages/*
+blocks: recommended-pages
 use-header: "# Page Descriptions"
 
-# Page Descriptions {id=page-descriptions}
-• **Home**: A compelling landing page that immediately communicates who you are and what you do, with clear navigation to your best work.
-• **About**: Your professional story, skills, experience, and what makes you unique as a developer or creator.
-• **Projects**: Detailed case studies of your best work with screenshots, technologies used, and links to live demos or code repositories.
-• **Blog**: Industry insights, tutorials, lessons learned, and updates about your current projects to demonstrate your expertise and thought leadership.
-• **Contact**: Multiple ways for potential employers or collaborators to reach you, including email, social media, and possibly a contact form.
+# Page Descriptions {id=page-descriptions} // [!code highlight]
+• **Home**: A compelling landing page that immediately communicates who you are and what you do, with clear navigation to your best work. // [!code highlight]
+• **About**: Your professional story, skills, experience, and what makes you unique as a developer or creator. // [!code highlight]
+• **Projects**: Detailed case studies of your best work with screenshots, technologies used, and links to live demos or code repositories. // [!code highlight]
+• **Blog**: Industry insights, tutorials, lessons learned, and updates about your current projects to demonstrate your expertise and thought leadership. // [!code highlight]
+• **Contact**: Multiple ways for potential employers or collaborators to reach you, including email, social media, and possibly a contact form. // [!code highlight]
 
 @shell
 prompt: "mkdir -p my-portfolio && echo 'Portfolio structure created'"
 use-header: "# Setup Confirmation"
 
-# Setup Confirmation {id=setup-confirmation}
-Portfolio structure created
+# Setup Confirmation {id=setup-confirmation} // [!code highlight]
+Portfolio structure created // [!code highlight]
 ```
 
-### What You're Seeing
+### The Magic You're Seeing
 
-The highlighted sections show:
-- **AI responses** - exactly what the language model generated based on your prompts
+The highlighted green lines show everything that Fractalic added to your document:
+- **AI responses** - exactly what the language model created based on your instructions
 - **Command outputs** - results from shell commands (like creating directories)
-- **Structured organization** - everything gets proper headings and IDs automatically
-- **Context building** - notice how the second AI call referenced the first AI's output
+- **Automatic organization** - everything gets proper headings and IDs without you having to think about it
+- **Context chaining** - notice how the second AI instruction automatically used the first AI's output
 
-This is the key insight: your document becomes a living record of both your intentions and the AI's work. You can see the whole process, modify it, and run it again. Each time you execute the document, Fractalic will either update existing sections or add new ones, depending on how you configure it.
+**This is the key insight**: Your document becomes a living record of both your ideas and what actually happened. You can see the whole process unfold, edit any part, and run it again. Fractalic treats your document like a program that grows and evolves as it runs.
 
-## Why This Approach Is Powerful
+**What makes this different from traditional programming:**
+- **No separate files** - your instructions and results live together
+- **No complex syntax** - just plain English instructions
+- **Visible process** - you can see exactly how the AI reasoned through each step  
+- **Iterative refinement** - change any instruction and re-run to see different results
 
-Traditional programming requires learning syntax, managing complex tools, and thinking like a computer. Fractalic lets you:
+## Why This Changes Everything
 
-- **Think in natural language** - write what you want, not how to code it
-- **See the process** - watch your document grow as AI works
-- **Build incrementally** - start simple, add complexity step by step  
-- **Reuse and share** - your documents become reusable "AI programs"
-- **Mix AI and automation** - combine AI reasoning with practical commands
+Most AI tools make you start from scratch every time. With Fractalic:
 
-## Common First-Time Issues
+**Your Work Accumulates**  
+Each instruction builds on previous results. The AI can read its own previous responses, refer to command outputs, and continuously refine its understanding.
+
+**Everything Stays Organized**  
+No more lost conversations or scattered results. Your entire thought process—from initial idea to final output—lives in one readable document.
+
+**You Stay in Control**  
+Unlike black-box AI tools, you can see exactly what the AI is thinking about at each step. Edit any instruction, change the context, or adjust the flow anytime.
+
+**Collaboration Becomes Natural**  
+Share your Fractalic document with teammates and they can see your entire reasoning process, modify it, and extend it—all in plain English.
+
+**Real Programs, Real Power**  
+Despite the simple syntax, you can build sophisticated workflows: data analysis pipelines, content generation systems, research workflows, or even complex multi-step automation.
+
+The paradigm shift is this: **instead of using AI as a chatbot, you're programming with AI as your execution engine.**
+
+## Troubleshooting Your First Run
+
+Don't worry if something doesn't work perfectly on your first try—here are the most common issues and how to fix them:
 
 | What you see | Why it happens | How to fix |
 |--------------|----------------|------------|
 | "Missing API key" | Fractalic needs credentials to talk to AI services | Add your OpenAI, Anthropic, or other API key to `settings.toml` |
-| "No settings file found" | First-time setup not complete | Run the UI once or copy `settings.toml.sample` to `settings.toml` |
-| "Port already in use" | Another program using the same port | Change ports in config or stop other programs |
-| AI gives weird responses | Context or prompt needs refinement | Be more specific in your prompts or adjust which blocks you reference |
+| "No settings file found" | First-time setup isn't complete | Run the web UI once or copy `settings.toml.sample` to `settings.toml` |
+| "Port already in use" | Another program is using the same port | Change ports in config or stop other programs |
+| AI gives unexpected responses | The instruction might be unclear or missing context | Be more specific in your prompts or check which blocks you're referencing |
+| "Block not found" | Typo in a block reference | Check that your `{id=...}` matches what you're referencing in `blocks:` |
 
-## What's Next?
+**Pro tip**: When you're just starting out, run each example exactly as written first. Once you see it working, then start experimenting with changes!
 
-Now that you've seen the basics:
+## Your Journey Starts Here
 
-1. **Try the examples** - Create and run the sample files above
-2. **Experiment** - Modify the prompts to see different results  
-3. **Learn the concepts** - Read [Core Concepts](./core-concepts.md) to understand how Fractalic works internally
-4. **Explore operations** - Check out [Operations Reference](./operations-reference.md) for all available commands
-5. **Build something real** - Start with a simple task you actually want to accomplish
+Now that you understand the basics, here's how to dive deeper:
 
-Remember: Fractalic is designed to grow with you. Start with simple instructions, and gradually add sophistication as you learn. The beauty is that everything stays readable and modifiable - no complex code to maintain!
+### 1. Try the Examples First
+Create and run the sample files above exactly as written. Seeing Fractalic in action will make everything click.
+
+### 2. Experiment with Small Changes
+Once the examples work, try modifying them:
+- Change the prompts to ask for different things
+- Reference different sections in your `blocks:` 
+- Add new `@llm` instructions that build on the existing results
+
+### 3. Learn the Core Concepts
+Read [Core Concepts](./core-concepts.md) to understand how Fractalic thinks about documents, blocks, and context. This will help you build more sophisticated workflows.
+
+### 4. Explore All the Operations
+Check out [Operations Reference](./operations-reference.md) to see everything Fractalic can do beyond `@llm` and `@shell`.
+
+### 5. Build Something Real
+Start with a task you actually want to accomplish—maybe automating something at work, organizing research, or creating content. Fractalic is designed to handle real-world problems.
+
+**Remember**: Fractalic grows with you. Start simple with natural language instructions, and gradually add sophistication as you learn. The best part? Everything stays readable and modifiable—no mysterious code to maintain, just clear English instructions that anyone can understand and improve.
+
+Ready to turn your ideas into intelligent, self-documenting programs? Create your first `.md` file and start writing!
