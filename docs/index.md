@@ -83,7 +83,7 @@ mode: append
 - Comprehensive error handling and logging // [!code highlight]
 ```
 
-The document evolves as operations run—new blocks are appended, replaced, or refined—so you can literally "grow" an AI system the way you draft a document.
+The document evolves as operations run—new blocks are appended, replaced, or refined—so you can literally "grow" an AI system the way you draft a document. 
 
 ## Core Benefits
 
