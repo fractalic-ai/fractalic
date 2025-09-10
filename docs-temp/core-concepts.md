@@ -719,62 +719,6 @@ tools: web_search
 tools-turns-max: 3  # Stop after 3 tool calls
 ```
 
-**Keep Context Focused**
-Sending too much text to AI models wastes money and can reduce response quality. Be selective about which blocks you include:
-
-```markdown
-# Good: Focused context
-@llm
-blocks: user-requirements
-prompt: "Create a solution for these specific requirements"
-
-# Avoid: Everything in the document
-@llm
-blocks: "*"  # This could be expensive and unfocused
-```
-
-**Use Replace Mode for Stable Content**
-Once content stops changing, use replace mode to keep your document clean and your context focused:
-
-```markdown
-@llm
-prompt: "Polish this final draft"
-blocks: rough-draft
-mode: replace
-to: rough-draft
-```
-
-**Disable Headers for Structured Output**
-When you need clean JSON or other structured data, turn off the automatic heading:
-
-**Before execution:**
-```js
-# API Design
-We need to define the structure for our user API response.
-
-@llm
-prompt: "Return ONLY a JSON object with keys: title, summary, tags"
-use-header: none
-```
-
-**After execution:**
-```js
-# API Design
-We need to define the structure for our user API response.
-
-@llm
-prompt: "Return ONLY a JSON object with keys: title, summary, tags"
-use-header: none
-
-{ // [!code highlight]
-  "title": "User Profile API", // [!code highlight]
-  "summary": "Endpoint for retrieving user profile information", // [!code highlight]
-  "tags": ["user", "profile", "api", "get"] // [!code highlight]
-} // [!code highlight]
-```
-
-Notice how the JSON appears directly without any heading wrapper, making it easy to copy or process programmatically.
-
 ## Quick Success Checklist
 Before running your Fractalic document, check these items:
 
