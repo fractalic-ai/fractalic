@@ -171,25 +171,34 @@ Additional insights: Mobile users prefer... // [!code highlight]
 **Replace Mode**
 This completely replaces the target content with new content. Use this when you want to refine or update something rather than add to it:
 
+**Before execution:**
 ```js
 # Draft Summary {id=summary}
-This is a rough first draft.
+This is a rough first draft that needs improvement.
 
 @llm
 prompt: "Rewrite this summary to be more professional"
 blocks: summary
 mode: replace
 to: summary
-
-# Draft Summary {id=summary} // [!code highlight]
-This comprehensive analysis demonstrates... // [!code highlight]
 ```
 
-**Prepend Mode**
-This adds new content before the target. Less common, but useful for adding context or introductions.
+**After execution:**
+```js
+# Draft Summary {id=summary} // [!code highlight]
+This comprehensive analysis demonstrates key insights and strategic recommendations based on our thorough research findings. // [!code highlight]
+
+@llm
+prompt: "Rewrite this summary to be more professional"
+blocks: summary
+mode: replace
+to: summary
+```
+
+Notice how the original content "This is a rough first draft that needs improvement." was completely replaced with the new, more professional version. The heading stayed the same, but everything under it was rewritten.
 
 **Choosing Where Results Go**
-The `to:` parameter specifies where to place results. If you omit it, results appear right after the operation. For clarity and control, it's often better to be explicit:
+The `to:` parameter specifies where to place results. If you omit it, results appear right after the operation. For clarity and control:
 
 ```yaml
 @llm
@@ -198,11 +207,6 @@ blocks: analysis/*
 mode: append
 to: final-report
 ```
-
-**Practical Guidance:**
-- Start with `append` mode while exploring ideas—you can see how your document evolves
-- Switch to `replace` mode once content stabilizes—keeps things clean and avoids repetition
-- Always include `to:` when using `replace` mode to be crystal clear about your intentions
 
 ## Controlling What AI Sees (Context Management)
 One of Fractalic's strengths is giving you precise control over what information the AI receives. This matters for both quality (focused context produces better results) and cost (less text means lower API bills).
@@ -250,7 +254,7 @@ use-header: # Analysis Results   # Wrong - YAML ignores this
 **Branch Selection for Holistic Understanding**
 When you need the AI to understand a complete topic with all its subtopics, use wildcard selection:
 
-```markdown
+```yaml
 @llm
 prompt: "What are the main themes across this research?"
 blocks: research/*  # Includes research + all nested sections
@@ -258,34 +262,16 @@ blocks: research/*  # Includes research + all nested sections
 
 This gives the AI the full picture when it needs to reason about relationships between different parts of your content.
 
-## Visualizing Added Content (VitePress Highlighting)
-Use a js code block and mark each added line with `// [!code highlight]`.
-
-Correct pattern:
-```js
-# My First AI Assistant {id=intro}
-I want to learn how Fractalic works.
-
-@llm
-prompt: "Write a friendly greeting that mentions Fractalic."
-blocks: intro
-use-header: "# AI Generated Greeting"
-
-# AI Generated Greeting {id=ai-generated-greeting} // [!code highlight]
-Welcome to Fractalic! You're off to a great start. // [!code highlight]
-```
-Rules:
-- Use js fences, not markdown.
-- Highlight only the content added by operations (headings and lines).
-- Keep your original text and the operation unhighlighted so readers see input → operation → output clearly.
-
 ## The Five Core Operations Explained
 
-**@llm: Getting AI to Read and Write**
+> **Note:** This section provides a quick overview of each operation. For complete syntax details, parameters, and advanced usage, see the [Operations Reference](./operations-reference.md).
+
+**`@llm`: Getting AI to Read and Write**
+
 This operation sends content to an AI language model and inserts the response back into your document. It's the most common operation because it lets you generate text, analyze information, or get creative suggestions.
 
 Example usage:
-```markdown
+```yaml
 @llm
 prompt: |
   Analyze the user feedback above and identify the top 3 pain points.
@@ -296,11 +282,12 @@ use-header: "# Feedback Analysis"
 
 The AI will read all the user feedback sections, process your instructions, and create a new section with its analysis.
 
-**@shell: Running Commands and Capturing Output**
+**`@shell`: Running Commands and Capturing Output**
+
 This operation executes commands on your computer and adds the output to your document. Use it to run scripts, check file systems, call APIs, or integrate with any command-line tool.
 
 Example usage:
-```markdown
+```yaml
 @shell
 prompt: "find . -name '*.py' | wc -l"
 use-header: "# Python File Count"
@@ -308,11 +295,12 @@ use-header: "# Python File Count"
 
 This counts Python files in your project and adds the result to your document.
 
-**@import: Bringing in External Content**
+**`@import`: Bringing in External Content**
+
 This operation reads content from other files and inserts it into your current document. You can import entire files or just specific sections.
 
 Example usage:
-```markdown
+```yaml
 @import
 file: templates/project-header.md
 blocks: introduction
@@ -321,11 +309,12 @@ use-header: "# Project Overview"
 
 This finds the "introduction" section in your template file and brings it into your current document.
 
-**@run: Executing Sub-Workflows**
+**`@run`: Executing Sub-Workflows**
+
 This operation runs another Fractalic document as a mini-workflow, passing it some context and getting back results. Think of it as calling a specialized function that lives in its own file.
 
 Example usage:
-```markdown
+```yaml
 @run
 file: agents/research-summarizer.md
 blocks: 
@@ -336,11 +325,12 @@ use-header: "# Research Summary"
 
 This sends your raw data and methodology to a specialized summarizer workflow and includes its output in your document.
 
-**@return: Ending a Workflow with Specific Output**
+**`@return`: Ending a Workflow with Specific Output**
+
 This operation stops the current workflow and returns specific content. It's essential in sub-workflows (called by @run) to specify what gets sent back to the caller.
 
 Example usage:
-```markdown
+```yaml
 @return
 blocks: final-summary
 use-header: "# Results"
@@ -352,7 +342,7 @@ This ends the workflow and returns only the "final-summary" block to whoever cal
 One of the key features of Fractalic is that when AI models or shell commands produce output, that output doesn't just disappear—it becomes a permanent, labeled part of your document that you can reference later.
 
 For example, when you run this operation:
-```markdown
+```yaml
 @shell
 prompt: "ls -la"
 use-header: "# Directory Contents"
@@ -360,7 +350,7 @@ use-header: "# Directory Contents"
 
 Fractalic doesn't just show you the directory listing temporarily. Instead, it creates a new section in your document called "Directory Contents" containing the output. Later, you can reference this section in other operations:
 
-```markdown
+```yaml
 @llm
 prompt: "Analyze the file structure above and suggest improvements"
 blocks: directory-contents
