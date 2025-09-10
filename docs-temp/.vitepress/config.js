@@ -56,7 +56,18 @@ export default defineConfig({
           collapsible: false,
           items: [
             { text: 'Syntax Reference', link: '/syntax-reference' },
-            { text: 'Operations Reference', link: '/operations-reference' },
+            { 
+              text: 'Operations Reference', 
+              link: '/operations-reference',
+              items: [
+                { text: '@import', link: '/operations-reference#import' },
+                { text: '@llm', link: '/operations-reference#llm' },
+                { text: '@shell', link: '/operations-reference#shell' },
+                { text: '@run', link: '/operations-reference#run' },
+                { text: '@return', link: '/operations-reference#return' },
+                { text: '@goto', link: '/operations-reference#goto-experimental' }
+              ]
+            },
             { text: 'Configuration', link: '/configuration' }
           ]
         },
