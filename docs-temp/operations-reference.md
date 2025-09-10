@@ -9,17 +9,29 @@ outline: deep
 Operations mutate the context tree, consuming inputs (blocks, prompt literals, external sources) and producing new nodes.
 
 ## Shared Fields
-- `block` → Content selection (single or array via `block_uri`).
+- `block` → Content selection (single block reference or array of block references).
 - `prompt` → Literal instruction / content.
-- `to.block_uri` → Target anchor for merge.
+- `to` → Target block path for merge.
 - `mode` → `append` | `prepend` | `replace`.
 - `use-header` → Wrapper heading or `none`.
+- `run-once` → Boolean flag to execute operation only once.
 - `header-auto-align` → (@llm) Adjust generated heading levels.
 - `model` → Alias; provider inferred via settings.
 Priority rule: If both `block` & `prompt` present they concatenate (blocks first). Missing both (where at least one required) → error.
 
 ## @import
 Purpose: Inject external markdown (entire file or subsection) into current context.
+
+**Parameters:**
+| Field | Required | Type | Description |
+|-------|----------|------|-------------|
+| `file` | Yes | string | Source path: folder/file.md or folder/file.ctx |
+| `block` | No | string | Source block path: block/subblock/* where /* is optional for nested blocks |
+| `mode` | No | string | How to insert content: append, prepend, replace (default: append) |
+| `to` | No | string | Target block path where content will be placed |
+| `run-once` | No | boolean | Whether this operation should only run once (default: false) |
+
+**Examples:**
 ```markdown
 @import
 file: docs/snippet.md
@@ -52,8 +64,7 @@ prompt: "List 3 strategic risks for a small AI startup."
 Blocks only:
 ```markdown
 @llm
-block:
-  block_uri: context/*
+block: context/*
 use-header: "# Context Summary"
 ```
 Prompt + blocks (blocks concatenated first, then prompt):
@@ -76,21 +87,24 @@ stop-sequences:
 ```
 
 ### Key Parameters (Extended)
-| Field | Required | Description |
-|-------|----------|-------------|
-| prompt | Conditional | Literal input text (multi-line allowed). Either `prompt` or `block` must be present. |
-| block.block_uri | Conditional | One path or YAML array of block paths (supports wildcards `/*`). |
-| model | No | Logical model name (provider inferred via `[settings]`). |
-| use-header | No | Wrapper heading (default internal value) or `none` to emit raw content. |
-| header-auto-align | No | Re-level generated headings to nest under current heading. |
-| mode / to.block_uri | No | Merge strategy and target anchor. |
-| media | No | File paths for multimodal context. |
-| save-to-file | No | Persist raw model response pre-merge. |
-| tools | No | Comma list or array of MCP tool identifiers; `none` disables tool loop. |
-| tools-turns-max | No | Upper bound on tool reasoning cycles. |
-| stop-sequences | No | Hard stop substrings—truncates generation early. |
-| context | No | `auto` (ambient headings when only prompt) or `none` (strict isolation). |
-| provider | No | Explicit override (normally inferred from `model`). |
+| Field | Required | Type | Description |
+|-------|----------|------|-------------|
+| `prompt` | Conditional | string | Literal input text (multi-line allowed). Either `prompt` or `block` must be present. |
+| `block` | Conditional | string or array | One path or array of block paths (supports wildcards `/*`). |
+| `media` | No | array | File paths for multimodal context. |
+| `save-to-file` | No | string | Persist raw model response pre-merge. |
+| `use-header` | No | string | Wrapper heading (default internal value) or `none` to emit raw content. |
+| `header-auto-align` | No | boolean | Re-level generated headings to nest under current heading. |
+| `mode` | No | string | Merge strategy: append, prepend, replace (default: append). |
+| `to` | No | string | Target block path for merge. |
+| `provider` | No | string | Explicit provider override (normally inferred from `model`). |
+| `model` | No | string | Logical model name (provider inferred via settings). |
+| `temperature` | No | number | Temperature setting for LLM call to control randomness (0-1). |
+| `run-once` | No | boolean | Whether this operation should only run once (default: false). |
+| `stop-sequences` | No | array | Hard stop substrings—truncates generation early. |
+| `tools` | No | string or array | MCP tool identifiers; `none` disables tool loop, `all` enables all tools. |
+| `tools-turns-max` | No | integer | Upper bound on tool reasoning cycles. |
+| `context` | No | string | `auto` (ambient headings when only prompt) or `none` (strict isolation). |
 
 (For semantics of each parameter see Syntax Reference §4.7.)
 
@@ -168,8 +182,7 @@ Later:
 ```markdown
 @llm
 prompt: "Refine just the plan."
-block:
-  block_uri: action-plan
+block: action-plan
 ```
 
 ### Ensuring Determinism & Safety
@@ -224,8 +237,7 @@ use-header: "# Test Output"
 
 @llm
 prompt: "List failing tests (if any) and propose fixes." 
-block:
-  block_uri: test-output/*
+block: test-output/*
 ```
 
 ### Validation Checklist
@@ -240,6 +252,17 @@ Before shipping an @llm workflow:
 ---
 ## @shell
 Execute shell commands and capture stdout/stderr.
+
+**Parameters:**
+| Field | Required | Type | Description |
+|-------|----------|------|-------------|
+| `prompt` | Yes | string | Shell command to execute (single line or multiline) |
+| `use-header` | No | string | Header for the block that will contain command output (default: "# OS Shell Tool response block"). Use 'none' to omit header completely |
+| `mode` | No | string | How to insert command output: append, prepend, replace (default: append) |
+| `to` | No | string | Target block where command output will be placed |
+| `run-once` | No | boolean | Whether this operation should only run once (default: false) |
+
+**Examples:**
 ```markdown
 @shell
 prompt: "ls -1"
@@ -257,6 +280,19 @@ Security: Avoid blindly executing unreviewed model output. Keep commands idempot
 
 ## @run
 Run another markdown workflow (agent) and merge its returned value.
+
+**Parameters:**
+| Field | Required | Type | Description |
+|-------|----------|------|-------------|
+| `file` | Yes | string | Path to markdown file to execute: folder/file.md |
+| `prompt` | No | string | Optional input text to pass to the executed file |
+| `block` | No | string or array | Block reference(s) to use as input |
+| `use-header` | No | string | If provided with prompt, header would be appended with prompt content to target file before execution |
+| `mode` | No | string | How to insert execution results: append, prepend, replace (default: append) |
+| `to` | No | string | Target block where execution results will be placed |
+| `run-once` | No | boolean | Whether this operation should only run once (default: false) |
+
+**Examples:**
 ```markdown
 @run
 file: agents/refine.md
@@ -275,10 +311,20 @@ Requires callee to contain an `@return` for deterministic output.
 
 ## @return
 Emit final value and terminate current workflow.
+
+**Parameters:**
+| Field | Required | Type | Description |
+|-------|----------|------|-------------|
+| `prompt` | Conditional | string | Literal text to return |
+| `block` | Conditional | string or array | Block reference(s) to use as return content |
+| `use-header` | No | string | Optional header for returned content. Use 'none' to omit header completely |
+
+Note: At least one of `prompt` or `block` must be provided.
+
+**Examples:**
 ```markdown
 @return
-block:
-  block_uri: final/*
+block: final/*
 ```
 Literal:
 ```markdown
@@ -287,12 +333,22 @@ prompt: "DONE"
 ```
 No `mode`/`to` (caller handles merge semantics).
 
-## @goto (Experimental)
-Conditional navigation / pointer jump (if enabled by implementation). Prefer explicit structure until stable.
+## @goto
+Navigate to another block in document.
+
+**Parameters:**
+| Field | Required | Type | Description |
+|-------|----------|------|-------------|
+| `block` | Yes | string | Target block to navigate to (no nested flags allowed) |
+| `run-once` | No | boolean | Whether this operation should only run once (default: false) |
+
+**Examples:**
 ```markdown
 @goto
 block: decision-node
 ```
+
+Note: @goto has built-in loop prevention via GOTO_LIMIT configuration.
 
 ## Internal Execution Flow
 1. Parse YAML
@@ -304,14 +360,14 @@ block: decision-node
 7. Update AST & diffs
 
 ## Capability Snapshot
-| Operation | Reads Blocks | Writes Blocks | External IO | Prompt Required | File Required | Tool Loop |
-|-----------|--------------|---------------|-------------|-----------------|--------------|-----------|
-| @import   | Optional     | Yes           | FS          | No              | Yes          | No        |
-| @llm      | Optional     | Yes           | LLM / Tools | Either prompt or blocks | No | Yes (tools) |
-| @shell    | No           | Yes           | OS          | Yes             | No           | No        |
-| @run      | Optional     | Yes (callee return) | FS      | Optional        | Yes          | Indirect  |
-| @return   | Optional     | (Return value) | None       | Optional        | No           | No        |
-| @goto*    | Optional     | No            | None        | Optional        | No           | No        |
+| Operation | Reads Blocks | Writes Blocks | External IO | Prompt Required | File Required | Tool Loop | Has run-once |
+|-----------|--------------|---------------|-------------|-----------------|--------------|-----------|--------------|
+| @import   | Optional     | Yes           | FS          | No              | Yes          | No        | Yes          |
+| @llm      | Optional     | Yes           | LLM / Tools | Either prompt or blocks | No | Yes (tools) | Yes          |
+| @shell    | No           | Yes           | OS          | Yes             | No           | No        | Yes          |
+| @run      | Optional     | Yes (callee return) | FS      | Optional        | Yes          | Indirect  | Yes          |
+| @return   | Optional     | (Return value) | None       | Optional        | No           | No        | No           |
+| @goto     | Optional     | No            | None        | No              | No           | No        | Yes          |
 
 ## Choosing the Right Operation
 - Static knowledge: @import
@@ -338,8 +394,7 @@ Initial text.
 
 @llm
 prompt: "Improve clarity of draft above."
-block:
-  draft
+block: draft
 mode: replace
 to: draft  # In-place refinement target
 ```
@@ -351,8 +406,7 @@ use-header: "# Test Output"
 
 @llm
 prompt: "Summarize test output and list failing tests if any."
-block:
-  block_uri: test-output/*
+block: test-output/*
 ```
 
 ## Performance Tips

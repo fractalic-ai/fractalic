@@ -52,6 +52,37 @@ use-header: "# Technical Specification"
 mode: append
 ```
 
+**After execution, your document grows:**
+
+```js
+# Product Requirements {id=reqs}
+- Fast response times
+- Easy to use interface
+- Reliable performance
+
+@llm
+prompt: "Create a technical specification based on these requirements"
+blocks: reqs
+use-header: "# Technical Specification"
+mode: append
+
+# Technical Specification {id=technical-specification} // [!code highlight]
+## Performance Requirements // [!code highlight]
+- Response time: < 200ms for all user interactions // [!code highlight]
+- System uptime: 99.9% availability target // [!code highlight]
+- Concurrent users: Support up to 10,000 simultaneous connections // [!code highlight]
+ // [!code highlight]
+## User Interface Specifications // [!code highlight]
+- Responsive design for mobile and desktop // [!code highlight]
+- Intuitive navigation with maximum 3-click access to any feature // [!code highlight]
+- Accessibility compliance (WCAG 2.1 AA standards) // [!code highlight]
+ // [!code highlight]
+## Reliability Standards // [!code highlight]
+- Automated failover mechanisms // [!code highlight]
+- Data backup and recovery procedures // [!code highlight]
+- Comprehensive error handling and logging // [!code highlight]
+```
+
 The document evolves as operations run—new blocks are appended, replaced, or refined—so you can literally "grow" an AI system the way you draft a document.
 
 ## Core Benefits
@@ -65,19 +96,3 @@ The document evolves as operations run—new blocks are appended, replaced, or r
 ## Getting Started
 
 Ready to build your first AI workflow? Check out the [Quick Start guide](/quick-start) or dive into [Core Concepts](/core-concepts) to understand the fundamentals.
-
-## Core Concepts
-
-## Guides
-
-## Reference
-
-## Integrations
-
-## Deployment
-
-## Advanced Topics
-
-## Contributing
-
-## Appendix
