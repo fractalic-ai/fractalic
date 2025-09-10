@@ -9,6 +9,8 @@ on:
       - '*.md'
       - 'docs/**'
       - 'docs-temp/**'
+      - '.github/workflows/docs-deploy.yml'
+      - '.gitignore'
   pull_request:
     branches: [ main ]
     paths-ignore:
@@ -16,6 +18,8 @@ on:
       - '*.md'
       - 'docs/**'
       - 'docs-temp/**'
+      - '.github/workflows/docs-deploy.yml'
+      - '.gitignore'
   workflow_dispatch:  # Allow manual triggering
 
 env:
@@ -28,6 +32,7 @@ jobs:
     permissions:
       contents: read
       packages: write
+      id-token: write  # for OIDC token
     strategy:
       matrix:
         build_type: [full, production]
@@ -91,13 +96,29 @@ jobs:
 
     - name: Set up Docker Buildx
       uses: docker/setup-buildx-action@v3
-
-    - name: Log in to Container Registry
-      uses: docker/login-action@v3
       with:
-        registry: ${{ env.REGISTRY }}
-        username: ${{ github.actor }}
-        password: ${{ secrets.GITHUB_TOKEN }}
+        install: true
+        use: true
+        driver-opts: |
+          network=host
+
+    - name: Debug authentication setup
+      run: |
+        echo "Registry: ${{ env.REGISTRY }}"
+        echo "Actor: ${{ github.actor }}"
+        echo "Event: ${{ github.event_name }}"
+        echo "Should push: ${{ github.event_name != 'pull_request' }}"
+        # Test basic connectivity
+        curl -I https://ghcr.io || echo "GHCR connectivity test failed"
+
+    - name: Log in to Container Registry (with retry)
+      uses: nick-fields/retry@v3
+      with:
+        timeout_minutes: 5
+        max_attempts: 3
+        retry_wait_seconds: 30
+        command: |
+          echo "${{ secrets.GITHUB_TOKEN }}" | docker login ${{ env.REGISTRY }} -u ${{ github.actor }} --password-stdin
 
     - name: Extract metadata
       id: meta
@@ -126,6 +147,10 @@ jobs:
         build-args: |
           BUILDKIT_INLINE_CACHE=1
           BUILD_TYPE=${{ matrix.build_type }}
+        network: host
+        provenance: false  # Disable provenance to avoid registry issues
+        sbom: false       # Disable SBOM to avoid registry issues
+      timeout-minutes: 45
 
     - name: Verify multi-arch images were built
       run: |
