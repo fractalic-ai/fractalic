@@ -6,11 +6,15 @@ on:
     paths-ignore:
       - 'README.md'
       - '*.md'
+      - 'docs/**'
+      - 'docs-temp/**'
   pull_request:
     branches: [ main ]
     paths-ignore:
       - 'README.md'
       - '*.md'
+      - 'docs/**'
+      - 'docs-temp/**'
   release:
     types: [ published ]
 
