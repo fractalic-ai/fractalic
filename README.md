@@ -202,21 +202,54 @@ Add packs as MCP services or as local tools per repo instructions.
 
 ## Screenshots
 
-<p align="center">
-  <img src="https://raw.githubusercontent.com/fractalic-ai/fractalic/main/docs/images/editor.png" width="720" alt="Fractalic Editor - Notebook-style UI with Markdown and YAML operations" />
-</p>
-<p align="center">
-  <img src="https://raw.githubusercontent.com/fractalic-ai/fractalic/main/docs/images/tools.png" width="720" alt="MCP Tools Integration - Access external services via Model Context Protocol" />
-</p>
-<p align="center">
-  <img src="https://raw.githubusercontent.com/fractalic-ai/fractalic/main/docs/images/diff.png" width="720" alt="Git-backed Diffs - Complete execution trace with version control" />
-</p>
-<p align="center">
-  <img src="https://raw.githubusercontent.com/fractalic-ai/fractalic/main/docs/images/mcp.png" width="720" alt="MCP Manager - Unified tool and service management interface" />
-</p>
-<p align="center">
-  <img src="https://raw.githubusercontent.com/fractalic-ai/fractalic/main/docs/images/deploy.png" width="720" alt="Deployment Dashboard - One-click containerization and service deployment" />
-</p>
+<table>
+  <tr>
+    <td width="50%">
+      <img src="docs/images/editor.png" alt="Fractalic Editor - Notebook-style UI with Markdown and YAML operations" />
+      <p align="center"><em>Main Editor Interface</em></p>
+    </td>
+    <td width="50%">
+      <img src="docs/images/notebook.png" alt="Notebook View - Interactive document execution with live results" />
+      <p align="center"><em>Notebook Execution View</em></p>
+    </td>
+  </tr>
+  <tr>
+    <td width="50%">
+      <img src="docs/images/tools.png" alt="MCP Tools Integration - Access external services via Model Context Protocol" />
+      <p align="center"><em>MCP Tools Integration</em></p>
+    </td>
+    <td width="50%">
+      <img src="docs/images/mcp.png" alt="MCP Manager - Unified tool and service management interface" />
+      <p align="center"><em>MCP Manager Interface</em></p>
+    </td>
+  </tr>
+  <tr>
+    <td width="50%">
+      <img src="docs/images/diff.png" alt="Git-backed Diffs - Complete execution trace with version control" />
+      <p align="center"><em>Git-backed Execution Diffs</em></p>
+    </td>
+    <td width="50%">
+      <img src="docs/images/inspector.png" alt="Debug Inspector - Deep inspection of execution state and variables" />
+      <p align="center"><em>Debug Inspector</em></p>
+    </td>
+  </tr>
+  <tr>
+    <td width="50%">
+      <img src="docs/images/inspector-messages.png" alt="Message Inspector - Detailed view of AI conversation turns and tool calls" />
+      <p align="center"><em>Message Inspector</em></p>
+    </td>
+    <td width="50%">
+      <img src="docs/images/markdown.png" alt="Markdown Editor - Clean document editing with syntax highlighting" />
+      <p align="center"><em>Markdown Editor</em></p>
+    </td>
+  </tr>
+  <tr>
+    <td colspan="2" align="center">
+      <img src="docs/images/deploy.png" alt="Deployment Dashboard - One-click containerization and service deployment" width="50%" />
+      <p align="center"><em>Deployment Dashboard</em></p>
+    </td>
+  </tr>
+</table>
 
 ## Architecture (short)
 
