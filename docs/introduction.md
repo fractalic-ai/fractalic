@@ -275,12 +275,3 @@ Getting Started Mindset:
 6. Iterate: adjust block references to tighten context, add shell calls for verification.
 
 Outcome: You transition naturally from idea → structured workflow → reusable agent library without switching mediums.
-
----
-### Supplemental Clarifications (Added)
-The above section is verbatim from the original monolithic document. The following clarifications were added later and are preserved here without altering original wording:
-- Default wrapper headings: @llm → `# LLM Response block`, @shell → `# OS Shell Tool response block`, @return → `# Return block`.
-- Quoting rule: Always quote a `use-header` value starting with `#` (YAML comment otherwise).
-- `context: none` disables implicit inclusion of earlier headings when only `prompt` is provided.
-- `stop-sequences` allow early, safe termination of model output to protect JSON / schema integrity.
-- `tools-turns-max` caps agentic tool loops to prevent runaway iterations.
