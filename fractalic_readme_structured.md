@@ -7,25 +7,19 @@
 # Fractalic
 Design, run and evolve multi‑model AI workflows in one executable Markdown file—no glue code—with precise context control, tool integration and git‑traceable reproducibility.
 
-## What This Means
-
-**Multi-model workflows**: Switch between GPT-4, Claude, and local models in the same document. Each `@llm` operation can specify a different provider. No vendor lock-in.
+## How
 
 **One executable Markdown file**: Your workflow specification *is* your runtime. Write what you want in plain Markdown, run it directly. No translation between documentation and code.
 
-**No glue code**: Replace orchestration scripts with 3-6 line YAML operations. `@llm`, `@shell`, `@run` handle the complexity.
+**No glue code**: Replace Python/JS/(any program language) orchestration scripts with 3-6 line YAML plain-text operations. 
 
-**Precise context control**: Your Markdown becomes an addressable tree. Reference exact sections (`block_uri: idea`), branches (`idea/*`), or lists. Models see only what you specify—no hidden prompt stuffing.
+**Multi-model workflows**: Switch between LLM models and providers in the same document. 
+
+**Precise context control**: Your Markdown becomes an addressable tree. Reference exact sections, branches, or lists. LLMs see only what you specify—no hidden prompt stuffing.
 
 **Tool integration**: Connect MCP servers, Python functions, and shell commands. All outputs flow back into your document structure for the next operation.
 
 **Git-traceable reproducibility**: Every run produces a `.ctx` file showing exactly what changed. Diff your workflow evolution semantically, not just text changes.
-
-## The Problem
-Current AI workflow tools fragment your intent. You write prompts in one place, scripts in another. You can't see which data reaches your model. Context leaks bloat your costs and degrade quality. Adding a new model or tool requires surgery across multiple files.
-
-## The Solution
-Write your entire workflow in one Markdown file. Run it directly. Watch it evolve as structured context, not logs. Diff your changes semantically.
 
 ## How It Works
 Your Markdown document becomes three things:
