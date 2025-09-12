@@ -1,12 +1,10 @@
-# Fractalic
-
 [![PyPI Version](https://img.shields.io/pypi/v/fractalic.svg)](https://pypi.org/project/fractalic/) [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE.txt) ![Status](https://img.shields.io/badge/status-early--adopter-orange) ![Python](https://img.shields.io/badge/python-3.11+-blue.svg) [![Docs](https://img.shields.io/badge/docs-reference-purple)](docs/)
 
-> Build & evolve AI workflows as executable Markdown. No brittle chains, no node graphs — just living documents you can read, diff and rerun.
+<p align="center">
+  <img src="https://raw.githubusercontent.com/fractalic-ai/fractalic/main/docs/images/fractalic_hero.png" alt="Fractalic Hero Image">
+</p>
 
-![Fractalic Hero UI](docs/images/hero.png)
-
-## One‑Line
+# Fractalic
 Design, run and evolve multi‑model AI workflows in one executable Markdown file—no glue code—with precise context control, tool integration and git‑traceable reproducibility.
 
 ## What This Means
