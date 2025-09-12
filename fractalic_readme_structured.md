@@ -11,74 +11,85 @@
 Design, run and evolve multi‑model AI workflows in one executable Markdown file—no glue code—with precise context control, tool integration and git‑traceable reproducibility.
 
 ## The Core User Pains (Narrative)
-Modern AI workflow building is still slowed by:
-- Scattered scripts and fragile glue layers that break when intent changes.
-- Hidden or overstuffed prompts causing irrelevant context leakage and inconsistent outputs.
-- Multiple, inconsistent ways to call tools (shell, Python, APIs, MCP) → duplication & drift.
-- Manual orchestration of different models or agent roles (planner / executor / validator).
-- Poor auditability: logs exist but lack semantic structure; hard to answer “why this answer?”.
-- Steep onboarding curve for non‑engineering stakeholders.
+Modern AI workflow stacks slow you down because they fragment intent (prompts in one place, scripts in another), hide which data actually reaches the model, require brittle orchestration code, and produce outputs that are hard to audit or reproduce. Non‑technical stakeholders cannot safely adjust logic; iterating small changes means touching multiple layers; adding tools or another model feels like surgery. Context leaks or bloat silently reduce quality. Debugging answers becomes guesswork.
 
-## How Fractalic Addresses These
-Fractalic collapses specification, execution, evolution and audit into a single artifact:
-- One document = intent + structured knowledge + operations + historical evolution.
-- Deterministic context selection: only referenced blocks enter a model call.
-- Unified tool surface (MCP, Python tools, deterministic shell) feeding results back as addressable blocks.
-- Multi‑model neutrality: assign any provider per operation, combine roles without extra orchestration code.
-- Git‑native semantic history: every run emits a `.ctx` snapshot for diff / rollback / analysis.
-- Any document can become an agent simply by returning a result (`@return`).
-- Progressive elaboration: start as rough notes, organically layer structure, agents, tools.
+## How Fractalic Shifts the Model
+Fractalic collapses specification, execution, evolution and provenance into a single artifact: a Markdown document. You write what you want, reference exactly the knowledge the model should see, run it, watch deterministic changes appended or replaced, and immediately diff the result. No hidden stuffing, no accidental inclusion of future sections, no implicit waterfalls.
 
-## Unified Context Architecture
-In Fractalic there is no separation between “data context”, “execution context” and “LLM context” — they are the SAME evolving structure:
-1. The Markdown document is parsed into a hierarchical knowledge tree (blocks + operations).
-2. Operations mutate or extend that tree (append / replace / create / import).
-3. `@llm` calls see only the explicitly referenced subset of that tree.
-4. Results (LLM output, tool output, sub‑run results) are re‑inserted as new or modified blocks, instantly addressable.
-5. The evolving tree at each execution is persisted (.md source + .ctx after run) → reproducible state transition history.
+Key shifts:
+- One medium (Markdown + tiny YAML) instead of code + config + chains
+- Explicit, selectable context instead of implicit global stuffing
+- Deterministic merge semantics (append / replace / isolate) instead of ad‑hoc string munging
+- Tool outputs become first‑class knowledge blocks instead of raw logs
+- Every execution produces a semantic snapshot (`.ctx`) you can diff & roll back
+- Any document can be promoted to an agent simply by adding `@return`
 
-This unified model enables:
-- Precise, minimal prompt payloads.
-- Deterministic reproducibility (semantic diffing of knowledge state).
-- Composable agent layers (each in isolated or shared view of the tree).
-- Future advanced features (auto‑compression, staged memory, validators) without changing authoring ergonomics.
+## Context Architecture
+Fractalic treats “context” as layered and programmable:
+1. Data / Knowledge Context – Hierarchical tree of headings (blocks). This is your structured knowledge base inside the document.
+2. Execution Context – Ordered sequence of operations (`@llm`, `@shell`, `@run`, generated operations) plus their merge effects; acts as a deterministic state machine.
+3. Model (LLM) Context Window – Precisely the subset you explicitly reference (single block, branch with `/*`, or assembled fragments). Nothing else is silently injected.
 
-## Execution Control: How the LLM Drives the Runtime
-Fractalic exposes a minimal set of orthogonal primitives that let LLMs *govern* execution safely:
+Because the full document is parsed into an addressable tree, you can perform CRUD on blocks: create, append, replace, target sub‑trees, or feed only curated slices to a model. That gives surgical control over what the AI reasons about while keeping a human‑readable narrative.
 
-### 1. `@shell`
-Deterministic execution of OS / CLI / API commands. Output is captured and inserted as a structured block (addressable via its auto or explicit ID). Enables runtime acquisition of specs (`--help`, Swagger, code introspection) that become immediate context for subsequent reasoning.
+## Universal Executable Documents
+Every Fractalic document is simultaneously:
+- Specification (what you intend)
+- Runtime (operations mutate context deterministically)
+- Module / Agent (it can be invoked via `@run` with parameters)
+- Reusable interface (it can expose a contract using `@return`)
+- Audit log (each run materializes into a diffable `.ctx` state)
 
-### 2. `@run`
-Invokes another Markdown document (module / agent) with optional parameters (prompt text and/or block references). It executes in an isolated context (fresh tree), produces its internal evolution, and can return selected blocks using `@return`. Returned material is merged back into the caller’s context.
+You can:
+- Invoke it from another document (`@run file: path/to/file.md prompt: ...`)
+- Pass parameters as headings or prompts
+- Return structured blocks or generated operations back to the parent
+- Export artefacts to external systems (via shell / API calls) while retaining semantic provenance
 
-### 3. `@llm` with `tools: fractalic_run`
-Provides an agentic loop where the model can decide (under given constraints you define in the surrounding prompt) WHEN to invoke subordinate agents and WHICH data blocks to pass. Fractalic mediates each invocation, preserves the full message trail, and re‑integrates outputs.
+## Execution Control Surface
+Fractalic gives you a minimal, orthogonal set of operation primitives:
+- `@llm` – Perform a model call on explicitly selected blocks; can specify model/provider, validators (planned), tools, merge mode, header behavior.
+- `@shell` – Execute deterministic OS / CLI / API commands; captured stdout becomes an addressable block immediately available to subsequent operations.
+- `@run` – Invoke another Markdown file in an isolated context; parameters (prompt or block injections) are placed at the top; returned blocks merge back according to specified mode.
+- `@import` – Bring in reusable identities, templates, prior results or knowledge modules without executing their operations (or with, depending on mode).
+- `@return` – Stop execution of the current document/agent and emit the selected block(s) or prompt content to the caller.
 
-### 4. `@llm` with `tools: fractalic_opgen`
-Allows the model to *generate future operations* (including conditional branches, validation passes, retry logic, or chained `@shell` / `@run` steps). Generated operations are appended to the execution queue. With `run-once: true` you can stage an execution stack where the model seeds the subsequent deterministic pipeline.
+## LLM‑Driven Dynamic Orchestration
+Beyond static operations you can hand control loops to the model itself using internal tooling (examples):
+- `@llm\ntools: fractalic_run` – The model operates in an agent loop where it can decide—under your explicit rules—when to spawn sub‑documents (`@run`), which parameters to pass, and when to terminate.
+- `@llm\ntools: fractalic_opgen` – The model generates future operations (including conditional branches, additional `@llm`, `@shell`, `@run` steps) that are inserted into the execution stream and then executed deterministically. With `run-once: true` you can produce a guarded single execution frame or allow recursive unfolding.
 
-Together these create a controllable boundary between freeform reasoning and governed execution: the model can propose structure, but Fractalic enforces deterministic application and traceability.
+This pattern lets you prototype self‑extending workflows (context‑aware reflection loops, adaptive planning, consensus or validator passes) without custom framework code.
+
+## Tool Integration (Unified)
+Out of the box you can integrate:
+- MCP tools – Structured external capability surface (knowledge bases, SaaS, internal APIs)
+- Python tools – Lightweight wrappers or simple CLI commands promoted to operations
+- Deterministic `@shell` – System utilities, REST calls (`curl`), data processing scripts
+All results flow *back* into the knowledge tree, enriching subsequent reasoning. You are not reading logs—you are evolving structured context.
+
+## Precise Context Control (Why It Matters)
+Accidental prompt over‑inclusion leads to cost spikes, degraded answer quality and leakage of future steps. Fractalic’s block addressing (`block_uri: id`, wildcards for branches, explicit lists) ensures models only see curated scope. Refining a workflow becomes: reorganize headings, narrow selection, re‑run—no refactor of orchestration code.
+
+## Reproducibility & Audit Trail
+Each run emits:
+- Source document (unchanged)
+- Context snapshot `.ctx` (post‑execution structure)
+- Deterministic ordering of operations and their merge effects
+This makes differences semantic (“risk section expanded” / “tool output appended”) instead of opaque diff noise.
+
+## Faster Evolution (Beyond “Fast Iteration”)
+Iteration speed comes from eliminating translation layers: the document you think in *is* the one you run. Evolve structure only when needed; start with a single `@llm`, later isolate blocks, then extract a reusable agent—without changing mediums.
 
 ## What Each Claim Means (Value Breakdown)
-- **No glue code**: 3–6 lines of YAML replace custom wrapper classes / pipeline scripts.
-- **Multi‑model workflows**: Assign specialized models per step (analysis, creative, verifier) without building a bespoke controller layer.
-- **Tool unification**: MCP, Python tool specs, and shell become uniform producers of structured knowledge blocks.
-- **Precise context control**: Block URIs and wildcards (`block_uri: research/*`) prevent accidental inclusion of unrelated sections.
-- **Git‑traceable**: Each run’s `.ctx` file is a semantic snapshot → diff shows conceptual evolution, not raw log noise.
-- **Executable document**: Specification and behavior co‑evolve; no separate “doc vs code” divergence.
-- **Composable agents**: Any file + `@return` = reusable semantic module callable from others.
-- **Iterative universality**: The same document can be: a prototype → a reusable agent → an internal API layer → an orchestrator of lower agents.
-
-## Core Primitives (Mental Model)
-| Primitive | Purpose | Mini Form |
-|----------|---------|-----------|
-| Knowledge Block | Heading + its content | `# Plan {id=plan}` |
-| `@llm` | Model call over selected blocks | `@llm\nprompt: "Refine plan"\nblock: { block_uri: plan }` |
-| `@import` | Bring another file / artefact | `@import\nfile: templates/identity.md` |
-| `@run` | Execute another markdown as isolated agent | `@run\nfile: agents/research.md\nprompt: "Trends"` |
-| `@shell` | Shell / CLI / API access | `@shell\ncommand: curl https://api/...` |
-| `@return` | Stop & emit result | `@return\nblock: { block_uri: final/* }` |
+No glue code – 3–6 line YAML ops instead of orchestration classes.
+Multi‑model workflows – Assign different providers/models per `@llm` or per generated step.
+Tool integration – MCP, Python and shell unify external capability; outputs re‑enter reasoning automatically.
+Precise context – Only referenced blocks; no hidden stuffing.
+Git‑traceable – Diff human semantic evolution, not just raw text churn.
+Executable document – Requirements, operations, artefacts and returns co‑exist; no drift.
+Auditable agents – Plain files with explicit inputs/outputs; easy to review.
+Adaptive orchestration – Let models propose next steps safely within deterministic execution rules.
 
 ## Quick Glimpse
 ```markdown
@@ -90,7 +101,7 @@ prompt: "Generate 3 tagline options."
 block: { block_uri: idea }
 mode: append
 ```
-Run → output is appended beneath `# Idea`. No framework code. No hidden state.
+Run → output is appended beneath `# Idea`.
 
 ## End‑to‑End Scenario (Single File, ~8 Lines)
 ```markdown
@@ -118,31 +129,31 @@ use-header: "# Draft Narrative"
 @return
 block: { block_uri: draft-narrative }
 ```
-Result: Narrative returned; full evolution diffable (`.md` vs `.ctx`).
+Result: Narrative returned; full evolution diffable.
 
 ## Common Uses
-- Rapid prototyping of AI & SaaS automation flows
-- Research → synthesis → reporting pipelines
-- Planner / executor / validator multi‑agent chains
-- Tool‑augmented reasoning (API spec ingestion, code gen + shell verification)
-- Self‑refining documents (reflection, validation, repair loops)
-- Living internal playbooks / procedural knowledge stores
+- Research → planning → synthesis → reporting chains
+- Multi‑role / multi‑model agent orchestration (planner / executor / validator)
+- Context‑aware tool calling (data fetch → transform → reasoning)
+- Self‑refining documents (reflection passes, quality validators)
+- Internal knowledge playbooks that stay executable
+- Rapid prototyping of AI product features & SaaS flows
 
-## Key Advantages (at a glance)
-- Unified knowledge + execution + LLM context
-- Deterministic & auditable evolution
-- Zero framework tax (text → runtime)
-- Composable agent modules (`@run` + `@return`)
-- Integrated tool outputs as structured knowledge
-- Multi‑provider model orchestration
+## Key Advantages (Snapshot)
+- Context as a programmable tree
+- Deterministic evolution & merge semantics
+- Zero framework overhead
+- Reusable agent modules (`@run` / `@return`)
+- Unified tool surface (MCP, Python, shell)
+- Multi‑provider neutrality
 - Git native provenance
+- Extensible via model‑generated operations
 
 ## Getting Started (60s)
 ```bash
 pip install fractalic
 fractalic init demo
 cd demo
-# create workflow.md then:
 fractalic run workflow.md
 ```
 Minimal file:
@@ -159,8 +170,8 @@ block: { block_uri: goal }
 - Explicit over implicit
 - Human‑readable over clever abstractions
 - Declarative context control
-- Progressive elaboration (start messy → structure later)
-- Everything diffable
+- Progressive elaboration
+- Everything diffable & auditable
 
 ## Roadmap (Condensed)
 Current: multi‑model, MCP, shell, agents, git sessions.
@@ -173,22 +184,19 @@ Future: visual notebook overlay, adaptive context compression, multi‑language 
 - Pure real‑time streaming scenarios
 
 ## Screenshots (Optional)
-| View | Placeholder |
-|------|-------------|
-| Editor (source vs context) | `docs/images/editor.png` |
-| Diff (.md vs .ctx) | `docs/images/diff.png` |
-| Multi‑model run trace | `docs/images/models.png` |
-| Tool execution panel | `docs/images/tools.png` |
-<!-- Add real images in /docs/images and update paths -->
+Editor (source vs evolving context) – `docs/images/editor.png`
+Diff view (.md vs .ctx) – `docs/images/diff.png`
+Multi‑model run trace – `docs/images/models.png`
+Tool execution panel – `docs/images/tools.png`
 
 ## License
 MIT
 
 ## Status
-Early but production‑experimented. Building with real multi‑agent + tooling scenarios.
+Early but production‑experimented. Used in real multi‑agent + tooling scenarios.
 
 ## Vision
 Executable documentation as the universal interface between humans and AI.
 
 ---
-Ready to replace brittle chains with living documents? Start a file and run it.
+Start with one heading and one `@llm`. Let the document grow into a system.
