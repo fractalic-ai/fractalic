@@ -11,6 +11,9 @@ oauth_redirect_state.json
 *.oauth_tokens.json
 oauth-cache/
 
+# Website cache and build artifacts
+.cache_fractalic_site/
+
 # Development and debugging utilities
 utils/oauth_debug/
 debug_*.py
