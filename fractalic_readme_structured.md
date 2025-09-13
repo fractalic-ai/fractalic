@@ -4,30 +4,68 @@
   <img src="https://raw.githubusercontent.com/fractalic-ai/fractalic/main/docs/images/fractalic_hero.png" alt="Fractalic Hero Image">
 </p>
 
-# Fractalic
+# What is Fractalic?
 Design, run and evolve multi‑model AI workflows in one executable Markdown file—no glue code—with precise context control, tool integration and git‑traceable reproducibility.
 
-## What's New in v0.1.0
-- ⚡ FastMCP SDK v2 (≈280× tool call throughput) + intelligent caching
-- 🔐 OAuth 2.0 integration & token lifecycle management for MCP services
-- 🐳 Multi-architecture Docker builds & production process supervision
-- 🚀 Publisher system for automated, declarative deployments
-- 🧠 Precise context diffs (.ctx) + refined multi-model orchestration
-- 🛠 Tool execution stability & structured return improvements
-- 🧪 Expanded test coverage + consolidated documentation
+## What's New in v0.1.1
+This update focuses on making Fractalic more practical for everyday use. We added better model options, tool handling, and ways to deploy and debug. Here's a rundown of the changes.
 
-## How
-**One executable Markdown file**: Your workflow specification *is* your runtime. Write what you want in plain Markdown, run it directly. No translation between documentation and code.
+### 🧠 AI & Model Support
+- 🤖 LiteLLM integration, supporting over 100 models and providers.
+- 🔄 Scripts now work as complete agents, with two-way parameter passing in LLM modes.
+- 📊 Basic token tracking and cost analytics (still in early stages).
+- 🧠 Improved context diffs (.ctx) for multi-model workflows.
 
-**No glue code**: Replace Python/JS/(any program language) orchestration scripts with 3-6 line YAML plain-text operations. 
+### ⚡ MCP & Tool Ecosystem
+- ⚡ Full MCP support, including schema caching.
+- 🔐 OAuth 2.0 and token management for MCP services.
+- 🛒 MCP marketplace in Fractalic Studio for one-click installs.
+- 🔧 Fractalic Tools marketplace with one-click options: Telegram, HubSpot CRM, Tavily web search, MarkItDown, HubSpot process-mining, ultra-fast grep, file patching, and others.
+- 🐍 Support for using Python modules as tools.
+- 👁️ Tool call tracing, available in context and through the Studio inspector.
 
-**Multi-model workflows**: Switch between LLM models and providers in the same document. 
+### 🚀 Deployment & Publishing
+- 🚀 Publisher system with Docker builds and a lightweight server for REST APIs, including Swagger docs.
+- 🐳 Automated deployments with process supervision.
+- 📦 Fractalic now available as a Python package for standalone use or importing as a module.
 
-**Precise context control**: Your Markdown becomes an addressable tree. Reference exact sections, branches, or lists. LLMs see only what you specify—no hidden prompt stuffing.
+### 🎨 Fractalic Studio (IDE)
+- 🖥️ Development environment with session views, diff inspector, editor, and deployment tools.
+- 📝 Notebook-style editor for building workflows step by step.
+- 🛒 Integrated marketplaces for MCP servers and tools.
+- 🔍 Debugging features like execution tracing and context inspection.
 
-**Tool integration**: Connect MCP servers, Python functions, and shell commands. All outputs flow back into your document structure for the next operation.
+### 📚 Documentation & Stability
+- 📖 Detailed docs covering all features and examples.
+- 🛠️ Better stability for tool executions, with improved structured outputs.
 
-**Git-traceable reproducibility**: Every run produces a `.ctx` file showing exactly what changed. Diff your workflow evolution semantically, not just text changes.
+## Table of Contents
+
+- [Basic Principles](#basic-principles)
+- [From Idea to Service in 5 Steps](#from-idea-to-service-in-5-steps)
+- [How It Works](#how-it-works)
+- [Operations](#operations)
+- [Advanced: Let Models Control Flow](#advanced-let-models-control-flow)
+- [Example](#example)
+- [Extended Examples (MCP & Media)](#extended-examples-mcp--media)
+- [Getting Started](#getting-started)
+- [Common Uses](#common-uses)
+- [Roadmap](#roadmap)
+- [When Not to Use Fractalic](#when-not-to-use-fractalic)
+- [License](#license)
+
+## Basic Principles
+- **One executable Markdown file**: Your workflow specification *is* your runtime. Write what you want in plain Markdown, run it directly. No translation between documentation and code.
+
+- **No glue code**: Replace Python/JS/(any program language) orchestration scripts with 3-6 line YAML plain-text operations. 
+
+- **Multi-model workflows**: Switch between LLM models and providers in the same document. 
+
+- **Precise context control**: Your Markdown becomes a manageable LLM context as an addressable tree. Reference exact sections, branches, or lists. LLMs see only what you specify—no hidden prompt stuffing.
+
+- **Tool integration**: Connect MCP servers, Python functions, and shell commands. All outputs flow back into your document structure for the next operation.
+
+- **Human‑readable audit trail**: Each run outputs a stepwise execution tree plus a complete change log (new blocks, edits, tool calls). Skim it like a focused diff—only actions and their effects, no noise.
 
 ## From Idea to Service in 5 Steps
 
@@ -230,21 +268,88 @@ blocks:
 ```
 
 ## Getting Started
+
+### Installation
+
+#### Method 1: Pre-Built Docker Image (Recommended)
+Run the published container directly with all services (UI + API + AI server):
+```bash
+docker run -d --name fractalic --network bridge -p 3000:3000 -p 8000:8000 -p 8001:8001 -p 5859:5859 -v /var/run/docker.sock:/var/run/docker.sock --env HOST=0.0.0.0 ghcr.io/fractalic-ai/fractalic:main
+```
+Then open: http://localhost:3000
+
+#### Method 2: Build from Source (Full Stack)
+Builds latest version from GitHub repositories and runs in Docker:
+```bash
+curl -s https://raw.githubusercontent.com/fractalic-ai/fractalic/main/deploy/docker-deploy.sh | bash
+```
+This clones both fractalic + fractalic-ui, builds Docker image locally, and starts all services:
+- UI: http://localhost:3000
+- API: http://localhost:8000
+- AI Server: http://localhost:8001
+- MCP Manager: http://localhost:5859
+
+#### Method 3: Local Development Setup
+Full source installation with both backend and frontend for development:
+```bash
+git clone https://github.com/fractalic-ai/fractalic.git
+cd fractalic
+./local-dev-setup.sh
+```
+This script will:
+- Clone fractalic-ui repository
+- Set up Python virtual environment
+- Install all dependencies
+- Start both backend and frontend servers
+- Open http://localhost:3000 automatically
+
+#### Method 4: Python Package (CLI Only)
+Install when you only need the command-line runner (no UI):
 ```bash
 pip install fractalic
-fractalic init demo
-cd demo
-fractalic run workflow.md
 ```
 
-Start simple:
-```markdown
+##### Basic CLI Usage
+Check install:
+```bash
+fractalic --help
+```
+Create and run a minimal workflow:
+```bash
+cat > hello.md <<'EOF'
 # Goal {id=goal}
-Generate 5 focus areas.
+Generate a short greeting.
 
 @llm
-prompt: "List 5 focus areas."
+prompt: "Write a friendly one-sentence greeting mentioning Fractalic."
 blocks: goal
+use-header: "# Result"
+EOF
+
+fractalic hello.md
+```
+
+##### Usage as Python Module
+```python
+import fractalic
+
+# Run a workflow file
+result = fractalic.run('workflow.md')
+
+# Run with parameters
+result = fractalic.run('workflow.md', parameters={'company': 'Tesla'})
+
+# Run workflow content directly
+workflow_content = """
+# Analysis {id=task}
+Research the company mentioned in parameters.
+
+@llm
+prompt: "Analyze the company"
+blocks: task
+"""
+result = fractalic.run_content(workflow_content, parameters={'company': 'Apple'})
+print(result)
 ```
 
 ## Common Uses

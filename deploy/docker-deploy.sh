@@ -64,6 +64,7 @@ export FRONTEND_PORT="$FRONTEND_PORT"
 export BACKEND_PORT="$BACKEND_PORT"
 export AI_SERVER_PORT="$AI_SERVER_PORT"
 export MCP_MANAGER_PORT="$MCP_MANAGER_PORT"
+export FRACTALIC_SKIP_EMPTY_CHECK="1"  # Skip empty directory check since we just cloned
 
 # Run the Docker build script
 ./docker_build_run.sh

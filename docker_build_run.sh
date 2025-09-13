@@ -29,20 +29,23 @@ fi
 
 # Safety check: Ensure we're in an empty or nearly empty directory
 # This prevents accidentally polluting existing projects
-CURRENT_FILES=$(ls -la | wc -l)
-if [ $CURRENT_FILES -gt 3 ]; then  # . .. and maybe one other file
-    echo "❌ ERROR: This directory is not empty!"
-    echo "This script is designed for fresh installations in empty directories."
-    echo ""
-    echo "Current directory contents:"
-    ls -la
-    echo ""
-    echo "If you want to deploy an existing Fractalic installation with custom content,"
-    echo "use the publish_docker.py script instead:"
-    echo "  python publish_docker.py --help"
-    echo ""
-    echo "If you want to continue anyway, create a new empty directory and run this script there."
-    exit 1
+# Note: This check is disabled when called from docker-deploy.sh
+if [ "$FRACTALIC_SKIP_EMPTY_CHECK" != "1" ]; then
+    CURRENT_FILES=$(ls -la | wc -l)
+    if [ $CURRENT_FILES -gt 3 ]; then  # . .. and maybe one other file
+        echo "❌ ERROR: This directory is not empty!"
+        echo "This script is designed for fresh installations in empty directories."
+        echo ""
+        echo "Current directory contents:"
+        ls -la
+        echo ""
+        echo "If you want to deploy an existing Fractalic installation with custom content,"
+        echo "use the publish_docker.py script instead:"
+        echo "  python publish_docker.py --help"
+        echo ""
+        echo "If you want to continue anyway, create a new empty directory and run this script there."
+        exit 1
+    fi
 fi
 
 echo "✅ Directory is suitable for fresh installation"
