@@ -16,7 +16,7 @@ on:
       publish_to_pypi:
         description: 'Publish to PyPI (not just Test PyPI)'
         required: false
-        default: 'false'
+        default: false
         type: boolean
 
 jobs:
@@ -98,6 +98,10 @@ jobs:
         TWINE_PASSWORD: ${{ secrets.TEST_PYPI_API_TOKEN }}
       run: |
         echo "📤 Publishing to Test PyPI..."
+        if [ -z "$TWINE_PASSWORD" ]; then
+          echo "⚠️ TEST_PYPI_API_TOKEN secret not found, skipping Test PyPI upload"
+          exit 0
+        fi
         python -m twine upload --repository testpypi dist/* || echo "⚠️ Test PyPI upload failed (might be version conflict)"
     
     # Publish to production PyPI only for releases or manual trigger
@@ -108,6 +112,10 @@ jobs:
         TWINE_PASSWORD: ${{ secrets.PYPI_API_TOKEN }}
       run: |
         echo "🚀 Publishing to PyPI..."
+        if [ -z "$TWINE_PASSWORD" ]; then
+          echo "❌ PYPI_API_TOKEN secret not found, cannot publish to PyPI"
+          exit 1
+        fi
         python -m twine upload dist/*
     
     - name: Create GitHub Release (if from tag)
