@@ -7,6 +7,15 @@
 # Fractalic
 Design, run and evolve multi‑model AI workflows in one executable Markdown file—no glue code—with precise context control, tool integration and git‑traceable reproducibility.
 
+## What's New in v0.1.0
+- ⚡ FastMCP SDK v2 (≈280× tool call throughput) + intelligent caching
+- 🔐 OAuth 2.0 integration & token lifecycle management for MCP services
+- 🐳 Multi-architecture Docker builds & production process supervision
+- 🚀 Publisher system for automated, declarative deployments
+- 🧠 Precise context diffs (.ctx) + refined multi-model orchestration
+- 🛠 Tool execution stability & structured return improvements
+- 🧪 Expanded test coverage + consolidated documentation
+
 ## How
 **One executable Markdown file**: Your workflow specification *is* your runtime. Write what you want in plain Markdown, run it directly. No translation between documentation and code.
 
