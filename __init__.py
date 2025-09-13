@@ -4,7 +4,7 @@ Fractalic - The Agentic Development Environment
 Turn simple documents into powerful, AI-native applications.
 """
 
-__version__ = "0.1.1"
+__version__ = "0.1.2"
 
 # Expose main functions without importing dependencies yet
 def main():

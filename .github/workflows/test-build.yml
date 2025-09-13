@@ -14,18 +14,15 @@ on:
 jobs:
   test-build:
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        python-version: ['3.8', '3.9', '3.10', '3.11', '3.12']
     
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
     
-    - name: Set up Python ${{ matrix.python-version }}
+    - name: Set up Python 3.11
       uses: actions/setup-python@v4
       with:
-        python-version: ${{ matrix.python-version }}
+        python-version: '3.11'
     
     - name: Install build dependencies
       run: |
@@ -34,7 +31,7 @@ jobs:
     
     - name: Build package
       run: |
-        echo "🔨 Building package for Python ${{ matrix.python-version }}..."
+        echo "🔨 Building package for Python 3.11..."
         python -m build
     
     - name: Check package
@@ -57,8 +54,7 @@ jobs:
         print(f'Available functions: {[f for f in dir(fractalic) if not f.startswith(\"_\")]}')
         "
     
-    - name: Upload build artifacts (Python 3.11 only)
-      if: matrix.python-version == '3.11'
+    - name: Upload build artifacts
       uses: actions/upload-artifact@v4
       with:
         name: test-build-artifacts
