@@ -1,0 +1,97 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "fractalic"
+version = "0.1.1"
+description = "The Agentic Development Environment - Turn simple documents into powerful, AI-native applications"
+readme = "README.md"
+license = {text = "MIT"}
+authors = [
+    {name = "Fractalic AI", email = "hello@fractalic.ai"}
+]
+maintainers = [
+    {name = "Fractalic AI", email = "hello@fractalic.ai"}
+]
+keywords = [
+    "ai", "agents", "automation", "markdown", "llm", "agentic", "development", 
+    "mcp", "model-context-protocol", "workflow", "orchestration"
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Text Processing :: Markup",
+    "Topic :: System :: Shells",
+]
+requires-python = ">=3.8"
+dependencies = [
+    "anthropic>=0.8.0",
+    "aiohttp>=3.9.0",
+    "aiohttp-cors",
+    "python-dotenv>=1.0.0",
+    "groq",
+    "openai",
+    "litellm>=1.70.0",
+    "requests",
+    "replicate",
+    "uvicorn",
+    "fastapi==0.115.6",
+    "gitpython==3.1.31",
+    "jsonschema==4.23.0",
+    "Pillow==11.1.0",
+    "PyYAML==6.0.2",
+    "rich==13.9.4",
+    "toml==0.10.2",
+    "mcp==1.11.0",
+    "fastmcp>=2.10.0",
+    "tiktoken",
+    "httpx>=0.27.0",
+    "pydantic>=2.7.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest",
+    "pytest-asyncio",
+    "black",
+    "flake8",
+    "mypy",
+]
+
+[project.urls]
+Homepage = "https://fractalic.ai"
+Documentation = "https://fractalic.ai/docs"
+Repository = "https://github.com/fractalic-ai/fractalic"
+Issues = "https://github.com/fractalic-ai/fractalic/issues"
+Discord = "https://discord.gg/DHbnvxAT"
+
+[project.scripts]
+fractalic = "fractalic:main"
+
+[tool.setuptools]
+packages = ["core", "core.ast_md", "core.llm", "core.llm.providers", "core.operations", "core.plugins", "core.render", "core.ui_server"]
+include-package-data = true
+py-modules = ["fractalic"]
+
+[tool.setuptools.package-data]
+"*" = ["*.md", "*.toml", "*.json", "*.txt", "*.yml", "*.yaml"]
+
+[tool.black]
+line-length = 100
+target-version = ['py38']
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]

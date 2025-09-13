@@ -1,0 +1,66 @@
+name: Test Package Build
+
+on:
+  push:
+    branches: [ main, develop ]
+    paths:
+      - '**.py'
+      - 'pyproject.toml'
+      - 'requirements.txt'
+      - '.github/workflows/**'
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  test-build:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ['3.8', '3.9', '3.10', '3.11', '3.12']
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ matrix.python-version }}
+    
+    - name: Install build dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install build twine
+    
+    - name: Build package
+      run: |
+        echo "🔨 Building package for Python ${{ matrix.python-version }}..."
+        python -m build
+    
+    - name: Check package
+      run: |
+        echo "🔍 Checking package..."
+        python -m twine check dist/*
+    
+    - name: Test installation
+      run: |
+        echo "🧪 Testing installation..."
+        pip install dist/*.whl
+        
+        # Test CLI is available
+        fractalic --help
+        
+        # Test Python import
+        python -c "
+        import fractalic
+        print(f'✅ Fractalic {fractalic.__version__} imported successfully')
+        print(f'Available functions: {[f for f in dir(fractalic) if not f.startswith(\"_\")]}')
+        "
+    
+    - name: Upload build artifacts (Python 3.11 only)
+      if: matrix.python-version == '3.11'
+      uses: actions/upload-artifact@v3
+      with:
+        name: test-build-artifacts
+        path: dist/
+        retention-days: 7

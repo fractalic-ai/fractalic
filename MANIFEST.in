@@ -1,0 +1,14 @@
+include README.md
+include LICENSE.txt
+include requirements.txt
+include settings.toml.sample
+include mcp_servers.json.sample
+recursive-include core *.py
+recursive-include docs *.md
+recursive-include tutorials *.md
+recursive-include utils *.py
+recursive-exclude __pycache__ *
+recursive-exclude *.pyc *
+recursive-exclude .git *
+recursive-exclude logs *
+recursive-exclude oauth-cache *
