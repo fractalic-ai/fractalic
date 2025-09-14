@@ -258,85 +258,338 @@ use-header: "# Draft {id=draft}"
 blocks: draft
 ```
 
-## Extended Examples (MCP & Media)
+## Extended Examples (Real & Tested)
 
-### Web Search → Notion Page (MCP tavily_search + mcp/notion)
+### Web Search → Notion Page (MCP Integration)
 ```markdown
-# Agent Framework Brief {id=agent-brief}
-Track emerging AI agent frameworks (≤4 weeks) and store a concise structured summary into Notion.
+# Web search task
+Find top-5 world news for today about AI, provide brief summary about each, print them under "# AI news" header (add empty line before it) and suppliment each with direct link
 
 @llm
-prompt: Gather frameworks
-blocks: agent-brief
-tools:
-  - tavily_search
-tools-turns-max: 2
-use-header: "# Source Notes {id=source-notes}"
+prompt: Search news 
+tools: tavily_search
+
+# Notion task
+Based on extracted news, extract important insights, keep for each news a direct link - and save them as newspaper (please format it properly) to my Notion, create new page there - Daily AI news
 
 @llm
-prompt: Create Notion page
-blocks: source-notes
-tools:
-  - mcp/notion
-tools-turns-max: 3
-use-header: "# Notion Result {id=notion-result}"
-
-@return
-blocks: notion-result
+prompt: Process news to Notion
+block: 
+    - notion-task
+    - ai-news
+tools: mcp/notion
 ```
-Example diff:
+Execution result:
 ```diff
-+ # Source Notes {id=source-notes}
-+ Framework X | routing | dynamic graph...
-+ Framework Y | memory | episodic store...
-+ # Notion Result {id=notion-result}
-+ Notion page created: Agent Framework Trends — 2025-09-13 (id: abc123)
+# Web search task
+Find top-5 world news for today about AI, provide brief summary about each, print them under "# AI news" header (add empty line before it) and suppliment each with direct link
+
+@llm
+prompt: Search news 
+tools: tavily_search
+
++ # LLM response block
++ 
++ > TOOL CALL, id: call_7fl4HiwuAV7crDV9TNJyyCu1
++ tool: tavily_search
++ args:
++ {
++   "task": "search",
++   "query": "AI news today top world news artificial intelligence",
++   "search_depth": "basic",
++   "topic": "news",
++   "days": 1,
++   "max_results": 10
++ }
++ 
++ > TOOL RESPONSE: (search results with 10 AI news articles)
++ 
++ # AI news
++ 
++ 1) OpenAI corporate move: OpenAI announced its nonprofit parent will retain control while the parent also gains an equity stake reported to be worth over $100 billion — a major structural and governance development for the company.  
++ Link: https://www.foxnews.com/tech/ai-newsletter-backlash-over-mystery-companys-data-center
++ 
++ 2) How AI is changing grieving: Reuters reports on growing use of voice cloning and digital avatars to preserve deceased loved ones, exploring benefits for mourning alongside ethical, consent and data‑privacy concerns.  
++ Link: https://www.reuters.com/lifestyle/it-feels-like-almost-hes-here-how-ai-is-changing-way-we-grieve-2025-09-13/
++ 
++ 3) Apple AI leadership exit: Bloomberg reports that Robby Walker, a senior AI and search executive at Apple who oversaw Siri until earlier this year, is leaving the company — a notable leadership change in Apple's AI team.  
++ Link: https://www.bloomberg.com/news/articles/2025-09-12/apple-ai-and-search-executive-robby-walker-to-leave-iphone-maker
++ 
++ 4) Demis Hassabis on future skills: Google's/DeepMind's Demis Hassabis says "learning how to learn" will be one of the most important skills for the next generation as AI reshapes education and work, emphasizing adaptiveness and lifelong learning.  
++ Link: https://www.greenwichtime.com/news/world/article/google-s-top-ai-scientist-says-learning-how-to-21045337.php
++ 
++ 5) xAI workforce cut: Reports say Elon Musk's xAI cut about 500 roles, largely affecting generalist AI tutors, as the company shifts toward a more specialist training model for its Grok chatbot — signaling changes in how AI training workforces are structured.  
++ Link: https://rollingout.com/2025/09/13/musks-xai-reduces-workforce-by-500/
+
+# Notion task
+Based on extracted news, extract important insights, keep for each news a direct link - and save them as newspaper (please format it properly) to my Notion, create new page there - Daily AI news
+
+@llm
+prompt: Process news to Notion
+block: 
+    - notion-task
+    - ai-news
+tools: mcp/notion
+
++ # LLM response block
++ 
++ > TOOL CALL, id: call_l626mZp42CTRV0bM79avSgei
++ tool: notion_notion-create-pages
++ args:
++ {
++   "pages": [
++     {
++       "content": "# Daily AI news — 2025-09-13\n\nA short, curated \"newspaper\" of important AI developments..."
++     }
++   ]
++ }
++ 
++ > TOOL RESPONSE: {"success": true, "result": {"content": {"pages": [{"id": "26d592eb-59c3-81f3-8094-f43a8f5c62f3", "url": "https://www.notion.so/26d592eb59c381f38094f43a8f5c62f3"}]}}}
++ 
++ Done — I created a Notion page titled "Daily AI news — 2025-09-13" containing the curated items and direct links. Link to the new page: https://www.notion.so/26d592eb59c381f38094f43a8f5c62f3
 ```
 
-### Replicate Image (flux-dev) + Simple Download
+**How this works:**
+The first `@llm` call automatically combines its prompt with the `# Web search task` block context, providing clear instructions while directly specifying `tools: tavily_search`. This narrow tool specification is crucial—it simplifies the model's choice and limits token count from tool schemas. The response generates under the default `# LLM response block` (addressable as `llm-response-block`), containing all tool exchange JSON for monitoring and the requested result under `# AI news`. 
+
+The second `@llm` call references both `notion-task` and `ai-news` blocks, bringing proper information enrichment logic to the model. Importantly, it excludes the raw JSON tool exchanges (which consume tokens unnecessarily) while preserving the structured results. This context isolation ensures each operation sees exactly what it needs—task instructions plus relevant prior results—without token bloat from intermediate data.
+
+**What happened here:**
+- **MCP Integration**: Two different MCP servers (`tavily_search` and `mcp/notion`) work seamlessly together in sequence
+- **Tool Output → Document Flow**: Web search results automatically become structured content in the document tree, which the next operation can reference
+- **Context Control**: Each `@llm` operation sees only the specific blocks it needs—no hidden prompt stuffing or context pollution
+- **Multi-step Automation**: Complex workflow (search → format → save to external service) runs with just two simple operations
+- **Real API Integration**: Shows actual OAuth-authenticated API calls to external services, with real URLs and IDs returned
+
+### Replicate Image Generation + Download
 ```markdown
-# Visual Asset Generation {id=visual-goal}
-Goal: single flux-dev image (agent nodes neon network dark background). Steps:
-1. Call replicate model (flux-dev) and capture raw JSON (do not trim keys inside predictions[0]).
-2. Extract first image URL to its own block (plain URL only).
-3. Use shell_tool to download the file to image.png (single curl). Keep log minimal.
+# Your goal
+1. Please  get on replicate schema of google/nano-banana model, avoid tool usage without pre-filtering outputs
+2. Generate image showcasing cute bunny 
 
 @llm
-prompt: Run model
-blocks: visual-goal
-tools:
-  - mcp/replicate
-tools-turns-max: 2
-use-header: "# Raw Generation {id=raw-generation}"
+prompt: generate requested image
+tools: mcp/replicate
+
+# Image download instructions
+1. Check if prediction complete
+3. Download image
+4. Open image in os (we are at macos, do not use pyhon)
 
 @llm
-prompt: URL only
-blocks: raw-generation
-use-header: "# Image URL {id=image-url}"
-
-@llm
-prompt: Download
-blocks: image-url
-tools:
-  - shell_tool
-tools-turns-max: 1
-use-header: "# Download Log {id=download-log}"
-
-@return
-blocks:
-  - image-url
-  - download-log
+prompt: get image
+tools: shell_tool
 ```
-Example diff:
+Execution result:
 ```diff
-+ # Raw Generation {id=raw-generation}
-+ {"predictions":[{"id":"p123","model":"flux-dev","status":"succeeded","output":["https://replicate.delivery/pbxt/asset123.png"]}]}
-+ # Image URL {id=image-url}
-+ https://replicate.delivery/pbxt/asset123.png
-+ # Download Log {id=download-log}
-+ curl -L -o image.png https://replicate.delivery/pbxt/asset123.png
-+ Saved image.png (512KB)
+# Your goal
+1. Please  get on replicate schema of google/nano-banana model, avoid tool usage without pre-filtering outputs
+2. Generate image showcasing cute bunny
+
+@llm
+prompt: generate requested image
+tools: mcp/replicate
+
++ # LLM response block
++ 
++ > TOOL CALL, id: call_ZKgQ243YPefqWQPvrWbhaiY6
++ tool: Replicate_get_models
++ args:
++ {
++   "model_owner": "google",
++   "model_name": "nano-banana",
++   "jq_filter": ".latest_version.openapi_schema.components.schemas"
++ }
++ 
++ > TOOL RESPONSE: (model schema with Input/Output specifications)
++ 
++ > TOOL CALL, id: call_UkFRxoiYmxBCJIAqnNK2hsD2
++ tool: Replicate_create_models_predictions
++ args:
++ {
++   "model_owner": "google",
++   "model_name": "nano-banana",
++   "input": {
++     "prompt": "A very cute fluffy baby bunny sitting on soft grass, pastel color palette, big sparkling eyes...",
++     "output_format": "png"
++   }
++ }
++ 
++ > TOOL RESPONSE: "https://replicate.delivery/xezq/mWpW7fB8AA20bSRWP8gf5d6PSqMtEe1v70NaKY6DbwxebhTVB/tmpajq3qlot.png"
++ 
++ I retrieved the nano-banana model schema and generated the image you requested.
++ Generated image: PNG URL: https://replicate.delivery/xezq/mWpW7fB8AA20bSRWP8gf5d6PSqMtEe1v70NaKY6DbwxebhTVB/tmpajq3qlot.png
+
+# Image download instructions
+1. Check if prediction complete
+3. Download image
+4. Open image in os (we are at macos, do not use pyhon)
+
+@llm
+prompt: get image
+tools: shell_tool
+
++ # LLM response block
++ 
++ > TOOL CALL, id: call_Cj7hjShKGepLaU8bucpPqDYl
++ tool: shell_tool
++ args:
++ {
++   "cmd": "curl -I -L \"https://replicate.delivery/...\" && curl -L -o bunny.png \"https://replicate.delivery/...\" && ls -l bunny.png && file bunny.png"
++ }
++ 
++ > TOOL RESPONSE: {"stdout": "HTTP/2 200... -rw-r--r--@ 1 dima staff 1346357 Sep 14 00:28 bunny.png\nbunny.png: PNG image data, 1024 x 1024, 8-bit/color RGB, non-interlaced"}
++ 
++ > TOOL CALL, id: call_nBvHO34MOLtvszwMK7eow0Fo
++ tool: shell_tool
++ args: {"cmd": "open bunny.png && echo 'Opened bunny.png'"}
++ 
++ > TOOL RESPONSE: {"stdout": "Opened bunny.png"}
++ 
++ Done.
++ - Downloaded file: bunny.png (1,346,357 bytes, 1024×1024 PNG)
++ - Image opened in macOS default viewer
 ```
+
+**How this works:**
+The first `@llm` operation combines the `# Your goal` context with `tools: mcp/replicate`, triggering two sequential tool calls. The `Replicate_get_models` call uses `jq_filter` to pre-process the API response, extracting only schema components rather than full model data—this prevents context bloat while providing necessary parameter information. The `Replicate_create_models_predictions` call then uses this schema knowledge to generate the image, with results flowing into the default `# LLM response block`.
+
+The second `@llm` operation switches tool ecosystems entirely, using `tools: shell_tool` to interact with the local system. It receives context from `# Image download instructions` plus the image URL from the previous operation's output. The shell commands execute sequentially (check, download, verify, open), with each command's output captured in the response block. This demonstrates Fractalic's ability to bridge cloud APIs and local system operations within a single document flow.
+
+**What happened here:**
+- **Tool Chaining**: MCP Replicate integration followed by shell commands, demonstrating how different tool types work together
+- **JQ Filtering**: The `jq_filter` parameter shows Fractalic's ability to pre-process API responses to avoid overwhelming context
+- **Cross-Platform Commands**: Shell tools automatically adapt to the OS (macOS `open` command used here)
+- **Structured Output Parsing**: Model schemas are retrieved and used programmatically, showing API-first tool integration
+- **File System Integration**: Generated content flows from cloud APIs to local files seamlessly
+
+### Context Compression Pattern
+```markdown
+@llm
+prompt: generate few parargraphs about GPT arhotecture
+use-header: "# Some large output"
+
+@llm
+prompt: extract consice detailed info from data above - keep only knowledge, remove noise
+mode: replace
+to: some-large-output
+```
+Execution result:
+```diff
+@llm
+prompt: generate few parargraphs about GPT arhotecture
+use-header: "# Some large output"
+
++ # LLM response block
++ - Architecture: decoder-only transformer (GPT family).
++ - Input processing: tokenization → token embeddings; positional information added.
++ - Core stack: repeated transformer blocks with multi-head self-attention and position-wise feed-forward networks; residual connections and layer normalization around sublayers.
++ - Attention: causal (masked) self-attention so each token can attend only to previous tokens.
++ - Multi-head attention: splits representations into multiple heads to capture diverse relationships in parallel.
++ - Feed-forward sublayer: two linear transformations with a nonlinearity applied independently at each position.
++ - Output: final layer projects to token logits → probabilities for next-token prediction.
++ - Training objective: next-token prediction on very large text corpora.
++ - Scaling: capabilities improve with more data, larger model size, and longer training (scaling laws).
++ - Alignment/finetuning: supervised fine-tuning and reinforcement learning from human feedback (RLHF) used to improve usefulness and safety.
++ - Inference: autoregressive token-by-token generation.
++ - Decoding methods: greedy, beam search, top-k/top-p sampling, and temperature control — trade off determinism, diversity, and quality.
++ - Practical concerns: latency and memory footprint scale with model size and context length.
++ - Safety/mitigation: filtering and guardrails to reduce harmful outputs.
++ - Limitations: propensity to hallucinate facts, reflect training-data biases, and require large compute/resources.
++ - Common applications: summarization, code generation, question answering, and dialog.
+
+@llm
+prompt: extract consice detailed info from data above - keep only knowledge, remove noise
+mode: replace
+to: some-large-output
+```
+
+**How this works:**
+The first `@llm` operation generates content directly under the specified `use-header: "# Some large output"`, creating an addressable block (`some-large-output`). The response contains detailed technical information that may be verbose or contain redundant explanations—typical of LLM generation patterns.
+
+The second `@llm` operation demonstrates Fractalic's replace-mode architecture: `mode: replace` combined with `to: some-large-output` targets the exact block for in-place modification. The operation receives the original block content as context but replaces it entirely with compressed output. This pattern is essential for token economy—instead of accumulating verbose content, the document evolves to maintain only distilled knowledge. The block ID remains stable, so downstream operations can still reference `some-large-output` regardless of content transformations.
+
+**What happened here:**
+- **Replace Mode**: The `mode: replace` operation shows how content can be compressed in-place to save tokens
+- **Block Targeting**: The `to: some-large-output` parameter precisely targets which block to replace
+- **Token Cost Control**: Large generated content gets distilled into essential facts, reducing costs for subsequent operations
+- **Content Evolution**: Document structure evolves from verbose to concise while preserving knowledge
+- **Memory Management**: Demonstrates how to handle large outputs without context overflow
+
+### Dynamic Operation Generation
+```markdown
+# Wiki
+
+## USA
+something about USA
+
+## France
+something about France
+
+## UK
+something about UK
+
+@llm
+prompt: use fractalic_opgen to generate for each sub block of wiki, an @llm instructions, to return one paragraph about country, set mode to replace, to = sub-block title in small-case kebab case, and use-header equal to sub-block header. No file field. Print generated instructions only separated and prexeeded by emptylines
+tools: fractalic_opgen
+```
+Execution result:
+```diff
+# Wiki
+
+## USA
++ The United States of America is a large federal republic in North America made up of 50 states and the federal district of Washington, D.C.; it has a diverse landscape ranging from coasts and plains to mountains and deserts and a population of about 330 million people. As the world's largest economy by nominal GDP, the U.S. is a global leader in technology, finance, entertainment, and higher education, and it hosts a wide mix of cultures and ethnicities due to centuries of immigration. Governed by a constitutional system with separation of powers, the country plays a major role in international politics, trade, and culture.
+
+## France
++ France is a country in Western Europe with a population of about 67 million and its capital in Paris; French is the official language and the government is a semi-presidential republic. A founding member of the European Union and a permanent member of the UN Security Council, France has a large, diversified economy driven by industries such as aerospace, luxury goods, agriculture and tourism, and it uses the euro as its currency. Renowned worldwide for its culture, cuisine and wine, art and fashion, France features iconic landmarks like the Eiffel Tower and the Louvre, and diverse landscapes ranging from Atlantic and Mediterranean coasts to the Alps and Pyrenees.
+
+## UK
++ The United Kingdom (officially the United Kingdom of Great Britain and Northern Ireland) is a sovereign country in northwestern Europe made up of England, Scotland, Wales and Northern Ireland, with a population of about 67 million and its capital in London. It is a constitutional monarchy with a parliamentary system, and its economy is large and service-oriented—notably finance, education, research, creative industries and tourism—using the pound sterling as its currency. A permanent member of the UN Security Council and a G7 country, the UK played a central historical role through its former empire; it exited the European Union in 2020. The UK is renowned for its cultural institutions, universities, and landmarks such as Buckingham Palace, the Houses of Parliament (Big Ben), and Stonehenge, and it features a variety of landscapes from lowland plains to upland highlands and rugged coastlines.
+
+@llm
+prompt: use fractalic_opgen to generate for each sub block of wiki, an @llm instructions, to return one paragraph about country, set mode to replace, to = sub-block title in small-case kebab case, and use-header equal to sub-block header. No file field. Print generated instructions only separated and prexeeded by emptylines
+tools: fractalic_opgen
+
++ # LLM response block
++ 
++ > TOOL CALL: fractalic_opgen (3 calls generating operations)
++ 
++ @llm
++ prompt: Return one paragraph about the USA.
++ tools: none
++ temperature: 0.0
++ use-header: '## USA'
++ mode: replace
++ to: usa
++ 
++ @llm
++ prompt: Return one paragraph about France.
++ tools: none
++ temperature: 0.0
++ use-header: '## France'
++ mode: replace
++ to: france
++ 
++ @llm
++ prompt: Return one paragraph about the UK.
++ tools: none
++ temperature: 0.0
++ use-header: '## UK'
++ mode: replace
++ to: uk
+```
+
+**How this works:**
+The `@llm` operation combines the entire `# Wiki` block hierarchy as context with `tools: fractalic_opgen`, enabling meta-programming capabilities. The model analyzes the document structure (main heading plus three country subheadings with placeholder content) and uses `fractalic_opgen` to generate three separate operations dynamically. Each generated operation targets a specific sub-block (`to: usa`, `to: france`, `to: uk`) with `mode: replace` to transform placeholder text into rich content.
+
+The `fractalic_opgen` tool calls return properly formatted YAML operations that Fractalic can execute immediately. This creates a self-extending workflow where the model determines what operations to generate based on document analysis. The generated operations use block ID targeting (kebab-case conversion of headings) and maintain document structure while replacing content. This pattern enables adaptive workflows that scale with document complexity without manual operation specification.
+
+**What happened here:**
+- **Self-Extending Workflows**: The `fractalic_opgen` tool allows models to generate new operations dynamically
+- **Block-Aware Generation**: The model analyzed the document structure (`# Wiki` with country subheadings) and created appropriate operations
+- **Operation Templates**: Generated operations follow proper YAML structure with parameters like `mode: replace` and `to:` targeting
+- **Content Replacement**: Original placeholder text ("something about USA") gets replaced with rich, factual content
+- **Meta-Programming**: Shows how Fractalic can modify its own execution flow based on document content
 
 ## Getting Started
 
