@@ -736,7 +736,7 @@ class Parser:
             node.prev = self.tail
             self.tail = node
     def get_node_by_id(self, id: str) -> Optional[Node]:
-            return next((node for node in self.nodes.values() if node.id == id), None)
+            return next((node for node in self.nodes.values() if node.id and node.id.lower() == id.lower()), None)
 
     def replace_node(self, target_key: str, new_node: Node):
         target_node = self.nodes.get(target_key)

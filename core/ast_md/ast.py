@@ -89,7 +89,10 @@ class AST:
     def get_node(self, **kwargs) -> Optional[Node]:
         #print(f"Debug: get_node called with kwargs: {kwargs}")
         for node in self.parser.nodes.values():
-            if all(getattr(node, key) == value for key, value in kwargs.items()):
+            if all(
+                (getattr(node, key, "").lower() == value.lower() if key == 'id' and isinstance(value, str) else getattr(node, key) == value)
+                for key, value in kwargs.items()
+            ):
                 #print(f"Debug: Found matching node: key={node.key}, id={node.id}, content={node.content[:50]}...")
                 return node
         #print("Debug: No matching node found")
@@ -103,7 +106,7 @@ class AST:
             raise ValueError("block_id_or_key_path cannot be None")
 
         block_ids_or_keys = block_id_or_key_path.split('/')
-        current_node = self.get_node(id=block_ids_or_keys[0]) or self.parser.nodes.get(block_ids_or_keys[0])
+        current_node = self.get_node(id=block_ids_or_keys[0]) or next((node for key, node in self.parser.nodes.items() if key.lower() == block_ids_or_keys[0].lower()), None)
 
         if not current_node:
             raise BlockNotFoundError(f"get_node_by_path: Block with id or key '{block_ids_or_keys[0]}' not found.")
@@ -114,7 +117,7 @@ class AST:
             temp_node = current_node.next
 
             while temp_node:
-                if (temp_node.id == part or temp_node.key == part) and temp_node.level == next_level:
+                if ((temp_node.id and temp_node.id.lower() == part.lower()) or (temp_node.key and temp_node.key.lower() == part.lower())) and temp_node.level == next_level:
                     current_node = temp_node
                     found = True
                     break
@@ -455,14 +458,14 @@ def get_ast_part_by_path(ast: AST, block_id_or_key_path: str, use_hierarchy: boo
             # Try Tool Loop AST first
             node = tool_loop_ast.get_node(id=node_id_or_key)
             if not node:
-                node = tool_loop_ast.parser.nodes.get(node_id_or_key)
+                node = next((n for k, n in tool_loop_ast.parser.nodes.items() if k.lower() == node_id_or_key.lower()), None)
             if node:
                 return node, tool_loop_ast
         
         # Try Main AST
         node = ast.get_node(id=node_id_or_key)
         if not node:
-            node = ast.parser.nodes.get(node_id_or_key)
+            node = next((n for k, n in ast.parser.nodes.items() if k.lower() == node_id_or_key.lower()), None)
         if node:
             return node, ast
         
@@ -489,7 +492,7 @@ def get_ast_part_by_path(ast: AST, block_id_or_key_path: str, use_hierarchy: boo
         # Continue searching in the same AST where we found the current node
         temp_node = current_node.next
         while temp_node:
-            if (temp_node.id == next_block_id_or_key or temp_node.key == next_block_id_or_key) and temp_node.level == next_level:
+            if ((temp_node.id and temp_node.id.lower() == next_block_id_or_key.lower()) or (temp_node.key and temp_node.key.lower() == next_block_id_or_key.lower())) and temp_node.level == next_level:
                 current_node = temp_node
                 found = True
                 break
@@ -520,12 +523,23 @@ def get_ast_parts_by_uri_array(ast: AST, block_uris: list, use_hierarchy: bool =
         if pattern.endswith('/*'):
             parent_id = pattern[:-2]  # Remove '/*'
             
-            # Find parent node
+            # Find parent node with flexible matching
             parent_node = None
             for node in all_nodes:
-                if node.id == parent_id or node.key == parent_id:
+                # Exact match (case insensitive)
+                if (node.id and node.id.lower() == parent_id.lower()) or (node.key and node.key.lower() == parent_id.lower()):
                     parent_node = node
                     break
+                # Partial match - check if the node ID contains the parent_id 
+                # This handles cases where "mixedcasesection" should match "mixedcasesection-mixedcasesection"
+                elif (node.id and parent_id.lower() in node.id.lower()) or (node.key and parent_id.lower() in node.key.lower()):
+                    # Only match if the parent_id is a significant part (to avoid false positives)
+                    if node.id and len(parent_id) >= 3 and parent_id.lower() in node.id.lower():
+                        parent_node = node
+                        break
+                    elif node.key and len(parent_id) >= 3 and parent_id.lower() in node.key.lower():
+                        parent_node = node
+                        break
             
             if parent_node:
                 # Find all child nodes
