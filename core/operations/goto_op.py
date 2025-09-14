@@ -21,7 +21,7 @@ def process_goto(ast: AST, current_node: Node, goto_count: dict) -> Optional[Nod
     # Find target node by searching through AST nodes
     target_node = None
     for node in ast.parser.nodes.values():
-        if node.id == block_uri:
+        if (node.id and node.id.lower() == block_uri.lower()) or (node.key and node.key.lower() == block_uri.lower()):
             target_node = node
             break
             
