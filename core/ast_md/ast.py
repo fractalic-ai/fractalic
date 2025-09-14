@@ -90,7 +90,7 @@ class AST:
         #print(f"Debug: get_node called with kwargs: {kwargs}")
         for node in self.parser.nodes.values():
             if all(
-                (getattr(node, key, "").lower() == value.lower() if key == 'id' and isinstance(value, str) else getattr(node, key) == value)
+                (getattr(node, key, None) is not None and getattr(node, key, "").lower() == value.lower() if key == 'id' and isinstance(value, str) else getattr(node, key) == value)
                 for key, value in kwargs.items()
             ):
                 #print(f"Debug: Found matching node: key={node.key}, id={node.id}, content={node.content[:50]}...")
