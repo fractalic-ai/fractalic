@@ -350,9 +350,11 @@ tools: mcp/notion
 ```
 
 **How this works:**
-The first `@llm` call automatically combines its prompt with the `# Web search task` block context, providing clear instructions while directly specifying `tools: tavily_search`. This narrow tool specification is crucial—it simplifies the model's choice and limits token count from tool schemas. The response generates under the default `# LLM response block` (addressable as `llm-response-block`), containing all tool exchange JSON for monitoring and the requested result under `# AI news`. 
+Think of this workflow as a two-step process. First, we tell an AI model to search the web for news. Then, we tell it to take those search results and save them to a Notion page.
 
-The second `@llm` call references both `notion-task` and `ai-news` blocks, bringing proper information enrichment logic to the model. Importantly, it excludes the raw JSON tool exchanges (which consume tokens unnecessarily) while preserving the structured results. This context isolation ensures each operation sees exactly what it needs—task instructions plus relevant prior results—without token bloat from intermediate data.
+In the first `@llm` step, Fractalic combines the instructions from the `# Web search task` with the `tavily_search` tool. By telling the model exactly which tool to use, we make its job simpler and avoid unnecessary processing costs (tokens). The results, including the raw data from the tool, are neatly stored back into our document under new headings.
+
+For the second `@llm` step, we give the model the instructions from `# Notion task` and the clean `# AI news` results from the previous step. Notice that we don't show it the messy, raw JSON data from the search tool. This is Fractalic's "context isolation" in action: each step gets only the information it needs. This keeps the process efficient and the document clean.
 
 **What happened here:**
 - **MCP Integration**: Two different MCP servers (`tavily_search` and `mcp/notion`) work seamlessly together in sequence
@@ -452,9 +454,11 @@ tools: shell_tool
 ```
 
 **How this works:**
-The first `@llm` operation combines the `# Your goal` context with `tools: mcp/replicate`, triggering two sequential tool calls. The `Replicate_get_models` call uses `jq_filter` to pre-process the API response, extracting only schema components rather than full model data—this prevents context bloat while providing necessary parameter information. The `Replicate_create_models_predictions` call then uses this schema knowledge to generate the image, with results flowing into the default `# LLM response block`.
+This example shows how Fractalic can connect to an online service (Replicate) to create an image, then use your computer's own tools to download and open it.
 
-The second `@llm` operation switches tool ecosystems entirely, using `tools: shell_tool` to interact with the local system. It receives context from `# Image download instructions` plus the image URL from the previous operation's output. The shell commands execute sequentially (check, download, verify, open), with each command's output captured in the response block. This demonstrates Fractalic's ability to bridge cloud APIs and local system operations within a single document flow.
+The first `@llm` step is a two-part conversation with the Replicate service. First, it asks for the "schema" of the image model. Think of this as asking for the instruction manual. We use a `jq_filter` to tell Fractalic we only want the important parts of that manual, which saves time and keeps our document from getting cluttered. With that information, it then makes a second call to actually generate the bunny image.
+
+The second `@llm` step switches gears completely. It uses the `shell_tool` to run commands directly on your computer. It takes the image URL from the first step and uses standard command-line tools like `curl` to download the image and `open` to view it. This demonstrates how easily Fractalic can bridge the gap between cloud services and your local machine.
 
 **What happened here:**
 - **Tool Chaining**: MCP Replicate integration followed by shell commands, demonstrating how different tool types work together
@@ -505,9 +509,11 @@ to: some-large-output
 ```
 
 **How this works:**
-The first `@llm` operation generates content directly under the specified `use-header: "# Some large output"`, creating an addressable block (`some-large-output`). The response contains detailed technical information that may be verbose or contain redundant explanations—typical of LLM generation patterns.
+AI models can sometimes be a bit too chatty. This example shows how you can use Fractalic to keep your document tidy and efficient.
 
-The second `@llm` operation demonstrates Fractalic's replace-mode architecture: `mode: replace` combined with `to: some-large-output` targets the exact block for in-place modification. The operation receives the original block content as context but replaces it entirely with compressed output. This pattern is essential for token economy—instead of accumulating verbose content, the document evolves to maintain only distilled knowledge. The block ID remains stable, so downstream operations can still reference `some-large-output` regardless of content transformations.
+The first `@llm` step asks the model to generate a few paragraphs about GPT architecture. The model does its job and produces a detailed, but potentially verbose, block of text under the heading `# Some large output`.
+
+The second `@llm` step is where the magic happens. It uses `mode: replace` to tell Fractalic: "take the content in the `# Some large output` block, summarize it, and then replace the original text with your summary." This is a powerful way to manage your document. You get the benefit of the detailed information, but you end up with a clean, concise version that's cheaper and faster to use in later steps. The block's address (`some-large-output`) stays the same, so other parts of your workflow won't break.
 
 **What happened here:**
 - **Replace Mode**: The `mode: replace` operation shows how content can be compressed in-place to save tokens
@@ -580,9 +586,13 @@ tools: fractalic_opgen
 ```
 
 **How this works:**
-The `@llm` operation combines the entire `# Wiki` block hierarchy as context with `tools: fractalic_opgen`, enabling meta-programming capabilities. The model analyzes the document structure (main heading plus three country subheadings with placeholder content) and uses `fractalic_opgen` to generate three separate operations dynamically. Each generated operation targets a specific sub-block (`to: usa`, `to: france`, `to: uk`) with `mode: replace` to transform placeholder text into rich content.
+This example showcases one of Fractalic's most advanced features: letting the AI build its own workflow.
 
-The `fractalic_opgen` tool calls return properly formatted YAML operations that Fractalic can execute immediately. This creates a self-extending workflow where the model determines what operations to generate based on document analysis. The generated operations use block ID targeting (kebab-case conversion of headings) and maintain document structure while replacing content. This pattern enables adaptive workflows that scale with document complexity without manual operation specification.
+We start with a simple `# Wiki` block that has a few subheadings for different countries. We then give the model the `fractalic_opgen` tool and a simple instruction: for each country, create a new operation to write a paragraph about it.
+
+The model examines the structure of the document, sees the three country subheadings, and uses the `fractalic_opgen` tool to generate three new `@llm` operations. Each new operation is perfectly formatted to target one of the subheadings (`to: usa`, `to: france`, `to: uk`) and replace the placeholder text with a detailed paragraph.
+
+This is a form of meta-programming: the AI is writing instructions for itself to execute. It allows you to create flexible and adaptive workflows that can change based on the content of your document, without you having to write every single step by hand.
 
 **What happened here:**
 - **Self-Extending Workflows**: The `fractalic_opgen` tool allows models to generate new operations dynamically
