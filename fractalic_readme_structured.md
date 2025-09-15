@@ -41,18 +41,21 @@ This update focuses on making Fractalic more practical for everyday use. We adde
 
 ## Table of Contents
 
-- [Basic Principles](#basic-principles)
-- [From Idea to Service in 5 Steps](#from-idea-to-service-in-5-steps)
-- [How It Works](#how-it-works)
-- [Operations](#operations)
-- [Advanced: Let Models Control Flow](#advanced-let-models-control-flow)
-- [Compression Pattern (Tool Output → Replace)](#compression-pattern-tool-output--replace)
-- [Example](#example)
-- [Extended Examples (MCP & Media)](#extended-examples-mcp--media)
+- [What is Fractalic?](#what-is-fractalic)
+- [What's New in v0.1.1](#whats-new-in-v011)
 - [Getting Started](#getting-started)
-- [Common Uses](#common-uses)
-- [Roadmap](#roadmap)
-- [When Not to Use Fractalic](#when-not-to-use-fractalic)
+  - [Installation](#installation)
+  - [Basic CLI Usage](#basic-cli-usage)
+  - [Usage as Python Module](#usage-as-python-module)
+- [Basic Principles](#basic-principles)
+- [Fractalic Operations](#fractalic-operations)
+- [Basic Examples](#basic-examples)
+  - [Example: Web Search → Notion Page (MCP Integration)](#example-web-search--notion-page-mcp-integration)
+  - [Example: Replicate Image Generation + Download](#example-replicate-image-generation--download)
+  - [Example: Context Compression Pattern](#example-context-compression-pattern)
+  - [Example: Dynamic Operation Generation](#example-dynamic-operation-generation)
+- [Screenshots](#screenshots)
+- [Integrations & Credits](#integrations--credits)
 - [License](#license)
 
 
@@ -103,21 +106,9 @@ Check install:
 ```bash
 fractalic --help
 ```
-[DIMA>] Здесь нужно без примера просто как запустить с файлом
-
-Create and run a minimal workflow:
+Run a workflow file:
 ```bash
-cat > hello.md <<'EOF'
-# Goal {id=goal}
-Generate a short greeting.
-
-@llm
-prompt: Greeting
-blocks: goal
-use-header: "# Result {id=result}"
-EOF
-
-fractalic hello.md
+fractalic your_workflow.md
 ```
 
 ##### Usage as Python Module
@@ -158,27 +149,27 @@ print(result)
 
 
 
-# Fractalic Operations
-[DIMA>] здесь]нужно короткое интро какое-то что во фракталике есть ключевые операции которые детерменировано исполняются интерпретатором:
+## Fractalic Operations
+Fractalic is built around a set of key operations. These are deterministic instructions that the Fractalic interpreter executes in sequence to process your workflow. Each operation performs a specific task, like calling an AI model, running a shell command, or manipulating the document's content.
 
-- `@llm` – Send specific blocks to any model and provider, including local models.
-[DIMA>] проверить с точки зрения ангилйского языка предложение про @llm выше
+- `@llm` – Sends specified blocks of content to any supported language model, including local models.
+- `@shell` – Runs terminal commands, with the output captured as a new block in the document.
+- `@run` – Executes another Fractalic Markdown file, allowing you to modularize workflows, pass parameters, and receive results.
+- `@import` – Includes content from other files directly into your document.
+- `@return` – Sends specified blocks back as a result to a parent workflow that used the `@run` operation.
 
-- `@shell` – Run terminal commands. Output becomes a new block.
-- `@run` – Execute another Markdown file. Pass parameters, get results back.
-- `@import` – Include content from other files.
-- `@return` – Send blocks back to parent workflow.
-
-[DIMA>] здесь нужно добавить короткое предложение что каждая из операций имеет большое количество настраиваемых параметров (и поставить ссылку на соотвествущий раздел в документации)
+Each operation can be customized with a variety of parameters. For a detailed reference of all available options, please see the [Operations Reference documentation](docs/operations-reference.md).
 
 
-# Basic Examples
+## Basic Examples
 
-[DIMA>] Короткая вводная коротко суммаризующая что на базе этих операций (YAML синтаксис) + знаний (Маркдаун блокм) какие примеры будут показаны дальше
+The following examples demonstrate how you can combine Fractalic's operations (using YAML syntax) with your knowledge (written as Markdown blocks) to create powerful, automated workflows. You'll see how to integrate with external tools, generate and manipulate content, and even create workflows that write themselves.
 
-[DIMA>] нужно изменить заголовк каждого примера (с ### на ##) и добавить перед примером два три предложения что делает пример с точки зрения результата и обратить внимание что зеленым показан результирующий контекст после сохранения в файл ("+" показывается из-за специфики gihub маркдауна - а реальности его не будет в выводе)И упомянуть что часть вывода инструментов обрезана чтобы сократить размер примеров
+*Note on examples: The execution results are shown as a `diff`. Green highlighted text (`+`) represents the new content added to the document after the workflow runs. The `+` markers are an artifact of GitHub's diff formatting and won't appear in the actual output file. Some tool outputs have been truncated for brevity.*
 
-### Web Search → Notion Page (MCP Integration)
+## Example: Web Search → Notion Page (MCP Integration)
+
+This example demonstrates a complete workflow: it uses the `tavily_search` tool to find information on the web, then passes the structured results to the `mcp/notion` tool to create a new, formatted page in Notion. This showcases how Fractalic can chain different services together to automate a research and publishing task.
 ```markdown
 # Web search task
 Find top-5 world news for today about AI, provide brief summary about each, print them under "# AI news" header (add empty line before it) and suppliment each with direct link
@@ -262,10 +253,9 @@ tools: mcp/notion
 +   ]
 + }
 + 
-[DIMA>] убери GUID и UUID из вывода (поставь плейсхолдеры)
-+ > TOOL RESPONSE: {"success": true, "result": {"content": {"pages": [{"id": "26d592eb-59c3-81f3-8094-f43a8f5c62f3", "url": "https://www.notion.so/26d592eb59c381f38094f43a8f5c62f3"}]}}}
++ > TOOL RESPONSE: {"success": true, "result": {"content": {"pages": [{"id": "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx", "url": "https://www.notion.so/xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"}]}}}
 + 
-+ Done — I created a Notion page titled "Daily AI news — 2025-09-13" containing the curated items and direct links. Link to the new page: https://www.notion.so/26d592eb59c381f38094f43a8f5c62f3
++ Done — I created a Notion page titled "Daily AI news — 2025-09-13" containing the curated items and direct links. Link to the new page: https://www.notion.so/xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 ```
 
 **How this works:**
@@ -276,14 +266,15 @@ In the first `@llm` step, Fractalic combines the instructions from the `# Web se
 For the second `@llm` step, we give the model the instructions from `# Notion task` and the clean `# AI news` results from the previous step. Notice that we don't show it the messy, raw JSON data from the search tool. This is Fractalic's "context isolation" in action: each step gets only the information it needs. This keeps the process efficient and the document clean.
 
 **What happened here:**
-[DIMA>] ниже неправильно - tavily_search это тул фракталика - поэтому нужно правильно написать что это пример когда MCP работает в связке с тулами
-- **MCP Integration**: Two different MCP servers (`tavily_search` and `mcp/notion`) work seamlessly together in sequence
-- **Tool Output → Document Flow**: Web search results automatically become structured content in the document tree, which the next operation can reference
-- **Context Control**: Each `@llm` operation sees only the specific blocks it needs—no hidden prompt stuffing or context pollution
-- **Multi-step Automation**: Complex workflow (search → format → save to external service) runs with just two simple operations
-- **Real API Integration**: Shows actual OAuth-authenticated API calls to external services, with real URLs and IDs returned
+- **Hybrid Tool Integration**: This example shows a Fractalic built-in tool (`tavily_search`) working seamlessly in sequence with an external MCP service (`mcp/notion`).
+- **Tool Output → Document Flow**: Web search results automatically become structured content in the document tree, which the next operation can reference.
+- **Context Control**: Each `@llm` operation sees only the specific blocks it needs—no hidden prompt stuffing or context pollution.
+- **Multi-step Automation**: A complex workflow (search → format → save to external service) runs with just two simple operations.
+- **Real API Integration**: Shows actual OAuth-authenticated API calls to external services, with real URLs and IDs returned.
 
-### Replicate Image Generation + Download
+## Example: Replicate Image Generation + Download
+
+This workflow demonstrates how Fractalic can orchestrate a multi-step process involving a cloud-based AI service (Replicate) and local shell commands. First, it retrieves the technical specifications (schema) for an image generation model, uses that schema to generate an image, and then downloads and opens the resulting image file on the local machine.
 ```markdown
 # Your goal
 1. Please  get on replicate schema of google/nano-banana model, avoid tool usage without pre-filtering outputs
@@ -340,11 +331,10 @@ tools: mcp/replicate
 +   }
 + }
 + 
-[DIMA>] замени ИД генерации на плейсхолдеры или рандомные значения
-+ > TOOL RESPONSE: "https://replicate.delivery/xezq/mWpW7fB8AA20bSRWP8gf5d6PSqMtEe1v70NaKY6DbwxebhTVB/tmpajq3qlot.png"
++ > TOOL RESPONSE: "https://replicate.delivery/xezq/xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx/tmp.png"
 + 
 + I retrieved the nano-banana model schema and generated the image you requested.
-+ Generated image: PNG URL: https://replicate.delivery/xezq/mWpW7fB8AA20bSRWP8gf5d6PSqMtEe1v70NaKY6DbwxebhTVB/tmpajq3qlot.png
++ Generated image: PNG URL: https://replicate.delivery/xezq/xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx/tmp.png
 
 # Image download instructions
 1. Check if prediction complete
@@ -390,7 +380,10 @@ The second `@llm` step switches gears completely. It uses the `shell_tool` to ru
 - **Structured Output Parsing**: Model schemas are retrieved and used programmatically, showing API-first tool integration
 - **File System Integration**: Generated content flows from cloud APIs to local files seamlessly
 
-### Context Compression Pattern
+## Example: Context Compression Pattern
+
+This pattern is essential for managing the context window in large language models. LLMs often generate verbose output, especially when using tools, which can quickly consume the available token limit. This example shows how to run an operation, get a large block of text, and then run a second operation that replaces the verbose text with a concise summary, preserving the essential information while freeing up context for subsequent steps.
+
 ```markdown
 @llm
 prompt: generate few parargraphs about GPT arhotecture
@@ -402,7 +395,16 @@ mode: replace
 to: some-large-output
 ```
 
-[DIMA>] Сюда нужно вставить пример с промежуточным состоянием - где есть огромный вывод после первой операции (анпиши его сам - три строки сначала и в кноце а посердине какой-то маркер или плейсхолжер говорящий о том что там 400+ строк текста в выводе)
+Intermediate state (after the first `@llm` operation):
+```markdown
+# Some large output
+
+The Generative Pre-trained Transformer (GPT) architecture is a type of neural network model that has revolutionized the field of natural language processing. Developed by OpenAI, it is based on the transformer architecture, which was introduced in the paper "Attention Is All You Need." The key innovation of the transformer is the self-attention mechanism, which allows the model to weigh the importance of different words in the input text when processing and generating language. GPT models are "pre-trained" on vast amounts of text data from the internet, which enables them to learn grammar, facts, reasoning abilities, and a wide range of language patterns.
+
+... (400+ lines of detailed text) ...
+
+This process of autoregressive generation, combined with the vast knowledge encoded during pre-training, allows GPT models to perform a wide array of tasks, from writing essays and code to answering questions and carrying on conversations. The quality and coherence of the generated text are a direct result of the model's ability to predict the most likely next word based on the patterns it has learned from its training data.
+```
 
 Execution result:
 ```diff
@@ -410,7 +412,6 @@ Execution result:
 prompt: generate 30 parargraphs about GPT arhotecture
 use-header: "# Some large output"
 
-[>DIMA] вывод этого примера тоже сократи (убери половину)
 + # LLM response block
 + - Architecture: decoder-only transformer (GPT family).
 + - Input processing: tokenization → token embeddings; positional information added.
@@ -422,12 +423,6 @@ use-header: "# Some large output"
 + - Training objective: next-token prediction on very large text corpora.
 + - Scaling: capabilities improve with more data, larger model size, and longer training (scaling laws).
 + - Alignment/finetuning: supervised fine-tuning and reinforcement learning from human feedback (RLHF) used to improve usefulness and safety.
-+ - Inference: autoregressive token-by-token generation.
-+ - Decoding methods: greedy, beam search, top-k/top-p sampling, and temperature control — trade off determinism, diversity, and quality.
-+ - Practical concerns: latency and memory footprint scale with model size and context length.
-+ - Safety/mitigation: filtering and guardrails to reduce harmful outputs.
-+ - Limitations: propensity to hallucinate facts, reflect training-data biases, and require large compute/resources.
-+ - Common applications: summarization, code generation, question answering, and dialog.
 
 @llm
 prompt: extract consice detailed info from data above - keep only knowledge, remove noise
@@ -436,15 +431,11 @@ to: some-large-output
 ```
 
 **How this works:**
-[DIMA>] здесь буллшит про чатти написано - надо прямо написать что ЛЛМ. процессе работы особенно использования тулов генерирует много токенов и проблема в архитектура ЛЛМ такая что кждый вызов ЛЛМ (например передача результатов работы тула) при каждом вызове передает полностью накопленный контекст
+LLMs, especially when using tools, can generate a lot of output (tokens). A fundamental challenge with LLM architectures is that the entire accumulated context is typically sent with each subsequent call. This can be inefficient and costly.
 
-AI models can sometimes be a bit too chatty. This example shows how you can use Fractalic to keep your document tidy and efficient.
+The first `@llm` step generates a detailed, but verbose, block of text.
 
-The first `@llm` step asks the model to generate a few paragraphs about GPT architecture. The model does its job and produces a detailed, but potentially verbose, block of text under the heading `# Some large output`.
-
-[DIMA>] не используй маркетингоыв слва типа magic  в readme на github
-
-The second `@llm` step is where the magic happens. It uses `mode: replace` to tell Fractalic: "take the content in the `# Some large output` block, summarize it, and then replace the original text with your summary." This is a powerful way to manage your document. You get the benefit of the detailed information, but you end up with a clean, concise version that's cheaper and faster to use in later steps. The block's address (`some-large-output`) stays the same, so other parts of your workflow won't break.
+The second `@llm` step demonstrates a powerful solution. It uses `mode: replace` to instruct Fractalic: "take the content in the `# Some large output` block, create a concise summary, and then replace the original text with that summary." This allows you to manage the document's size dynamically. You get the benefit of the initial detailed generation but end up with a clean, token-efficient version for use in later steps. The block's address (`some-large-output`) remains stable, ensuring that other parts of your workflow can still reference it without issue.
 
 **What happened here:**
 - **Replace Mode**: The `mode: replace` operation shows how content can be compressed in-place to save tokens
@@ -453,7 +444,9 @@ The second `@llm` step is where the magic happens. It uses `mode: replace` to te
 - **Content Evolution**: Document structure evolves from verbose to concise while preserving knowledge
 - **Memory Management**: Demonstrates how to handle large outputs without context overflow
 
-### Dynamic Operation Generation
+## Example: Dynamic Operation Generation
+
+This example showcases a unique feature of Fractalic: enabling an AI model to dynamically control its own execution flow. This is a form of polymorphism where the AI can generate and execute new instructions based on the context of the document, leading to highly adaptive and powerful workflows. This is crucial for tasks where the exact steps are not known in advance, allowing the AI to reason about the document's structure and build its own plan.
 ```markdown
 # Wiki
 
@@ -517,15 +510,13 @@ tools: fractalic_opgen
 ```
 
 **How this works:**
-[DIMA>] это не most advanced фича - это уникальная фича - полиморфизм и дианмический доступ для ИИ к управлению своим исполнением - добавь почему это важно и как можно использовать
-This example showcases one of Fractalic's most advanced features: 
-letting the AI build its own workflow.
+This example showcases a unique feature of Fractalic: giving the AI dynamic access to control its own execution. This is a powerful form of meta-programming or polymorphism, where the AI can generate new instructions for itself based on the document's content.
 
-We start with a simple `# Wiki` block that has a few subheadings for different countries. We then give the model the `fractalic_opgen` tool and a simple instruction: for each country, create a new operation to write a paragraph about it.
+We start with a simple `# Wiki` block containing several country subheadings. We then give the model the `fractalic_opgen` tool and instruct it to create a new operation for each country to write a summary paragraph.
 
-The model examines the structure of the document, sees the three country subheadings, and uses the `fractalic_opgen` tool to generate three new `@llm` operations. Each new operation is perfectly formatted to target one of the subheadings (`to: usa`, `to: france`, `to: uk`) and replace the placeholder text with a detailed paragraph.
+The model analyzes the document structure, identifies the three country subheadings, and uses `fractalic_opgen` to generate three new, perfectly formatted `@llm` operations. Each new operation is tailored to target a specific subheading (`to: usa`, `to: france`, `to: uk`) and replace its placeholder text.
 
-This is a form of meta-programming: the AI is writing instructions for itself to execute. It allows you to create flexible and adaptive workflows that can change based on the content of your document, without you having to write every single step by hand.
+This is critically important for building workflows that can adapt to changing inputs. Instead of hard-coding every step, you can create systems where the AI reasons about the content it's given and builds the appropriate execution plan on the fly.
 
 **What happened here:**
 - **Self-Extending Workflows**: The `fractalic_opgen` tool allows models to generate new operations dynamically
