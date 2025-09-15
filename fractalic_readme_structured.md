@@ -55,6 +55,94 @@ This update focuses on making Fractalic more practical for everyday use. We adde
 - [When Not to Use Fractalic](#when-not-to-use-fractalic)
 - [License](#license)
 
+
+## Getting Started
+
+### Installation
+
+#### Method 1: Pre-Built Docker Image (Recommended)
+Run the published container directly with all services (UI + API + AI server):
+```bash
+docker run -d --name fractalic --network bridge -p 3000:3000 -p 8000:8000 -p 8001:8001 -p 5859:5859 -v /var/run/docker.sock:/var/run/docker.sock --env HOST=0.0.0.0 ghcr.io/fractalic-ai/fractalic:main
+```
+Then open: http://localhost:3000
+
+#### Method 2: Build from Source (Full Stack)
+Builds latest version from GitHub repositories and runs in Docker:
+```bash
+curl -s https://raw.githubusercontent.com/fractalic-ai/fractalic/main/deploy/docker-deploy.sh | bash
+```
+This clones both fractalic + fractalic-ui, builds Docker image locally, and starts all services:
+- UI: http://localhost:3000
+- API: http://localhost:8000
+- AI Server: http://localhost:8001
+- MCP Manager: http://localhost:5859
+
+#### Method 3: Local Development Setup
+Full source installation with both backend and frontend for development:
+```bash
+git clone https://github.com/fractalic-ai/fractalic.git
+cd fractalic
+./local-dev-setup.sh
+```
+This script will:
+- Clone fractalic-ui repository
+- Set up Python virtual environment
+- Install all dependencies
+- Start both backend and frontend servers
+- Open http://localhost:3000 automatically
+
+#### Method 4: Python Package (CLI Only)
+Install when you only need the command-line runner (no UI):
+```bash
+pip install fractalic
+```
+
+##### Basic CLI Usage
+Check install:
+```bash
+fractalic --help
+```
+[DIMA>] Здесь нужно без примера просто как запустить с файлом
+
+Create and run a minimal workflow:
+```bash
+cat > hello.md <<'EOF'
+# Goal {id=goal}
+Generate a short greeting.
+
+@llm
+prompt: Greeting
+blocks: goal
+use-header: "# Result {id=result}"
+EOF
+
+fractalic hello.md
+```
+
+##### Usage as Python Module
+```python
+import fractalic
+
+# Run a workflow file
+result = fractalic.run('workflow.md')
+
+# Run with parameters
+result = fractalic.run('workflow.md', parameters={'company': 'Tesla'})
+
+# Run workflow content directly
+workflow_content = """
+# Analysis {id=task}
+Research the company mentioned in parameters.
+
+@llm
+prompt: Analyze
+blocks: task
+"""
+result = fractalic.run_content(workflow_content, parameters={'company': 'Apple'})
+print(result)
+```
+
 ## Basic Principles
 - **One executable Markdown file**: Your workflow specification *is* your runtime. Write what you want in plain Markdown, run it directly. No translation between documentation and code.
 
@@ -68,197 +156,27 @@ This update focuses on making Fractalic more practical for everyday use. We adde
 
 - **Human‑readable audit trail**: Each run outputs a stepwise execution tree plus a complete change log (new blocks, edits, tool calls). Skim it like a focused diff—only actions and their effects, no noise.
 
-## From Idea to Service in 5 Steps
 
-**1. Minimal workflow (hard‑coded input):**
 
-Instructions live in the heading block (context). Prompts are terse triggers.
-```markdown
-# Market Research {id=task}
-Goal: capture latest Apple quarterly results and produce a concise financial summary.
-Required: core revenue, EPS, notable YoY deltas, one risk.
-Produce two blocks: financial data (raw metrics) then analysis summary (bullet form).
+# Fractalic Operations
+[DIMA>] здесь]нужно короткое интро какое-то что во фракталике есть ключевые операции которые детерменировано исполняются интерпретатором:
 
-@llm
-prompt: Fetch results
-tools:
-  - tavily_search
-use-header: "# Financial Data {id=financial-data}"
+- `@llm` – Send specific blocks to any model and provider, including local models.
+[DIMA>] проверить с точки зрения ангилйского языка предложение про @llm выше
 
-@llm
-prompt: Summarize key metrics
-blocks: financial-data
-use-header: "# Analysis Summary {id=analysis-summary}"
-```
-Example output (diff):
-```diff
-+ # Financial Data {id=financial-data}
-+ Apple Q2 2025: Revenue $82.9B (+6% YoY), EPS $1.32, Services +11%, Mac -4%...
-+ # Analysis Summary {id=analysis-summary}
-+ • Moderate top-line growth driven by Services
-+ • Hardware softness isolated to Mac
-+ • Margin stable; FX impact minimal
-+ • Watch regulatory risk (EU DMA compliance)
-```
-
-Run:
-```bash
-python fractalic.py research.md
-```
-
-**2. Add dynamic input (parameter injection):**
-Create a parameter file and inject it as `# Input Parameters`.
-```bash
-echo '# Input Parameters {id=input-parameters}\nCompany: Tesla' > params.md
-python fractalic.py research.md --task_file params.md --param_input_user_request input-parameters
-```
-Modify workflow (reuse pattern; minimal prompts):
-```markdown
-# Market Research {id=task}
-Input-driven company scan. Use 'input-parameters' for target. Extract latest quarter core metrics then bullet summary.
-
-@import
-blocks: input-parameters
-mode: append
-
-@llm
-prompt: Fetch results
-blocks: input-parameters
-use-header: "# Financial Data {id=financial-data}"
-
-@llm
-prompt: Summarize
-blocks: financial-data
-use-header: "# Analysis Summary {id=analysis-summary}"
-```
-Diff after run (example):
-```diff
-+ # Input Parameters {id=input-parameters}
-+ Company: Tesla
-+ # Financial Data {id=financial-data}
-+ Tesla Q4 2024: Revenue $25.2B (+9% YoY), EPS $0.78, Energy +30%...
-+ # Analysis Summary {id=analysis-summary}
-+ • Growth led by energy storage
-+ • Automotive margin compression persists
-+ • Cash position stable
-+ • Watch pricing elasticity risk
-```
-
-**3. Inspect structured diff (.ctx):**
-```diff
-+ # Input Parameters {id=input-parameters}
-+ Company: Tesla
-+ # Financial Data {id=financial-data}
-+ Tesla Q4 2024 results: Revenue ...
-+ # Analysis Summary {id=analysis-summary}
-+ • Growth drivers ...
-```
-
-**4. Add return for service interface:**
-```markdown
-@return
-blocks: analysis-summary
-```
-Result: upstream caller (CLI / AI Server) receives only the summary.
-
-**5. Call via AI Server (REST):**
-```bash
-curl -X POST http://localhost:8001/execute \
-  -H 'Content-Type: application/json' \
-  -d '{"filename": "research.md", "parameter_text": "Company: Nvidia"}'
-```
-Server auto-creates an in‑memory `# Input Parameters {id=input-parameters}` block from `parameter_text`.
-
-**Result:** Same Markdown becomes an on-demand research microservice. No placeholders, no template engine.
-
-## How It Works
-Your Markdown document becomes three things:
-
-**Document tree**: Headings create addressable blocks. Reference exact sections (`block_uri: idea`) or branches (`idea/*`). 
-
-**Operation sequence**: `@llm`, `@shell`, `@run` operations execute in order. Each changes your document structure predictably.
-
-**Context window**: Models see only the blocks you specify. No hidden prompt stuffing.
-
-## Operations
-Five operations control your workflow:
-
-- `@llm` – Send specific blocks to any model. GPT-4, Claude, local models.
 - `@shell` – Run terminal commands. Output becomes a new block.
 - `@run` – Execute another Markdown file. Pass parameters, get results back.
 - `@import` – Include content from other files.
 - `@return` – Send blocks back to parent workflow.
 
-## Advanced: Let Models Control Flow
-Give models tools to extend your workflow:
-- `fractalic_run` – Model decides when to spawn sub-workflows
-- `fractalic_opgen` – Model generates new operations to execute
+[DIMA>] здесь нужно добавить короткое предложение что каждая из операций имеет большое количество настраиваемых параметров (и поставить ссылку на соотвествущий раздел в документации)
 
-This creates self-extending workflows without custom code.
 
-## Compression Pattern (Tool Output → Replace)
-Use when a raw tool or multi-turn capture block is large and stabilized. Rationale: reduce token cost while preserving essential facts.
+# Basic Examples
 
-```markdown
-# Trend Scan {id=trend-scan}
-Goal: gather emerging AI agent frameworks (≤4 weeks), capture raw notes, then compress.
-Keep framework name, category, single differentiator.
+[DIMA>] Короткая вводная коротко суммаризующая что на базе этих операций (YAML синтаксис) + знаний (Маркдаун блокм) какие примеры будут показаны дальше
 
-@llm
-prompt: Collect sources
-tools:
-  - tavily_search
-use-header: "# Raw Sources {id=raw-sources}"
-
-@llm
-prompt: Compress essentials
-blocks: raw-sources
-mode: replace
-to: raw-sources
-use-header: "# Raw Sources {id=raw-sources}"
-```
-Example diff (initial creation):
-```diff
-+ # Raw Sources {id=raw-sources}
-+ Framework A: launch blog snippet ... (3 lines details)
-+ Framework B: GitHub trending note ...
-+ Framework C: ...
-```
-After compression (replace):
-```diff
-# Raw Sources {id=raw-sources}
-- Framework A: launch blog snippet ... (3 lines details)
-- Framework B: GitHub trending note full paragraph...
-- Framework C: long description...
-+ Framework A | orchestration | agent graph focus
-+ Framework B | memory | fast vector sync
-+ Framework C | evaluation | scenario DSL
-```
-Reason for `replace`: raw text no longer needed; distilled lines cheaper to reuse.
-
-## Example
-```markdown
-# Launch Brief {id=brief}
-We need a launch narrative for our AI workflow feature.
-
-@llm
-prompt: List pains
-blocks: brief
-mode: append
-
-@shell
-command: curl api.example.com/trends > trends.json
-
-@llm
-prompt: Draft narrative
-blocks: brief/*
-use-header: "# Draft {id=draft}"
-
-@return
-blocks: draft
-```
-
-## Extended Examples (Real & Tested)
+[DIMA>] нужно изменить заголовк каждого примера (с ### на ##) и добавить перед примером два три предложения что делает пример с точки зрения результата и обратить внимание что зеленым показан результирующий контекст после сохранения в файл ("+" показывается из-за специфики gihub маркдауна - а реальности его не будет в выводе)И упомянуть что часть вывода инструментов обрезана чтобы сократить размер примеров
 
 ### Web Search → Notion Page (MCP Integration)
 ```markdown
@@ -282,7 +200,7 @@ tools: mcp/notion
 Execution result:
 ```diff
 # Web search task
-Find top-5 world news for today about AI, provide brief summary about each, print them under "# AI news" header (add empty line before it) and suppliment each with direct link
+Find top world news for today about AI, provide brief summary about each, print them under "# AI news" header (add empty line before it) and suppliment each with direct link
 
 @llm
 prompt: Search news 
@@ -344,6 +262,7 @@ tools: mcp/notion
 +   ]
 + }
 + 
+[DIMA>] убери GUID и UUID из вывода (поставь плейсхолдеры)
 + > TOOL RESPONSE: {"success": true, "result": {"content": {"pages": [{"id": "26d592eb-59c3-81f3-8094-f43a8f5c62f3", "url": "https://www.notion.so/26d592eb59c381f38094f43a8f5c62f3"}]}}}
 + 
 + Done — I created a Notion page titled "Daily AI news — 2025-09-13" containing the curated items and direct links. Link to the new page: https://www.notion.so/26d592eb59c381f38094f43a8f5c62f3
@@ -357,6 +276,7 @@ In the first `@llm` step, Fractalic combines the instructions from the `# Web se
 For the second `@llm` step, we give the model the instructions from `# Notion task` and the clean `# AI news` results from the previous step. Notice that we don't show it the messy, raw JSON data from the search tool. This is Fractalic's "context isolation" in action: each step gets only the information it needs. This keeps the process efficient and the document clean.
 
 **What happened here:**
+[DIMA>] ниже неправильно - tavily_search это тул фракталика - поэтому нужно правильно написать что это пример когда MCP работает в связке с тулами
 - **MCP Integration**: Two different MCP servers (`tavily_search` and `mcp/notion`) work seamlessly together in sequence
 - **Tool Output → Document Flow**: Web search results automatically become structured content in the document tree, which the next operation can reference
 - **Context Control**: Each `@llm` operation sees only the specific blocks it needs—no hidden prompt stuffing or context pollution
@@ -403,7 +323,10 @@ tools: mcp/replicate
 +   "jq_filter": ".latest_version.openapi_schema.components.schemas"
 + }
 + 
-+ > TOOL RESPONSE: (model schema with Input/Output specifications)
++ > TOOL RESPONSE: 
++ ...
++ Bunch of lines with model schema with Input/Output specifications
++ ...
 + 
 + > TOOL CALL, id: call_UkFRxoiYmxBCJIAqnNK2hsD2
 + tool: Replicate_create_models_predictions
@@ -417,6 +340,7 @@ tools: mcp/replicate
 +   }
 + }
 + 
+[DIMA>] замени ИД генерации на плейсхолдеры или рандомные значения
 + > TOOL RESPONSE: "https://replicate.delivery/xezq/mWpW7fB8AA20bSRWP8gf5d6PSqMtEe1v70NaKY6DbwxebhTVB/tmpajq3qlot.png"
 + 
 + I retrieved the nano-banana model schema and generated the image you requested.
@@ -425,7 +349,7 @@ tools: mcp/replicate
 # Image download instructions
 1. Check if prediction complete
 3. Download image
-4. Open image in os (we are at macos, do not use pyhon)
+4. Open image in os (don't use Python)
 
 @llm
 prompt: get image
@@ -456,13 +380,12 @@ tools: shell_tool
 **How this works:**
 This example shows how Fractalic can connect to an online service (Replicate) to create an image, then use your computer's own tools to download and open it.
 
-The first `@llm` step is a two-part conversation with the Replicate service. First, it asks for the "schema" of the image model. Think of this as asking for the instruction manual. We use a `jq_filter` to tell Fractalic we only want the important parts of that manual, which saves time and keeps our document from getting cluttered. With that information, it then makes a second call to actually generate the bunny image.
+The first `@llm` step is a two-part conversation with the Replicate service. First, it asks for the "schema" of the image model. Think of this as asking for the instruction manual. With that information, it then makes a second call to actually generate the bunny image.
 
 The second `@llm` step switches gears completely. It uses the `shell_tool` to run commands directly on your computer. It takes the image URL from the first step and uses standard command-line tools like `curl` to download the image and `open` to view it. This demonstrates how easily Fractalic can bridge the gap between cloud services and your local machine.
 
 **What happened here:**
 - **Tool Chaining**: MCP Replicate integration followed by shell commands, demonstrating how different tool types work together
-- **JQ Filtering**: The `jq_filter` parameter shows Fractalic's ability to pre-process API responses to avoid overwhelming context
 - **Cross-Platform Commands**: Shell tools automatically adapt to the OS (macOS `open` command used here)
 - **Structured Output Parsing**: Model schemas are retrieved and used programmatically, showing API-first tool integration
 - **File System Integration**: Generated content flows from cloud APIs to local files seamlessly
@@ -478,12 +401,16 @@ prompt: extract consice detailed info from data above - keep only knowledge, rem
 mode: replace
 to: some-large-output
 ```
+
+[DIMA>] Сюда нужно вставить пример с промежуточным состоянием - где есть огромный вывод после первой операции (анпиши его сам - три строки сначала и в кноце а посердине какой-то маркер или плейсхолжер говорящий о том что там 400+ строк текста в выводе)
+
 Execution result:
 ```diff
 @llm
-prompt: generate few parargraphs about GPT arhotecture
+prompt: generate 30 parargraphs about GPT arhotecture
 use-header: "# Some large output"
 
+[>DIMA] вывод этого примера тоже сократи (убери половину)
 + # LLM response block
 + - Architecture: decoder-only transformer (GPT family).
 + - Input processing: tokenization → token embeddings; positional information added.
@@ -509,9 +436,13 @@ to: some-large-output
 ```
 
 **How this works:**
+[DIMA>] здесь буллшит про чатти написано - надо прямо написать что ЛЛМ. процессе работы особенно использования тулов генерирует много токенов и проблема в архитектура ЛЛМ такая что кждый вызов ЛЛМ (например передача результатов работы тула) при каждом вызове передает полностью накопленный контекст
+
 AI models can sometimes be a bit too chatty. This example shows how you can use Fractalic to keep your document tidy and efficient.
 
 The first `@llm` step asks the model to generate a few paragraphs about GPT architecture. The model does its job and produces a detailed, but potentially verbose, block of text under the heading `# Some large output`.
+
+[DIMA>] не используй маркетингоыв слва типа magic  в readme на github
 
 The second `@llm` step is where the magic happens. It uses `mode: replace` to tell Fractalic: "take the content in the `# Some large output` block, summarize it, and then replace the original text with your summary." This is a powerful way to manage your document. You get the benefit of the detailed information, but you end up with a clean, concise version that's cheaper and faster to use in later steps. The block's address (`some-large-output`) stays the same, so other parts of your workflow won't break.
 
@@ -586,7 +517,9 @@ tools: fractalic_opgen
 ```
 
 **How this works:**
-This example showcases one of Fractalic's most advanced features: letting the AI build its own workflow.
+[DIMA>] это не most advanced фича - это уникальная фича - полиморфизм и дианмический доступ для ИИ к управлению своим исполнением - добавь почему это важно и как можно использовать
+This example showcases one of Fractalic's most advanced features: 
+letting the AI build its own workflow.
 
 We start with a simple `# Wiki` block that has a few subheadings for different countries. We then give the model the `fractalic_opgen` tool and a simple instruction: for each country, create a new operation to write a paragraph about it.
 
@@ -600,92 +533,6 @@ This is a form of meta-programming: the AI is writing instructions for itself to
 - **Operation Templates**: Generated operations follow proper YAML structure with parameters like `mode: replace` and `to:` targeting
 - **Content Replacement**: Original placeholder text ("something about USA") gets replaced with rich, factual content
 - **Meta-Programming**: Shows how Fractalic can modify its own execution flow based on document content
-
-## Getting Started
-
-### Installation
-
-#### Method 1: Pre-Built Docker Image (Recommended)
-Run the published container directly with all services (UI + API + AI server):
-```bash
-docker run -d --name fractalic --network bridge -p 3000:3000 -p 8000:8000 -p 8001:8001 -p 5859:5859 -v /var/run/docker.sock:/var/run/docker.sock --env HOST=0.0.0.0 ghcr.io/fractalic-ai/fractalic:main
-```
-Then open: http://localhost:3000
-
-#### Method 2: Build from Source (Full Stack)
-Builds latest version from GitHub repositories and runs in Docker:
-```bash
-curl -s https://raw.githubusercontent.com/fractalic-ai/fractalic/main/deploy/docker-deploy.sh | bash
-```
-This clones both fractalic + fractalic-ui, builds Docker image locally, and starts all services:
-- UI: http://localhost:3000
-- API: http://localhost:8000
-- AI Server: http://localhost:8001
-- MCP Manager: http://localhost:5859
-
-#### Method 3: Local Development Setup
-Full source installation with both backend and frontend for development:
-```bash
-git clone https://github.com/fractalic-ai/fractalic.git
-cd fractalic
-./local-dev-setup.sh
-```
-This script will:
-- Clone fractalic-ui repository
-- Set up Python virtual environment
-- Install all dependencies
-- Start both backend and frontend servers
-- Open http://localhost:3000 automatically
-
-#### Method 4: Python Package (CLI Only)
-Install when you only need the command-line runner (no UI):
-```bash
-pip install fractalic
-```
-
-##### Basic CLI Usage
-Check install:
-```bash
-fractalic --help
-```
-Create and run a minimal workflow:
-```bash
-cat > hello.md <<'EOF'
-# Goal {id=goal}
-Generate a short greeting.
-
-@llm
-prompt: Greeting
-blocks: goal
-use-header: "# Result {id=result}"
-EOF
-
-fractalic hello.md
-```
-
-##### Usage as Python Module
-```python
-import fractalic
-
-# Run a workflow file
-result = fractalic.run('workflow.md')
-
-# Run with parameters
-result = fractalic.run('workflow.md', parameters={'company': 'Tesla'})
-
-# Run workflow content directly
-workflow_content = """
-# Analysis {id=task}
-Research the company mentioned in parameters.
-
-@llm
-prompt: Analyze
-blocks: task
-"""
-result = fractalic.run_content(workflow_content, parameters={'company': 'Apple'})
-print(result)
-```
-
 
 
 ## Screenshots
