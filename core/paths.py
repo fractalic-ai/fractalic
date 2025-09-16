@@ -424,18 +424,29 @@ def get_context_summary() -> dict:
 # Validate that we can find expected files in the fractalic root
 def _validate_fractalic_root():
     """Validate that the detected fractalic root contains expected files."""
-    expected_files = [
-        "fractalic.py",
-        "pyproject.toml",
-        "requirements.txt"
-    ]
+    # Check if this is a development environment or an installed package
+    # In development: we should have pyproject.toml 
+    # In installed package: we won't have pyproject.toml, but should have fractalic.py
     
-    for file_name in expected_files:
-        if not (_FRACTALIC_ROOT / file_name).exists():
+    # Always check for fractalic.py as it's the main entry point
+    fractalic_py = _FRACTALIC_ROOT / "fractalic.py" 
+    if not fractalic_py.exists():
+        raise RuntimeError(
+            f"Fractalic root validation failed: fractalic.py not found in {_FRACTALIC_ROOT}. "
+            f"This might indicate an incorrect project structure or corrupted installation."
+        )
+    
+    # Check if this looks like a development environment (has pyproject.toml)
+    pyproject_toml = _FRACTALIC_ROOT / "pyproject.toml"
+    if pyproject_toml.exists():
+        # Development environment - also check for requirements.txt
+        requirements_txt = _FRACTALIC_ROOT / "requirements.txt"
+        if not requirements_txt.exists():
             raise RuntimeError(
-                f"Fractalic root validation failed: {file_name} not found in {_FRACTALIC_ROOT}. "
-                f"This might indicate an incorrect project structure or corrupted installation."
+                f"Fractalic root validation failed: requirements.txt not found in {_FRACTALIC_ROOT}. "
+                f"This might indicate an incorrect project structure."
             )
+    # If no pyproject.toml, assume this is an installed package and skip additional checks
 
 # Validate on import
 _validate_fractalic_root()
