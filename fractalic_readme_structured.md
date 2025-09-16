@@ -41,10 +41,12 @@ This update focuses on making Fractalic more practical for everyday use. We adde
 
 ## Table of Contents
 
-- [What is Fractalic?](#what-is-fractalic)
-- [What's New in v0.1.1](#whats-new-in-v011)
 - [Getting Started](#getting-started)
   - [Installation](#installation)
+    - [Method 1: Pre-Built Docker Image (Recommended)](#method-1-pre-built-docker-image-recommended)
+    - [Method 2: Build from Source (Full Stack)](#method-2-build-from-source-full-stack)
+    - [Method 3: Local Development Setup](#method-3-local-development-setup)
+    - [Method 4: Python Package (CLI Only)](#method-4-python-package-cli-only)
   - [Basic CLI Usage](#basic-cli-usage)
   - [Usage as Python Module](#usage-as-python-module)
 - [Basic Principles](#basic-principles)
