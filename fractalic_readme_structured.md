@@ -46,7 +46,8 @@ This update focuses on making Fractalic more practical for everyday use. We adde
     - [Method 1: Pre-Built Docker Image (Recommended)](#method-1-pre-built-docker-image-recommended)
     - [Method 2: Build from Source (Full Stack)](#method-2-build-from-source-full-stack)
     - [Method 3: Local Development Setup](#method-3-local-development-setup)
-    - [Method 4: Python Package (CLI Only)](#method-4-python-package-cli-only)
+    - [Method 4: Python Package - CLI](#method-4-python-package---cli)
+    - [Method 5: Python Package - API](#method-5-python-package---api)
   - [Basic CLI Usage](#basic-cli-usage)
   - [Usage as Python Module](#usage-as-python-module)
 - [Basic Principles](#basic-principles)
@@ -97,43 +98,50 @@ This script will:
 - Start both backend and frontend servers
 - Open http://localhost:3000 automatically
 
-#### Method 4: Python Package (CLI Only)
-Install when you only need the command-line runner (no UI):
+#### Method 4: Python Package - CLI
+Install for command-line usage (no UI):
 ```bash
 pip install fractalic
 ```
 
-##### Basic CLI Usage
 Check install:
 ```bash
 fractalic --help
 ```
+
 Run a workflow file:
 ```bash
 fractalic your_workflow.md
 ```
 
-##### Usage as Python Module
+#### Method 5: Python Package - API
+Install for programmatic usage in Python:
+```bash
+pip install fractalic
+```
+
+Then use in your Python code:
 ```python
 import fractalic
 
 # Run a workflow file
-result = fractalic.run('workflow.md')
+result = fractalic.run_fractalic('workflow.md')
 
-# Run with parameters
-result = fractalic.run('workflow.md', parameters={'company': 'Tesla'})
+# Run with user input parameters
+result = fractalic.run_fractalic('workflow.md', param_input_user_request='Tesla analysis')
 
-# Run workflow content directly
-workflow_content = """
-# Analysis {id=task}
-Research the company mentioned in parameters.
+# Run with custom model and API key
+result = fractalic.run_fractalic(
+    'workflow.md', 
+    model='openai/gpt-4',
+    api_key='your-api-key'
+)
 
-@llm
-prompt: Analyze
-blocks: task
-"""
-result = fractalic.run_content(workflow_content, parameters={'company': 'Apple'})
-print(result)
+# Result is a dictionary with execution details
+print(f"Success: {result['success']}")
+print(f"Branch: {result['branch_name']}")
+print(f"Context file: {result['ctx_file']}")
+print(f"Context hash: {result['ctx_hash']}")
 ```
 
 ## Basic Principles
