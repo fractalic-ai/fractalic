@@ -39,7 +39,7 @@ sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8')
 original_open = open
 
 
-def run_fractalic(input_file, task_file=None, param_input_user_request=None, capture_output=False, 
+def run_fractalic(input_file, task_file=None, param_input_user_request=None, param_node=None, capture_output=False, 
                  model=None, api_key=None, operation=None, show_operations=False, context_render_mode=None):
     """
     Run a Fractalic script programmatically - the core execution function.
@@ -48,6 +48,7 @@ def run_fractalic(input_file, task_file=None, param_input_user_request=None, cap
         input_file: Path to the Fractalic script to execute
         task_file: Optional path to task file for parameter injection
         param_input_user_request: Optional parameter path for injection
+        param_node: Optional Node object to inject directly (takes precedence over task_file)
         capture_output: Whether to capture output (not used in current implementation)
         model: LLM model to use (overrides settings.defaultProvider)
         api_key: LLM API key (overrides settings)
@@ -171,8 +172,8 @@ def run_fractalic(input_file, task_file=None, param_input_user_request=None, cap
             }
         
         # Handle parameter injection if provided
-        param_node = None
-        if task_file and param_input_user_request:
+        final_param_node = param_node  # Use passed param_node if provided
+        if not final_param_node and task_file and param_input_user_request:
             if not os.path.exists(task_file):
                 return {
                     'success': False,
@@ -184,7 +185,7 @@ def run_fractalic(input_file, task_file=None, param_input_user_request=None, cap
                     'provider_info': None
                 }
             temp_ast = parse_file(task_file)
-            param_node = temp_ast.get_part_by_path(param_input_user_request, True)
+            final_param_node = temp_ast.get_part_by_path(param_input_user_request, True)
         
         # Initialize variables for exception handling
         result_nodes = None
@@ -201,7 +202,7 @@ def run_fractalic(input_file, task_file=None, param_input_user_request=None, cap
             # Run the Fractalic script (use basename since we're in the correct directory)
             result_nodes, call_tree_root, ctx_file, ctx_hash, trc_file, trc_hash, branch_name, explicit_return = run(
                 input_file_basename,
-                param_node,
+                final_param_node,
                 p_call_tree_node=None
             )
             
