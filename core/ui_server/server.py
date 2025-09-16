@@ -34,6 +34,16 @@ current_dir = os.path.dirname(os.path.abspath(__file__))
 project_root = os.path.abspath(os.path.join(current_dir, '..', '..'))
 if project_root not in sys.path:
     sys.path.insert(0, project_root)
+
+# Import our centralized path management system
+from core.paths import (
+    get_fractalic_root, 
+    get_session_root, 
+    get_session_cwd,
+    get_tools_directory,
+    get_logs_directory
+)
+
 from core.plugins.tool_registry import ToolRegistry
 
 logging.getLogger("git").setLevel(logging.CRITICAL)
@@ -78,8 +88,11 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Define the settings file path
-SETTINGS_FILE_PATH = os.path.join(project_root, 'settings.toml')
+# Define the settings file path using centralized path management
+def get_current_settings_path():
+    """Get the settings file path for UI server - always use global settings"""
+    # UI server always works with global settings from fractalic_root
+    return os.path.join(get_fractalic_root(), 'settings.toml')
 
 def set_repo_path(path: str):
     """Set the current repository path globally"""
@@ -157,9 +170,16 @@ def _init_trace_log(base_dir: Optional[str] = None):
     global _trace_log_path
     if _trace_log_path is not None:
         return
-    base = Path(base_dir or project_root) / 'logs'
-    base.mkdir(parents=True, exist_ok=True)
-    _trace_log_path = base / 'mcp_trace.log'
+    
+    # Use centralized path management for logs directory
+    try:
+        logs_dir = get_logs_directory()
+    except:
+        # Fallback to fractalic_root/logs if no session is set
+        logs_dir = Path(get_fractalic_root()) / 'logs'
+    
+    logs_dir.mkdir(parents=True, exist_ok=True)
+    _trace_log_path = logs_dir / 'mcp_trace.log'
     _record_trace('trace', message='trace file initialized', path=str(_trace_log_path))
 
 def _write_trace_line(record: Dict[str, Any]):
@@ -304,7 +324,10 @@ async def start_mcp_manager():
         _mcp_state.update({"phase": "starting", "start_time": time.time(), "last_exit_code": None, "last_error": None})
         _init_trace_log()
         _record_trace("lifecycle", message="starting mcp manager")
-        mcp_manager_script = Path(project_root) / "fractalic_mcp_manager.py"
+        
+        # Use fractalic_root for MCP manager script location
+        fractalic_root = get_fractalic_root()
+        mcp_manager_script = Path(fractalic_root) / "fractalic_mcp_manager.py"
         if not mcp_manager_script.exists():
             raise HTTPException(status_code=500, detail=f"MCP manager script not found at {mcp_manager_script}")
         
@@ -313,12 +336,12 @@ async def start_mcp_manager():
         env.update({'PYTHONIOENCODING': 'utf-8','LC_ALL': 'en_US.UTF-8','LANG': 'en_US.UTF-8','PYTHONUNBUFFERED': '1'})
         
         # Use Python from virtual environment if available
-        venv_python = Path(project_root) / ".venv" / "bin" / "python"
+        venv_python = Path(fractalic_root) / ".venv" / "bin" / "python"
         python_executable = str(venv_python) if venv_python.exists() else sys.executable
         
         mcp_manager_process = subprocess.Popen(
             [python_executable, str(mcp_manager_script), "serve", "--port", str(mcp_manager_port), "--host", "localhost"],
-            cwd=project_root,
+            cwd=fractalic_root,  # Always run MCP manager from fractalic_root
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
@@ -730,12 +753,12 @@ async def get_file_content_disk(path: str = Query(...)):
         return JSONResponse(status_code=500, content={"detail": f"Internal Server Error: {str(e)}"})
 
 
-# Endpoint to save settings
 @app.post("/save_settings/")
 async def save_settings(request: Request):
     try:
         settings_data = await request.json()
-        with open(SETTINGS_FILE_PATH, 'w') as f:
+        settings_path = get_current_settings_path()
+        with open(settings_path, 'w') as f:
             toml.dump(settings_data, f)
         return JSONResponse(content={"detail": "Settings saved successfully"})
     except Exception as e:
@@ -746,9 +769,10 @@ async def save_settings(request: Request):
 @app.get("/load_settings/")
 async def load_settings():
     try:
-        if not os.path.exists(SETTINGS_FILE_PATH):
+        settings_path = get_current_settings_path()
+        if not os.path.exists(settings_path):
             return JSONResponse(content={"settings": None})
-        with open(SETTINGS_FILE_PATH, 'r') as f:
+        with open(settings_path, 'r') as f:
             settings_data = toml.load(f)
         return JSONResponse(content={"settings": settings_data})
     except Exception as e:
@@ -919,11 +943,9 @@ async def run_fractalic(request: Request):
     if not file_path:
         raise HTTPException(status_code=400, detail="file_path is required")
 
-    # Build command
-    server_dir = os.path.dirname(os.path.abspath(__file__))
-    parent_dir = os.path.dirname(server_dir)
-    root_dir = os.path.dirname(parent_dir)
-    fractalic_path = os.path.join(root_dir, "fractalic.py")
+    # Build command using centralized path management
+    fractalic_root = get_fractalic_root()
+    fractalic_path = Path(fractalic_root) / "fractalic.py"
 
     # Using current Python (from venv)
     python_exe = sys.executable 
@@ -944,7 +966,7 @@ async def run_fractalic(request: Request):
                 command,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
-                cwd=root_dir,
+                cwd=fractalic_root,  # Use fractalic_root instead of root_dir
                 env=env
             )
 
@@ -1063,6 +1085,7 @@ _SCHEMA_CACHE_DURATION = 30  # Cache for 30 seconds
 async def tools_schema(tools_dir: str = Query("tools", description="Path to the tools directory")):
     """
     Autodiscover tools from the specified tools_dir and return their schema in OpenAI/MCP-compatible JSON format.
+    Preserves original frontend compatibility while using improved ToolRegistry.
     """
     try:
         current_time = time.time()
@@ -1074,7 +1097,8 @@ async def tools_schema(tools_dir: str = Query("tools", description="Path to the 
             if current_time - timestamp < _SCHEMA_CACHE_DURATION:
                 return JSONResponse(content=cached_schema)
         
-        # Generate fresh schema and cache it
+        # Use the original simple logic - frontend knows where tools are
+        # ToolRegistry will handle path resolution internally
         registry = ToolRegistry(tools_dir=tools_dir)
         schema = registry.generate_schema()
         _tools_schema_cache[cache_key] = (schema, current_time)

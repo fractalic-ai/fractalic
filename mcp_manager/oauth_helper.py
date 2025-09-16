@@ -8,20 +8,18 @@ from pathlib import Path
 from fastmcp.client.auth import OAuth
 from fastmcp.client.auth.oauth import FileTokenStorage
 
-# Project root directory (where this file is located)
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
-
-# OAuth cache directory relative to project root
-OAUTH_CACHE_DIR = PROJECT_ROOT / "oauth-cache"
+# Import centralized path management
+from core.paths import get_oauth_cache_directory
 
 def get_oauth_cache_dir() -> Path:
-    """Get the OAuth cache directory path"""
-    return OAUTH_CACHE_DIR
+    """Get the OAuth cache directory path using centralized path management"""
+    return get_oauth_cache_directory()
 
 def ensure_oauth_cache_dir() -> Path:
     """Ensure OAuth cache directory exists and return its path"""
-    OAUTH_CACHE_DIR.mkdir(exist_ok=True)
-    return OAUTH_CACHE_DIR
+    oauth_cache_dir = get_oauth_cache_directory()
+    oauth_cache_dir.mkdir(exist_ok=True)
+    return oauth_cache_dir
 
 def create_custom_oauth_client(mcp_url: str, **kwargs) -> OAuth:
     """Create OAuth client with custom cache directory"""

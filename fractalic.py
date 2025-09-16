@@ -28,6 +28,9 @@ from core.operations.call_tree import CallTreeNode
 from core.errors import BlockNotFoundError, UnknownOperationError
 from core.render.render_ast import render_ast_to_markdown
 
+# Import centralized path management
+from core.paths import set_session_root, validate_session_safety, get_session_root
+
 from rich.console import Console
 from rich.panel import Panel
 
@@ -62,7 +65,17 @@ def run_fractalic(input_file, task_file=None, param_input_user_request=None, par
     original_cwd = os.getcwd()
     
     try:
-        # Load settings
+        # Setup session context using centralized path management
+        input_file_path = Path(input_file).resolve()
+        input_file_dir = input_file_path.parent
+        
+        # Set session root to the directory containing the input .md file
+        set_session_root(str(input_file_dir))
+        
+        # Validate session safety
+        validate_session_safety()
+        
+        # Load settings using centralized path management (will find settings.toml correctly)
         settings = load_settings()
         
         # Update show-operations setting if explicitly requested
@@ -149,18 +162,17 @@ def run_fractalic(input_file, task_file=None, param_input_user_request=None, par
         # Set environment variable for API key
         os.environ[f"{provider.upper()}_API_KEY"] = final_api_key
         
-        # Change working directory to the input file's directory for proper git tracking
-        input_file_dir = os.path.dirname(os.path.abspath(input_file))
-        
-        # Change to the input file's directory so git operations happen in the right place
-        os.chdir(input_file_dir)
-        print(f"Changed working directory to: {input_file_dir}")
+        # Change working directory to session_root (where the input .md file is located)
+        # This ensures git operations and file operations happen in the right place
+        session_root = get_session_root()
+        os.chdir(str(session_root))
+        print(f"Changed working directory to: {session_root}")
         
         # Reset token stats for this new session
         
-        # Validate input file exists
-        input_file_basename = os.path.basename(input_file)
-        if not os.path.exists(input_file_basename):
+        # Validate input file exists (use the basename since we're already in the right directory)
+        input_file_basename = input_file_path.name
+        if not input_file_path.exists():
             return {
                 'success': False,
                 'error': f"Input file not found: {input_file}",

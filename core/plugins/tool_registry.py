@@ -140,13 +140,25 @@ class ToolParameterParser:
 
 from core.utils import load_settings # Ensure load_settings is imported if needed elsewhere, though Config should handle it
 
+# Import centralized path management for default tools directory
+from core.paths import get_tools_directory
+
 class ToolRegistry(dict):
     def __init__(self,
-                 tools_dir: str | Path = "tools",
+                 tools_dir: str | Path = None,
                  mcp_servers: Optional[List[str]] = None):
         super().__init__()
         self._manifests: List[Dict[str, Any]] = []
-        self.tools_dir = Path(tools_dir).expanduser()
+        
+        # Use centralized path management for tools directory if not explicitly provided
+        if tools_dir is None:
+            try:
+                self.tools_dir = get_tools_directory()
+            except Exception:
+                # Fallback to "tools" relative path if centralized path management fails
+                self.tools_dir = Path("tools").expanduser()
+        else:
+            self.tools_dir = Path(tools_dir).expanduser()
         # Load MCP servers from config if not explicitly provided
         if mcp_servers is None:
             from core.config import Config

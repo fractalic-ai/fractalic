@@ -11,9 +11,13 @@ import locale
 from contextlib import contextmanager
 import socket
 import time
+from pathlib import Path
 
 from core.ast_md.node import NodeType, Node
 from core.ast_md.ast import AST
+
+# Import centralized path management
+from core.paths import get_fractalic_root, get_session_root
 
 def parse_file(filename: str) -> AST:
     content = read_file(filename)
@@ -76,10 +80,34 @@ def get_content_without_header(node: Node) -> str:
 
 import toml
 
+# Import centralized path management
+# (get_fractalic_root and get_session_root imported above)
 
-
-def load_settings(settings_file='settings.toml'):
-    """Load settings from TOML file with proper error handling."""
+def load_settings(settings_file=None):
+    """Load settings from TOML file with proper error handling.
+    
+    Uses centralized path management to locate settings.toml correctly.
+    
+    Args:
+        settings_file: Optional explicit path to settings file. If not provided,
+                      uses centralized path management to find the correct settings.toml
+    """
+    if settings_file is None:
+        try:
+            # Try session_root first, then fractalic_root
+            try:
+                session_root = get_session_root()
+                settings_file = str(session_root / "settings.toml")
+                if not os.path.exists(settings_file):
+                    # Fallback to fractalic_root
+                    settings_file = str(get_fractalic_root() / "settings.toml")
+            except:
+                # If session_root not available, use fractalic_root
+                settings_file = str(get_fractalic_root() / "settings.toml")
+        except Exception as e:
+            print(f"[WARNING] Could not locate settings file using path management: {e}")
+            settings_file = 'settings.toml'  # Fallback to relative path
+    
     print(f"Current working directory: {os.getcwd()}")
     print(f"Looking for settings file at: {settings_file}")
     try:

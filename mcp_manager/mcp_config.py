@@ -11,9 +11,15 @@ from pathlib import Path
 from typing import Dict, Any, Optional
 from urllib.parse import urlparse
 
+# Import centralized path management
+from core.paths import get_fractalic_root
+
 logger = logging.getLogger(__name__)
 
-ROOT_DIR = Path(__file__).resolve().parent.parent  # Go up one level from mcp_manager/
+# Use centralized path management for root directory
+def get_mcp_root_dir() -> Path:
+    """Get the root directory for MCP configuration files"""
+    return Path(get_fractalic_root())
 
 @dataclass
 class ServiceConfig:
@@ -73,7 +79,7 @@ class MCPConfigLoader:
     def __init__(self, config_path: str = "mcp_servers.json"):
         self.config_path = Path(config_path)
         if not self.config_path.is_absolute():
-            self.config_path = ROOT_DIR / self.config_path
+            self.config_path = get_mcp_root_dir() / self.config_path
         
         self._config_cache: Optional[Dict[str, ServiceConfig]] = None
     
