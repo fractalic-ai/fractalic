@@ -14,7 +14,7 @@
   },
   "devDependencies": {
     "markdownlint-cli2": "^0.18.1",
-    "vitepress": "^0.1.1"
+    "vitepress": "^1.6.4"
   },
   "engines": {
     "node": ">=18"
@@ -33,5 +33,8 @@
     "url": "https://github.com/fractalic-ai/fractalic.git",
     "directory": "docs-temp"
   },
-  "license": "MIT"
+  "license": "MIT",
+  "dependencies": {
+    "esbuild": "^0.25.9"
+  }
 }
