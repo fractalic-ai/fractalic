@@ -93,33 +93,41 @@ async def list_tools_handler(request):
         flat_tools = []
         total_token_count = 0
         enabled_services = 0
+        disabled_services = 0
         
         for service_name, service_data in all_tools.items():
-            if 'error' in service_data:
+            if 'error' in service_data and service_data.get('enabled', True):
+                # Only count errors from enabled services
                 continue
+            
+            # Count enabled/disabled services
+            if service_data.get('enabled', True):
+                enabled_services += 1
+                tools = service_data.get('tools', [])
                 
-            tools = service_data.get('tools', [])
-            enabled_services += 1
-            
-            for tool in tools:
-                # Create tool with service prefix as expected by Fractalic
-                tool_with_service = {
-                    **tool,
-                    "name": f"{service_name}.{tool['name']}",
-                    "service": service_name,
-                    "original_name": tool['name']
-                }
-                flat_tools.append(tool_with_service)
-            
-            # Add service token count if available
-            total_token_count += service_data.get('token_count', 0)
+                for tool in tools:
+                    # Create tool with service prefix as expected by Fractalic
+                    tool_with_service = {
+                        **tool,
+                        "name": f"{service_name}.{tool['name']}",
+                        "service": service_name,
+                        "original_name": tool['name']
+                    }
+                    flat_tools.append(tool_with_service)
+                
+                # Add service token count if available
+                total_token_count += service_data.get('token_count', 0)
+            else:
+                disabled_services += 1
         
         # Return format matching original fractalic_mcp_manager.py
         response = {
             'tools': flat_tools,
             'count': len(flat_tools),
             'total_token_count': total_token_count,
-            'services_count': enabled_services
+            'services_count': enabled_services,
+            'disabled_services_count': disabled_services,
+            'total_services_count': enabled_services + disabled_services
         }
         return web.json_response(response)
     except Exception as e:

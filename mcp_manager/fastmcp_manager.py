@@ -222,16 +222,20 @@ class FastMCPManager:
             
             start_time = time.time()
             
-            # Get enabled services
+            # Get all services (enabled and disabled)
+            all_services = list(self.service_configs.keys())
             enabled_services = [name for name, config in self.service_configs.items() if config.enabled]
-            logger.info(f"Enabled services for single-client data fetch: {enabled_services}")
+            disabled_services = [name for name, config in self.service_configs.items() if not config.enabled]
+            logger.info(f"All services: {all_services}")
+            logger.info(f"Enabled services for data fetch: {enabled_services}")
+            logger.info(f"Disabled services (config only): {disabled_services}")
             
             # UNIFIED APPROACH: Only get OAuth status separately, extract service status from unified service data
             all_tasks = [
                 self.get_oauth_status(), 
             ]
             
-            # Add single task per service that gets ALL data (status+tools+prompts+resources) with one client  
+            # Add single task per ENABLED service that gets ALL data (status+tools+prompts+resources) with one client  
             service_data_tasks = []
             if enabled_services:
                 service_data_tasks = [self.get_all_service_data(name) for name in enabled_services]
@@ -248,13 +252,14 @@ class FastMCPManager:
             # Build service status from unified service data results (no duplicate clients!)
             basic_status = {
                 "services": {},
-                "total_enabled": 0,
-                "total_disabled": 0
+                "total_enabled": len(enabled_services),
+                "total_disabled": len(disabled_services)
             }
             all_tools = {}
             all_prompts = {}
             all_resources = {}
             
+            # Process enabled services with data fetch
             if enabled_services:
                 for i, service_name in enumerate(enabled_services):
                     service_data = results[1 + i]  # Skip oauth_status
@@ -276,12 +281,6 @@ class FastMCPManager:
                         }
                         all_prompts[service_name] = service_data["prompts"]
                         all_resources[service_name] = service_data["resources"]
-                        
-                        # Update totals
-                        if status_info.get("enabled", True):
-                            basic_status["total_enabled"] += 1
-                        else:
-                            basic_status["total_disabled"] += 1
                     else:
                         logger.warning(f"Invalid service data for {service_name}: {service_data}")
                         # Add to basic_status with error state
@@ -292,11 +291,28 @@ class FastMCPManager:
                             "tools_count": 0,
                             "error": f"Invalid service data: {service_data}"
                         }
+                        basic_status["total_enabled"] -= 1
                         basic_status["total_disabled"] += 1
                         
                         all_tools[service_name] = {"tools": [], "count": 0}
                         all_prompts[service_name] = []
                         all_resources[service_name] = []
+            
+            # Process disabled services (config only, no data fetch)
+            for service_name in disabled_services:
+                config = self.service_configs.get(service_name)
+                basic_status["services"][service_name] = {
+                    "enabled": False,
+                    "transport": config.spec.get("transport", "stdio") if config else "unknown",
+                    "connected": False,
+                    "tools_count": 0,
+                    "error": None
+                }
+                
+                # Empty data for disabled services
+                all_tools[service_name] = {"tools": [], "count": 0}
+                all_prompts[service_name] = []
+                all_resources[service_name] = []
             
             elapsed = time.time() - start_time
             logger.info(f"ALL data gathered with SINGLE CLIENT architecture in {elapsed:.2f}s")
@@ -332,7 +348,7 @@ class FastMCPManager:
             total_resources = sum(len(resources) for resources in all_resources.values())
             
             complete_status = {
-                "total_services": len(self.service_configs),
+                "total_services": len(all_services),
                 "enabled_services": basic_status["total_enabled"], 
                 "total_tools": sum(data.get("count", 0) for data in all_tools.values()),
                 "oauth_enabled": len(oauth_status) > 0,
@@ -341,8 +357,11 @@ class FastMCPManager:
             
             # Build service details with embedded data
             logger.debug("Building service details...")
-            for service_name, service_info in basic_status["services"].items():
+            for service_name in all_services:  # Process ALL services (enabled and disabled)
                 logger.debug(f"Processing service: {service_name}")
+                
+                # Get service info from basic_status (guaranteed to exist for all services)
+                service_info = basic_status["services"][service_name]
                 
                 tools_data = all_tools.get(service_name, {})
                 tools = tools_data.get("tools", [])
@@ -658,7 +677,7 @@ class FastMCPManager:
         return all_data["tools"]
     
     async def get_all_tools(self) -> Dict[str, Any]:
-        """Get tools from all enabled services with full collection caching"""
+        """Get tools from all services (enabled with data, disabled with empty data) with full collection caching"""
         # Try to get cached full collection first
         cached_all_tools = await self.cache.get_cached_data("all_tools", ttl=30.0)
         if cached_all_tools is not None:
@@ -668,34 +687,46 @@ class FastMCPManager:
         logger.info("Building fresh all_tools collection")
         all_tools = {}
         
-        # Get enabled services
+        # Get enabled and disabled services
         enabled_services = [(name, config) for name, config in self.service_configs.items() if config.enabled]
+        disabled_services = [(name, config) for name, config in self.service_configs.items() if not config.enabled]
+        
+        # Add disabled services with empty data (for frontend management)
+        for name, config in disabled_services:
+            all_tools[name] = {
+                "tools": [],
+                "count": 0,
+                "enabled": False,
+                "error": "Service is disabled"
+            }
         
         if not enabled_services:
             return all_tools
         
-        # Create tasks for parallel execution
+        # Create tasks for parallel execution (only for enabled services)
         async def get_service_tools_safe(service_name: str) -> tuple[str, Dict[str, Any]]:
             try:
                 tools = await self.get_tools_for_service(service_name)
                 return service_name, {
                     "tools": tools,
-                    "count": len(tools)
+                    "count": len(tools),
+                    "enabled": True
                 }
             except Exception as e:
                 logger.error(f"Error getting tools for {service_name}: {e}")
                 return service_name, {
                     "error": str(e),
                     "tools": [],
-                    "count": 0
+                    "count": 0,
+                    "enabled": True
                 }
         
-        # Execute all service tool fetching in parallel
-        logger.info(f"Fetching tools from {len(enabled_services)} services in parallel")
+        # Execute all service tool fetching in parallel (only enabled services)
+        logger.info(f"Fetching tools from {len(enabled_services)} enabled services in parallel")
         tasks = [get_service_tools_safe(name) for name, _ in enabled_services]
         results = await asyncio.gather(*tasks, return_exceptions=True)
         
-        # Build results dictionary
+        # Build results dictionary (add enabled services data)
         for result in results:
             if isinstance(result, Exception):
                 logger.error(f"Task failed with exception: {result}")
