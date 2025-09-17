@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "fractalic"
-version = "0.1.2"
+version = "0.1.3"
 description = "The Agentic Development Environment - Turn simple documents into powerful, AI-native applications"
 readme = "README.md"
 license = {text = "MIT"}
