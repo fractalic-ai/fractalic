@@ -36,6 +36,9 @@ class FastMCPManager:
         self.config_loader = MCPConfigLoader()
         self.service_configs: Dict[str, ServiceConfig] = {}
         self.service_states: Dict[str, str] = {}  # enabled/disabled
+        # Cache OAuth instances per URL to avoid re-creating them and to ensure
+        # cached tokens are consistently attached to requests within the process
+        self._oauth_by_url: Dict[str, OAuth] = {}
         
         # Initialize status cache with 60 second TTL
         self.cache = StatusCache(default_ttl=60.0)
@@ -47,6 +50,14 @@ class FastMCPManager:
         for name, config in self.service_configs.items():
             self.service_states[name] = "enabled" if config.enabled else "disabled"
     
+    
+    def _get_or_create_oauth(self, url: str) -> OAuth:
+        """Get a cached OAuth instance for a URL or create and cache it."""
+        oauth = self._oauth_by_url.get(url)
+        if oauth is None:
+            oauth = create_custom_oauth_client(url)
+            self._oauth_by_url[url] = oauth
+        return oauth
     
     def create_fastmcp_client(self, service_name: str) -> Optional[Client]:
         """Create FastMCP client for service (per-request, not cached)"""
@@ -92,7 +103,7 @@ class FastMCPManager:
                     client = Client(url)
                 else:
                     # Clean URLs likely need OAuth
-                    oauth_client = create_custom_oauth_client(url)
+                    oauth_client = self._get_or_create_oauth(url)
                     client = Client(url, auth=oauth_client)
             
             # Don't cache stdio clients - return immediately for per-request usage
@@ -550,7 +561,7 @@ class FastMCPManager:
                     async def get_tools():
                         try:
                             tools = await asyncio.wait_for(c.list_tools(), timeout=10.0)
-                            tools_list = tools.tools if hasattr(tools, 'tools') else tools
+                            tools_list = tools.tools if hasattr(tools, 'tools') and tools.tools else tools
                             
                             if tools_list:
                                 formatted_tools = []
@@ -872,37 +883,69 @@ class FastMCPManager:
         }
     
     async def start_oauth_flow(self, service_name: str) -> Dict[str, Any]:
-        """Start OAuth flow for service (using FastMCP)"""
+        """Start OAuth flow for service (using FastMCP).
+        Primary path: use our custom OAuth (fixed callback_port, cached per URL).
+        Fallback: auth="oauth" if custom OAuth fails.
+        Treat initial 401/403 as initiation (not fatal) and invalidate caches.
+        """
         try:
             config = self.service_configs.get(service_name)
             if not config:
                 return {"error": f"Service {service_name} not found"}
-            
-            # Check if service requires OAuth using FastMCP's check
+
             url = config.spec.get('url')
             if not url:
                 return {"error": f"Service {service_name} is not an HTTP server"}
-                
-            from fastmcp.client.auth.oauth import check_if_auth_required
-            requires_auth = await check_if_auth_required(url)
-            if not requires_auth:
-                return {"error": f"Service {service_name} does not require OAuth"}
-            
-            # Create client - this will trigger OAuth flow  
-            client = self.create_fastmcp_client(service_name)
-            if not client:
-                return {"error": f"Failed to create client for {service_name}"}
-            
-            # Test connection to trigger OAuth
-            async with client as c:
-                await c.ping()
-            
-            return {
-                "success": True,
-                "service": service_name,
-                "message": "OAuth flow initiated successfully"
-            }
-            
+
+            # Primary path: custom OAuth with fixed callback_port (cached per URL)
+            try:
+                oauth_client = self._get_or_create_oauth(url)
+                client = Client(url, auth=oauth_client)
+
+                try:
+                    async with client as c:
+                        await c.ping()
+                    await self.cache.invalidate_service(service_name)
+                    return {
+                        "success": True,
+                        "service": service_name,
+                        "message": "OAuth flow completed or not required"
+                    }
+                except Exception as e:
+                    msg = str(e)
+                    if ("401" in msg) or ("Unauthorized" in msg) or ("403" in msg) or ("Forbidden" in msg):
+                        await self.cache.invalidate_service(service_name)
+                        return {
+                            "success": True,
+                            "service": service_name,
+                            "message": "OAuth flow initiated; complete auth in browser"
+                        }
+                    # Otherwise try fallback path below
+                    raise
+
+            except Exception:
+                # Fallback: default library behavior (random port) to avoid UX break
+                client_fb = Client(url, auth="oauth")
+                try:
+                    async with client_fb as c:
+                        await c.ping()
+                    await self.cache.invalidate_service(service_name)
+                    return {
+                        "success": True,
+                        "service": service_name,
+                        "message": "OAuth flow completed or not required (fallback)"
+                    }
+                except Exception as e2:
+                    msg2 = str(e2)
+                    if ("401" in msg2) or ("Unauthorized" in msg2) or ("403" in msg2) or ("Forbidden" in msg2):
+                        await self.cache.invalidate_service(service_name)
+                        return {
+                            "success": True,
+                            "service": service_name,
+                            "message": "OAuth flow initiated; complete auth in browser (fallback)"
+                        }
+                    return {"error": f"Failed to create or ping client for {service_name}: {e2}"}
+
         except Exception as e:
             logger.error(f"Failed to start OAuth flow for {service_name}: {e}")
             return {"error": str(e)}
