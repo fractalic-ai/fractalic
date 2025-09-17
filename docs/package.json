@@ -13,8 +13,8 @@
     "lint": "markdownlint-cli2 '**/*.md' '#node_modules' '#.vitepress'"
   },
   "devDependencies": {
-    "vitepress": "^1.0.0",
-    "markdownlint-cli2": "^0.12.1"
+    "markdownlint-cli2": "^0.18.1",
+    "vitepress": "^0.1.1"
   },
   "engines": {
     "node": ">=18"
