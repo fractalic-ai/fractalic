@@ -977,6 +977,36 @@ class FastMCPManager:
             logger.error(f"Failed to reset OAuth for {service_name}: {e}")
             return {"error": str(e)}
     
+    async def _check_if_auth_required_with_redirects(self, url: str) -> bool:
+        """
+        Check if MCP endpoint requires OAuth by following redirects.
+        This is a workaround for FastMCP's check_if_auth_required not following redirects.
+        """
+        import httpx
+        try:
+            async with httpx.AsyncClient(follow_redirects=True, timeout=3.0) as client:
+                response = await client.get(url)
+                # Check for authentication requirements
+                if response.status_code == 401:
+                    return True
+                if 'www-authenticate' in response.headers:
+                    return True
+                # Check for OAuth-related headers that indicate auth is required
+                auth_headers = ['x-clerk-auth-status', 'authorization', 'www-authenticate']
+                for header in auth_headers:
+                    if header in response.headers:
+                        value = response.headers[header].lower()
+                        if any(keyword in value for keyword in ['signed-out', 'bearer', 'oauth']):
+                            return True
+                return False
+        except Exception:
+            # If we can't determine, fallback to FastMCP's check_if_auth_required
+            try:
+                from fastmcp.client.auth.oauth import check_if_auth_required
+                return await check_if_auth_required(url)
+            except Exception:
+                return False
+
     async def _check_oauth_single(self, service_name: str, config: ServiceConfig) -> tuple[str, Optional[Dict[str, Any]]]:
         """Check OAuth status for single service (for parallel execution)"""
         # Check only HTTP servers
@@ -988,10 +1018,8 @@ class FastMCPManager:
             return (service_name, None)
         
         try:
-            # Use FastMCP's check_if_auth_required to determine if server needs OAuth
-            from fastmcp.client.auth.oauth import check_if_auth_required
-            
-            requires_auth = await asyncio.wait_for(check_if_auth_required(url), timeout=3.0)
+            # Use our custom function that follows redirects
+            requires_auth = await self._check_if_auth_required_with_redirects(url)
             
             if requires_auth:
                 # Server requires OAuth - check token status

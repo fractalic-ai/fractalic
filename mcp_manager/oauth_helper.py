@@ -31,7 +31,8 @@ def create_custom_oauth_client(mcp_url: str, **kwargs) -> OAuth:
     """Create OAuth client with custom cache directory and fixed callback port.
     Backward compatible with fastmcp 2.10.x and 2.11.x (param name differences).
     """
-    oauth_cache_dir = ensure_oauth_cache_dir()
+    from pathlib import Path
+    oauth_cache_dir = Path(ensure_oauth_cache_dir())  # Convert to Path object
 
     # Prefer modern param names first
     params = dict(kwargs)
