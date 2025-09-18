@@ -113,6 +113,55 @@ class FastMCPManager:
             logger.exception(f"Error creating FastMCP client for {service_name}: {e}")
             return None
     
+    async def _detect_sse_service(self, client, service_name: str) -> bool:
+        """
+        Detect if a service uses SSE (Server-Sent Events) that can't handle parallel operations.
+        Returns True if the service should use sequential execution to avoid ClosedResourceError.
+        """
+        try:
+            # Check if this is an HTTP/HTTPS MCP server (SSE is only used with HTTP transport)
+            config = self.service_configs.get(service_name)
+            if not config or config.transport != 'http':
+                return False
+            
+            # For HTTP servers, check if they use SSE by looking for typical SSE indicators
+            url = config.spec.get('url', '')
+            
+            # Check URL patterns that typically indicate SSE usage
+            sse_indicators = [
+                'sse',
+                'stream',
+                'events',
+                'realtime',
+                'live'
+            ]
+            
+            url_lower = url.lower()
+            if any(indicator in url_lower for indicator in sse_indicators):
+                logger.debug(f"Service {service_name} detected as SSE-based (URL pattern)")
+                return True
+            
+            # Additional heuristic: try a quick ping to see if we get SSE-related headers
+            # This is a lightweight check that doesn't interfere with the main operations
+            try:
+                import httpx
+                parsed_url = url.rstrip('/').replace('/mcp', '')  # Get base URL
+                async with httpx.AsyncClient(timeout=2.0) as http_client:
+                    response = await http_client.head(parsed_url)
+                    content_type = response.headers.get('content-type', '').lower()
+                    if 'text/event-stream' in content_type or 'application/stream' in content_type:
+                        logger.debug(f"Service {service_name} detected as SSE-based (content-type)")
+                        return True
+            except Exception:
+                # If HTTP check fails, fall back to conservative approach
+                pass
+            
+            return False
+            
+        except Exception as e:
+            logger.debug(f"SSE detection failed for {service_name}: {e}, assuming non-SSE")
+            return False
+    
     async def _poll_single_service(self, service_name: str, config: ServiceConfig) -> tuple[str, Dict[str, Any]]:
         """Poll a single service for status (for parallel execution)"""
         service_status = {
@@ -130,11 +179,11 @@ class FastMCPManager:
             client = self.create_fastmcp_client(service_name)
             if client:
                 async with client as c:
-                    # Check if this is an SSE-based service (like Gmail) that can't handle parallel operations
-                    is_sse_service = "gmail" in service_name.lower() or "google" in service_name.lower()
+                    # Check if this is an SSE-based service that can't handle parallel operations
+                    is_sse_service = await self._detect_sse_service(c, service_name)
                     
                     if is_sse_service:
-                        # Sequential execution for SSE services
+                        # Sequential execution for SSE services to avoid ClosedResourceError
                         ping_result = await asyncio.wait_for(c.ping(), timeout=5.0)
                         tools_result = await asyncio.wait_for(c.list_tools(), timeout=5.0)
                     else:
@@ -532,7 +581,7 @@ class FastMCPManager:
             }
             
             async with client as c:
-                logger.debug(f"Using unified single client session for {service_name} - status + data in PARALLEL")
+                logger.debug(f"Using unified single client session for {service_name} - status + data with SSE detection")
                 
                 # Create tasks for parallel execution within single client session
                 tasks_to_run = []
@@ -541,11 +590,11 @@ class FastMCPManager:
                 if cached_status is None:
                     async def get_status():
                         try:
-                            # Check if this is an SSE-based service (like Gmail) that can't handle parallel operations
-                            is_sse_service = "gmail" in service_name.lower() or "google" in service_name.lower()
+                            # Check if this is an SSE-based service that can't handle parallel operations
+                            is_sse_service = await self._detect_sse_service(c, service_name)
                             
                             if is_sse_service:
-                                # Sequential execution for SSE services
+                                # Sequential execution for SSE services to avoid ClosedResourceError
                                 ping_result = await asyncio.wait_for(c.ping(), timeout=5.0)
                                 tools_result = await asyncio.wait_for(c.list_tools(), timeout=5.0)
                             else:
