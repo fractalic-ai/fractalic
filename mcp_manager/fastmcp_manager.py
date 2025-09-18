@@ -115,60 +115,56 @@ class FastMCPManager:
     
     async def _detect_sse_service(self, client, service_name: str) -> bool:
         """
-        Detect if a service uses SSE (Server-Sent Events) that can't handle parallel operations.
+        Detect if a service uses legacy SSE transport that can't handle parallel operations.
         Returns True if the service should use sequential execution to avoid ClosedResourceError.
+        
+        Note: streamable-http is the modern MCP transport and does NOT have SSE limitations.
+        Only legacy SSE servers need sequential execution.
         """
         try:
-            # Check if this is an HTTP/HTTPS MCP server (SSE is used with HTTP transports)
+            # Check if this is an HTTP/HTTPS MCP server
             config = self.service_configs.get(service_name)
             if not config:
                 return False
             
-            # Check transport type - streamable-http is specifically for SSE services
+            # streamable-http is the modern transport - it does NOT have SSE limitations
             if config.transport == 'streamable-http':
-                logger.debug(f"Service {service_name} detected as SSE-based (streamable-http transport)")
-                return True
+                logger.debug(f"Service {service_name} uses modern streamable-http transport (no SSE limitations)")
+                return False
             
-            # Regular HTTP transport may or may not be SSE
+            # Only HTTP transport may use legacy SSE
             if config.transport != 'http':
                 return False
             
-            # For regular HTTP servers, check if they use SSE by looking for typical SSE indicators
+            # For HTTP servers, detect if they use legacy SSE transport
             url = config.spec.get('url', '')
             
-            # Check URL patterns that typically indicate SSE usage
-            sse_indicators = [
-                'sse',
-                'stream',
-                'events',
-                'realtime',
-                'live'
-            ]
-            
-            url_lower = url.lower()
-            if any(indicator in url_lower for indicator in sse_indicators):
-                logger.debug(f"Service {service_name} detected as SSE-based (URL pattern)")
+            # Check URL patterns that indicate legacy SSE usage (typically /sse endpoint)
+            if '/sse' in url.lower():
+                logger.debug(f"Service {service_name} detected as legacy SSE-based (URL contains /sse)")
                 return True
             
-            # Additional heuristic: try a quick ping to see if we get SSE-related headers
-            # This is a lightweight check that doesn't interfere with the main operations
+            # Additional heuristic: check if server responds with SSE headers to GET requests
+            # This identifies legacy SSE servers that establish persistent SSE connections
             try:
                 import httpx
                 parsed_url = url.rstrip('/').replace('/mcp', '')  # Get base URL
+                # Try GET request to see if it responds with SSE headers (legacy behavior)
                 async with httpx.AsyncClient(timeout=2.0) as http_client:
-                    response = await http_client.head(parsed_url)
+                    response = await http_client.get(parsed_url, headers={'Accept': 'text/event-stream'})
                     content_type = response.headers.get('content-type', '').lower()
-                    if 'text/event-stream' in content_type or 'application/stream' in content_type:
-                        logger.debug(f"Service {service_name} detected as SSE-based (content-type)")
+                    if 'text/event-stream' in content_type:
+                        logger.debug(f"Service {service_name} detected as legacy SSE-based (responds with text/event-stream)")
                         return True
             except Exception:
-                # If HTTP check fails, fall back to conservative approach
+                # If HTTP check fails, assume modern transport
                 pass
             
+            # Default: assume modern transport (no SSE limitations)
             return False
             
         except Exception as e:
-            logger.debug(f"SSE detection failed for {service_name}: {e}, assuming non-SSE")
+            logger.debug(f"SSE detection failed for {service_name}: {e}, assuming modern transport")
             return False
     
     async def _poll_single_service(self, service_name: str, config: ServiceConfig) -> tuple[str, Dict[str, Any]]:
