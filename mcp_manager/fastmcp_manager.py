@@ -119,12 +119,21 @@ class FastMCPManager:
         Returns True if the service should use sequential execution to avoid ClosedResourceError.
         """
         try:
-            # Check if this is an HTTP/HTTPS MCP server (SSE is only used with HTTP transport)
+            # Check if this is an HTTP/HTTPS MCP server (SSE is used with HTTP transports)
             config = self.service_configs.get(service_name)
-            if not config or config.transport != 'http':
+            if not config:
                 return False
             
-            # For HTTP servers, check if they use SSE by looking for typical SSE indicators
+            # Check transport type - streamable-http is specifically for SSE services
+            if config.transport == 'streamable-http':
+                logger.debug(f"Service {service_name} detected as SSE-based (streamable-http transport)")
+                return True
+            
+            # Regular HTTP transport may or may not be SSE
+            if config.transport != 'http':
+                return False
+            
+            # For regular HTTP servers, check if they use SSE by looking for typical SSE indicators
             url = config.spec.get('url', '')
             
             # Check URL patterns that typically indicate SSE usage
