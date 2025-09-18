@@ -552,7 +552,16 @@ class ToolRegistry(dict):
             
             # Create the MCP tool function
             def mcp_runner(**kwargs):
-                return mcp_call(srv, name, kwargs)
+                # Prepare execution context for MCP server
+                context = {}
+                if hasattr(self, '_current_file') and self._current_file:
+                    from ..paths import get_session_cwd
+                    current_cwd = get_session_cwd()
+                    context['current_file'] = self._current_file
+                    context['current_directory'] = str(current_cwd)
+                    print(f"[DEBUG] MCP Context: current_file={self._current_file}, current_directory={current_cwd}")
+                
+                return mcp_call(srv, name, kwargs, context)
             
             # Add to registry dictionary and manifests list
             self[name] = mcp_runner
@@ -575,11 +584,27 @@ class ToolRegistry(dict):
                         if 'key' in item and 'value' in item:
                             env[item['key']] = item['value']
                 
-                # Set working directory to the tool's directory
+                # Determine working directory:
+                # 1) settings.tools.defaultCwdPolicy: "session_cwd" | "tool_dir" (default: session_cwd)
+                # 2) default to session_cwd
+                from ..paths import get_session_cwd
+                cwd_policy = (Config.TOML_SETTINGS.get('tools', {}).get('defaultCwdPolicy')
+                              if Config.TOML_SETTINGS else None) or 'session_cwd'
                 tool_dir = path.parent
+                if cwd_policy == 'tool_dir':
+                    run_cwd = str(tool_dir)
+                else:
+                    run_cwd = str(get_session_cwd() or tool_dir)
+                
+                # Ensure tool's directory is on PYTHONPATH so its local imports work when cwd != tool_dir
+                run_env = env or os.environ.copy()
+                existing_pp = run_env.get('PYTHONPATH', '')
+                if str(tool_dir) not in existing_pp.split(os.pathsep):
+                    run_env['PYTHONPATH'] = (existing_pp + os.pathsep if existing_pp else '') + str(tool_dir)
+                
                 result = subprocess.run(
                     [sys.executable, str(path), json_input],
-                    capture_output=True, text=True, env=env, timeout=TOOL_EXECUTION_TIMEOUT, cwd=str(tool_dir)
+                    capture_output=True, text=True, env=run_env, timeout=TOOL_EXECUTION_TIMEOUT, cwd=run_cwd
                 )
                 if result.returncode != 0:
                     try:
@@ -608,7 +633,16 @@ class ToolRegistry(dict):
 
         elif cmd == "mcp":
             srv = meta.get("_mcp") or meta["mcp_server"]
-            runner = lambda **kw: mcp_call(srv, name, kw)
+            def mcp_runner(**kw):
+                # Prepare execution context for MCP server
+                context = {}
+                if hasattr(self, '_current_file') and self._current_file:
+                    from ..paths import get_session_cwd
+                    context['current_file'] = self._current_file
+                    context['current_directory'] = str(get_session_cwd())
+                
+                return mcp_call(srv, name, kw, context)
+            runner = mcp_runner
 
         elif meta.get("type") == "cli":
             path = Path(meta["entry"])
@@ -1029,7 +1063,15 @@ class ToolRegistry(dict):
                 server = manifest.get("_mcp") or manifest.get("mcp_server")
                 if not server:
                     raise ValueError(f"MCP tool '{tool_name}' missing server information")
-                return mcp_call(server, tool_name, kwargs)
+                
+                # Prepare execution context for MCP server
+                context = {}
+                if hasattr(self, '_current_file') and self._current_file:
+                    from ..paths import get_session_cwd
+                    context['current_file'] = self._current_file
+                    context['current_directory'] = str(get_session_cwd())
+                
+                return mcp_call(server, tool_name, kwargs, context)
             elif manifest.get("_type") == "mcp_prompt":
                 # Synthetic prompt invocation returns the prompt message content
                 from .mcp_client import get_prompt as _get_prompt

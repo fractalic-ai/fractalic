@@ -196,8 +196,9 @@ async def call_tool_handler(request):
     try:
         data = await request.json()
         arguments = data.get('arguments', {})
+        context = data.get('context', {})
         
-        result = await manager.call_tool_for_service(service_name, tool_name, arguments)
+        result = await manager.call_tool_for_service(service_name, tool_name, arguments, context)
         
         # Handle non-serializable objects in result
         try:

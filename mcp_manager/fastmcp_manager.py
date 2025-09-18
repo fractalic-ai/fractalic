@@ -59,58 +59,58 @@ class FastMCPManager:
             self._oauth_by_url[url] = oauth
         return oauth
     
-    def create_fastmcp_client(self, service_name: str) -> Optional[Client]:
+    def create_fastmcp_client(self, service_name: str, context: Dict[str, Any] | None = None) -> Optional[Client]:
         """Create FastMCP client for service (per-request, not cached)"""
         try:
             config = self.service_configs.get(service_name)
             if not config or not config.enabled:
                 return None
             
-            # Create client based on transport type
+            # Determine desired working directory (default from context)
+            desired_cwd = None
+            if context and isinstance(context, dict):
+                desired_cwd = context.get('current_directory')
+            
             if config.transport == 'stdio':
-                # For stdio servers - create full MCP config dict
                 command = config.spec.get('command')
                 if not command:
                     logger.error(f"No command specified for stdio service {service_name}")
                     return None
                 
-                # Create MCP config dict in standard format
+                # Use env from config as-is (do not inject FRACTALIC_* vars)
+                env = config.spec.get('env', {})
+                
                 mcp_config = {
                     "mcpServers": {
                         service_name: {
                             "command": command,
                             "args": config.spec.get('args', []),
-                            "env": config.spec.get('env', {})
+                            "env": env
                         }
                     }
                 }
                 
-                # Create stdio client with MCP config
-                client = Client(mcp_config)
+                # Set working directory via MCP JSON (supported by clients)
+                if desired_cwd:
+                    mcp_config["mcpServers"][service_name]["cwd"] = desired_cwd
                 
+                client = Client(mcp_config)
             else:
-                # For HTTP/SSE servers
                 url = config.spec.get('url')
                 if not url:
                     logger.error(f"No URL specified for service {service_name}")
                     return None
                 
-                # For HTTP servers - try without OAuth first
-                # If server has embedded tokens (long URL paths), no OAuth needed
                 import re
                 if re.search(r'/[A-Za-z0-9+/=]{50,}', url):
-                    # URL contains embedded tokens - no OAuth
                     client = Client(url)
                 else:
-                    # Clean URLs likely need OAuth
                     oauth_client = self._get_or_create_oauth(url)
                     client = Client(url, auth=oauth_client)
             
-            # Don't cache stdio clients - return immediately for per-request usage
             return client
-            
         except Exception as e:
-            logger.error(f"Failed to create client for {service_name}: {e}")
+            logger.exception(f"Error creating FastMCP client for {service_name}: {e}")
             return None
     
     async def _poll_single_service(self, service_name: str, config: ServiceConfig) -> tuple[str, Dict[str, Any]]:
@@ -130,11 +130,18 @@ class FastMCPManager:
             client = self.create_fastmcp_client(service_name)
             if client:
                 async with client as c:
-                    # Run ping and list_tools IN PARALLEL within same client session
-                    ping_task = asyncio.wait_for(c.ping(), timeout=5.0)
-                    tools_task = asyncio.wait_for(c.list_tools(), timeout=5.0)
+                    # Check if this is an SSE-based service (like Gmail) that can't handle parallel operations
+                    is_sse_service = "gmail" in service_name.lower() or "google" in service_name.lower()
                     
-                    ping_result, tools_result = await asyncio.gather(ping_task, tools_task, return_exceptions=True)
+                    if is_sse_service:
+                        # Sequential execution for SSE services
+                        ping_result = await asyncio.wait_for(c.ping(), timeout=5.0)
+                        tools_result = await asyncio.wait_for(c.list_tools(), timeout=5.0)
+                    else:
+                        # Run ping and list_tools IN PARALLEL within same client session for non-SSE services
+                        ping_task = asyncio.wait_for(c.ping(), timeout=5.0)
+                        tools_task = asyncio.wait_for(c.list_tools(), timeout=5.0)
+                        ping_result, tools_result = await asyncio.gather(ping_task, tools_task, return_exceptions=True)
                     
                     # Process ping result
                     if not isinstance(ping_result, Exception):
@@ -534,11 +541,18 @@ class FastMCPManager:
                 if cached_status is None:
                     async def get_status():
                         try:
-                            # Parallel ping and tools for status
-                            ping_task = asyncio.wait_for(c.ping(), timeout=5.0)
-                            tools_task = asyncio.wait_for(c.list_tools(), timeout=5.0)
+                            # Check if this is an SSE-based service (like Gmail) that can't handle parallel operations
+                            is_sse_service = "gmail" in service_name.lower() or "google" in service_name.lower()
                             
-                            ping_result, tools_result = await asyncio.gather(ping_task, tools_task, return_exceptions=True)
+                            if is_sse_service:
+                                # Sequential execution for SSE services
+                                ping_result = await asyncio.wait_for(c.ping(), timeout=5.0)
+                                tools_result = await asyncio.wait_for(c.list_tools(), timeout=5.0)
+                            else:
+                                # Parallel ping and tools for non-SSE services
+                                ping_task = asyncio.wait_for(c.ping(), timeout=5.0)
+                                tools_task = asyncio.wait_for(c.list_tools(), timeout=5.0)
+                                ping_result, tools_result = await asyncio.gather(ping_task, tools_task, return_exceptions=True)
                             
                             # Process status results
                             if not isinstance(ping_result, Exception):
@@ -750,13 +764,14 @@ class FastMCPManager:
         logger.info(f"Built all_tools collection with {len(all_tools)} services")
         return all_tools
     
-    async def call_tool_for_service(self, service_name: str, tool_name: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
+    async def call_tool_for_service(self, service_name: str, tool_name: str, arguments: Dict[str, Any], context: Dict[str, Any] | None = None) -> Dict[str, Any]:
         """Call tool for specific service"""
         try:
-            client = self.create_fastmcp_client(service_name)
+            client = self.create_fastmcp_client(service_name, context)
             if not client:
                 raise Exception(f"No client available for service {service_name}")
             
+            # Do not mutate arguments; context is used only for client setup (e.g., cwd)
             async with client as c:
                 result = await c.call_tool(tool_name, arguments)
                 
@@ -779,23 +794,19 @@ class FastMCPManager:
                 if result.data:
                     content_parts.append(str(result.data))
                 
-                # Join all content parts
-                content = "\n".join(content_parts) if content_parts else ""
+                output = "\n".join([p for p in content_parts if p]) if content_parts else ""
                 
                 return {
                     "success": True,
                     "result": {
-                        "content": content,
-                        "isError": result.is_error
-                    }
+                        "content": output,
+                        "raw": getattr(result, 'raw', None)
+                    },
+                    "isError": False
                 }
-                
         except Exception as e:
-            logger.error(f"Failed to call tool {tool_name} for {service_name}: {e}")
-            return {
-                "success": False,
-                "error": str(e)
-            }
+            logger.exception(f"Error calling tool {tool_name} for service {service_name}: {e}")
+            return {"success": False, "isError": True, "error": str(e)}
     
     async def get_capabilities_for_service(self, service_name: str) -> Dict[str, Any]:
         """Get capabilities for specific service"""
@@ -963,7 +974,7 @@ class FastMCPManager:
             url = config.spec.get('url')
             if url:
                 storage = create_custom_token_storage(url)
-                await storage.clear()
+                storage.clear()
             
             # No client cache to clear - per-request approach
             

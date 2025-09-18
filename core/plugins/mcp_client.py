@@ -142,7 +142,7 @@ def read_resource(server: str, service: str, uri: str) -> Dict[str, Any]:
     except requests.exceptions.RequestException as e:
         return {"error": f"Network error: {e}", "isError": True}
 
-def call_tool(server: str, name: str, args: Dict[str, Any]) -> Dict[str, Any]:
+def call_tool(server: str, name: str, args: Dict[str, Any], context: Dict[str, Any] = None) -> Dict[str, Any]:
     """Call a tool on an MCP server with better error handling."""
     try:
         # Handle server URL resolution
@@ -167,13 +167,18 @@ def call_tool(server: str, name: str, args: Dict[str, Any]) -> Dict[str, Any]:
         # Use the SDK v2 endpoint format: /call/{service}/{tool}
         url = f"{server.rstrip('/')}/call/{service}/{tool}"
         
+        # Prepare request payload
+        payload = {"arguments": args}
+        if context:
+            payload["context"] = context
+        
         # Increased timeout for complex operations (especially Replicate API calls)
         # and add retry logic for network issues
         import time
         for attempt in range(3):
             try:
                 response = requests.post(url,
-                                       json={"arguments": args},  # SDK v2 expects just arguments
+                                       json=payload,  # Include context if provided
                                        timeout=90)  # Increased from 30s to 90s
                 break  # Success, exit retry loop
             except (requests.exceptions.Timeout, requests.exceptions.ConnectionError, ConnectionResetError) as e:

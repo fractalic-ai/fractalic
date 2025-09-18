@@ -21,6 +21,7 @@ from core.git import ensure_git_repo, create_session_branch, commit_changes
 from core.simple_token_tracker import token_tracker
 from rich import print
 from rich.console import Console
+from core.paths import set_session_cwd
 
 def get_relative_path(base_dir: str, file_path: str) -> str:
     """Convert absolute path to relative path based on base directory."""
@@ -65,6 +66,8 @@ def run(filename: str, param_node: Optional[Union[Node, AST]] = None, create_new
     
     try:
         os.chdir(file_dir)
+        # Keep paths session_cwd in sync with the currently executing file directory
+        set_session_cwd(file_dir)
 
         if create_new_branch:
             ensure_git_repo(base_dir)
