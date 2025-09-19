@@ -1,0 +1,5 @@
+# Map fractalic process commits to proper author
+dimusdim <dimusdim@users.noreply.github.com> fractalic process <fractalic_core_agent@fractalic_core_agent.com>
+dimusdim <dimusdim@users.noreply.github.com> <fractalic_core_agent@fractalic_core_agent.com>
+# Also normalize dimusdim commits to the same author format
+dimusdim <dimusdim@users.noreply.github.com> dimusdim <fractalic_core_agent@fractalic_core_agent.com>
