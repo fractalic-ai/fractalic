@@ -36,9 +36,7 @@ class FastMCPManager:
         self.config_loader = MCPConfigLoader()
         self.service_configs: Dict[str, ServiceConfig] = {}
         self.service_states: Dict[str, str] = {}  # enabled/disabled
-        # Cache OAuth instances per URL to avoid re-creating them and to ensure
-        # cached tokens are consistently attached to requests within the process
-        self._oauth_by_url: Dict[str, OAuth] = {}
+
         
         # Initialize status cache with 60 second TTL
         self.cache = StatusCache(default_ttl=60.0)
@@ -52,12 +50,9 @@ class FastMCPManager:
     
     
     def _get_or_create_oauth(self, url: str) -> OAuth:
-        """Get a cached OAuth instance for a URL or create and cache it."""
-        oauth = self._oauth_by_url.get(url)
-        if oauth is None:
-            oauth = create_custom_oauth_client(url)
-            self._oauth_by_url[url] = oauth
-        return oauth
+        """Create OAuth instance for a URL (no caching - FastMCP handles token persistence)."""
+        # FastMCP automatically loads existing tokens from storage
+        return create_custom_oauth_client(url)
     
     def create_fastmcp_client(self, service_name: str, context: Dict[str, Any] | None = None) -> Optional[Client]:
         """Create FastMCP client for service (per-request, not cached)"""
@@ -113,59 +108,7 @@ class FastMCPManager:
             logger.exception(f"Error creating FastMCP client for {service_name}: {e}")
             return None
     
-    async def _detect_sse_service(self, client, service_name: str) -> bool:
-        """
-        Detect if a service uses legacy SSE transport that can't handle parallel operations.
-        Returns True if the service should use sequential execution to avoid ClosedResourceError.
-        
-        Note: streamable-http is the modern MCP transport and does NOT have SSE limitations.
-        Only legacy SSE servers need sequential execution.
-        """
-        try:
-            # Check if this is an HTTP/HTTPS MCP server
-            config = self.service_configs.get(service_name)
-            if not config:
-                return False
-            
-            # streamable-http is the modern transport - it does NOT have SSE limitations
-            if config.transport == 'streamable-http':
-                logger.debug(f"Service {service_name} uses modern streamable-http transport (no SSE limitations)")
-                return False
-            
-            # Only HTTP transport may use legacy SSE
-            if config.transport != 'http':
-                return False
-            
-            # For HTTP servers, detect if they use legacy SSE transport
-            url = config.spec.get('url', '')
-            
-            # Check URL patterns that indicate legacy SSE usage (typically /sse endpoint)
-            if '/sse' in url.lower():
-                logger.debug(f"Service {service_name} detected as legacy SSE-based (URL contains /sse)")
-                return True
-            
-            # Additional heuristic: check if server responds with SSE headers to GET requests
-            # This identifies legacy SSE servers that establish persistent SSE connections
-            try:
-                import httpx
-                parsed_url = url.rstrip('/').replace('/mcp', '')  # Get base URL
-                # Try GET request to see if it responds with SSE headers (legacy behavior)
-                async with httpx.AsyncClient(timeout=2.0) as http_client:
-                    response = await http_client.get(parsed_url, headers={'Accept': 'text/event-stream'})
-                    content_type = response.headers.get('content-type', '').lower()
-                    if 'text/event-stream' in content_type:
-                        logger.debug(f"Service {service_name} detected as legacy SSE-based (responds with text/event-stream)")
-                        return True
-            except Exception:
-                # If HTTP check fails, assume modern transport
-                pass
-            
-            # Default: assume modern transport (no SSE limitations)
-            return False
-            
-        except Exception as e:
-            logger.debug(f"SSE detection failed for {service_name}: {e}, assuming modern transport")
-            return False
+
     
     async def _poll_single_service(self, service_name: str, config: ServiceConfig) -> tuple[str, Dict[str, Any]]:
         """Poll a single service for status (for parallel execution)"""
@@ -184,18 +127,11 @@ class FastMCPManager:
             client = self.create_fastmcp_client(service_name)
             if client:
                 async with client as c:
-                    # Check if this is an SSE-based service that can't handle parallel operations
-                    is_sse_service = await self._detect_sse_service(c, service_name)
-                    
-                    if is_sse_service:
-                        # Sequential execution for SSE services to avoid ClosedResourceError
-                        ping_result = await asyncio.wait_for(c.ping(), timeout=5.0)
-                        tools_result = await asyncio.wait_for(c.list_tools(), timeout=5.0)
-                    else:
-                        # Run ping and list_tools IN PARALLEL within same client session for non-SSE services
-                        ping_task = asyncio.wait_for(c.ping(), timeout=5.0)
-                        tools_task = asyncio.wait_for(c.list_tools(), timeout=5.0)
-                        ping_result, tools_result = await asyncio.gather(ping_task, tools_task, return_exceptions=True)
+                    # FastMCP automatically handles transport detection and parallel/sequential execution
+                    # Let FastMCP determine the best approach based on the actual transport
+                    ping_task = asyncio.wait_for(c.ping(), timeout=5.0)
+                    tools_task = asyncio.wait_for(c.list_tools(), timeout=5.0)
+                    ping_result, tools_result = await asyncio.gather(ping_task, tools_task, return_exceptions=True)
                     
                     # Process ping result
                     if not isinstance(ping_result, Exception):
@@ -586,7 +522,7 @@ class FastMCPManager:
             }
             
             async with client as c:
-                logger.debug(f"Using unified single client session for {service_name} - status + data with SSE detection")
+                logger.debug(f"Using unified single client session for {service_name} - status + data")
                 
                 # Create tasks for parallel execution within single client session
                 tasks_to_run = []
@@ -595,18 +531,11 @@ class FastMCPManager:
                 if cached_status is None:
                     async def get_status():
                         try:
-                            # Check if this is an SSE-based service that can't handle parallel operations
-                            is_sse_service = await self._detect_sse_service(c, service_name)
-                            
-                            if is_sse_service:
-                                # Sequential execution for SSE services to avoid ClosedResourceError
-                                ping_result = await asyncio.wait_for(c.ping(), timeout=5.0)
-                                tools_result = await asyncio.wait_for(c.list_tools(), timeout=5.0)
-                            else:
-                                # Parallel ping and tools for non-SSE services
-                                ping_task = asyncio.wait_for(c.ping(), timeout=5.0)
-                                tools_task = asyncio.wait_for(c.list_tools(), timeout=5.0)
-                                ping_result, tools_result = await asyncio.gather(ping_task, tools_task, return_exceptions=True)
+                            # FastMCP automatically handles transport detection and parallel/sequential execution
+                            # Let FastMCP determine the best approach based on the actual transport
+                            ping_task = asyncio.wait_for(c.ping(), timeout=5.0)
+                            tools_task = asyncio.wait_for(c.list_tools(), timeout=5.0)
+                            ping_result, tools_result = await asyncio.gather(ping_task, tools_task, return_exceptions=True)
                             
                             # Process status results
                             if not isinstance(ping_result, Exception):
@@ -1083,15 +1012,14 @@ class FastMCPManager:
             return (service_name, None)
         
         try:
-            # Use our custom function that follows redirects
-            requires_auth = await self._check_if_auth_required_with_redirects(url)
+            # First check if we have tokens - if we do, assume server requires auth
+            from fastmcp.client.auth.oauth import FileTokenStorage
             
-            if requires_auth:
-                # Server requires OAuth - check token status
-                from fastmcp.client.auth.oauth import FileTokenStorage
-                
-                storage = create_custom_token_storage(url)
-                tokens = await storage.get_tokens()
+            storage = create_custom_token_storage(url)
+            tokens = await storage.get_tokens()
+            
+            if tokens:
+                # We have tokens - server requires OAuth, return token status
                 
                 if tokens:
                     # FastMCP uses token file modification time + expires_in for expiry calculation
@@ -1135,18 +1063,23 @@ class FastMCPManager:
                         "refresh_needed": refresh_needed,
                         "scope": getattr(tokens, 'scope', ''),
                         "client_configured": True,  # FastMCP handles OAuth internally
-                        "provider_configured": requires_auth  # Server requires OAuth
+                        "provider_configured": True  # We have tokens, so server requires OAuth
                     })
-                else:
-                    return (service_name, {
-                        "authenticated": False,
-                        "has_token": False,
-                        "has_access_token": False,
-                        "has_refresh_token": False,
-                        "client_configured": True,  # FastMCP handles OAuth internally
-                        "provider_configured": requires_auth  # Server requires OAuth
-                    })
-            # If server doesn't require OAuth, we don't include it
+            
+            # No tokens - check if server requires OAuth
+            requires_auth = await self._check_if_auth_required_with_redirects(url)
+            
+            if requires_auth:
+                return (service_name, {
+                    "authenticated": False,
+                    "has_token": False,
+                    "has_access_token": False,
+                    "has_refresh_token": False,
+                    "client_configured": True,  # FastMCP handles OAuth internally
+                    "provider_configured": True  # Server requires OAuth
+                })
+            
+            # Server doesn't require OAuth
             return (service_name, None)
             
         except asyncio.TimeoutError:

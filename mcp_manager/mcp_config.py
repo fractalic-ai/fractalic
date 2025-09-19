@@ -9,7 +9,6 @@ import logging
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, Any, Optional
-from urllib.parse import urlparse
 
 # Import centralized path management
 from core.paths import get_fractalic_root
@@ -33,18 +32,16 @@ class ServiceConfig:
     @classmethod
     def from_dict(cls, name: str, config: Dict[str, Any]) -> 'ServiceConfig':
         """Create ServiceConfig from dictionary"""
-        # Auto-detect transport if not specified
-        transport = config.get('transport', 'stdio')
-        
-        if 'url' in config and transport == 'stdio':
-            url_val = config['url']
-            path = urlparse(url_val).path.rstrip('/').lower()
-            
-            # Detect transport type from URL path
-            if path.endswith('/sse') or '/sse/' in path or path.endswith('/mcp/sse'):
-                transport = 'sse'
+        # Auto-detect transport based on config
+        transport = config.get('transport')
+        if not transport:
+            # If no transport specified, detect from spec
+            if 'url' in config:
+                # Has URL - let FastMCP auto-detect the specific HTTP transport
+                transport = None  # FastMCP will auto-detect
             else:
-                transport = 'streamable-http'
+                # No URL - assume stdio
+                transport = 'stdio'
         
         # OAuth only when explicitly configured by user
         has_oauth = config.get('oauth', False)
