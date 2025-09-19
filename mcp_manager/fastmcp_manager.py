@@ -11,9 +11,12 @@ TODO: Token counting feature
 """
 
 import asyncio
+import httpx
 import json
 import logging
+import re
 import time
+import traceback
 from typing import Dict, Any, List, Optional
 from pathlib import Path
 
@@ -49,8 +52,8 @@ class FastMCPManager:
             self.service_states[name] = "enabled" if config.enabled else "disabled"
     
     
-    def _get_or_create_oauth(self, url: str) -> OAuth:
-        """Create OAuth instance for a URL (no caching - FastMCP handles token persistence)."""
+    def _create_oauth_client(self, url: str) -> OAuth:
+        """Create OAuth instance for a URL (FastMCP handles token persistence)."""
         # FastMCP automatically loads existing tokens from storage
         return create_custom_oauth_client(url)
     
@@ -96,11 +99,10 @@ class FastMCPManager:
                     logger.error(f"No URL specified for service {service_name}")
                     return None
                 
-                import re
                 if re.search(r'/[A-Za-z0-9+/=]{50,}', url):
                     client = Client(url)
                 else:
-                    oauth_client = self._get_or_create_oauth(url)
+                    oauth_client = self._create_oauth_client(url)
                     client = Client(url, auth=oauth_client)
             
             return client
@@ -878,7 +880,7 @@ class FastMCPManager:
     
     async def start_oauth_flow(self, service_name: str) -> Dict[str, Any]:
         """Start OAuth flow for service (using FastMCP).
-        Primary path: use our custom OAuth (fixed callback_port, cached per URL).
+        Primary path: use our custom OAuth configuration.
         Fallback: auth="oauth" if custom OAuth fails.
         Treat initial 401/403 as initiation (not fatal) and invalidate caches.
         """
@@ -891,9 +893,9 @@ class FastMCPManager:
             if not url:
                 return {"error": f"Service {service_name} is not an HTTP server"}
 
-            # Primary path: custom OAuth with fixed callback_port (cached per URL)
+            # Primary path: use our custom OAuth configuration
             try:
-                oauth_client = self._get_or_create_oauth(url)
+                oauth_client = self._create_oauth_client(url)
                 client = Client(url, auth=oauth_client)
 
                 try:
@@ -976,7 +978,6 @@ class FastMCPManager:
         Check if MCP endpoint requires OAuth by following redirects.
         This is a workaround for FastMCP's check_if_auth_required not following redirects.
         """
-        import httpx
         try:
             async with httpx.AsyncClient(follow_redirects=True, timeout=3.0) as client:
                 response = await client.get(url)
