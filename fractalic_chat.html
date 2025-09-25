@@ -512,6 +512,58 @@
             padding: 4px 8px;
             border-bottom: 1px solid #dee2e6;
         }
+
+        /* Terminal Viewer Styles */
+        .terminal-modal .modal-content {
+            width: 90%;
+            max-width: 1200px;
+            height: 80vh;
+        }
+
+        .terminal-container {
+            flex: 1;
+            overflow: hidden;
+            padding: 0;
+        }
+
+        .terminal-viewer {
+            height: 100%;
+            overflow: auto;
+            background: #1e1e1e;
+            color: #ffffff;
+            border: 1px solid #333;
+        }
+
+        .terminal-content {
+            margin: 0;
+            padding: 16px;
+            font-family: 'Courier New', 'Monaco', 'Consolas', monospace;
+            font-size: 13px;
+            line-height: 1.4;
+            white-space: pre-wrap;
+            background: #1e1e1e;
+            color: #ffffff;
+            border: none;
+        }
+
+        .terminal-status {
+            padding: 10px 16px;
+            background: #333;
+            color: #ffffff;
+            font-size: 12px;
+            border-bottom: 1px solid #444;
+            font-family: monospace;
+        }
+
+        .terminal-status.running {
+            background: #2d5f3f;
+            color: #90ee90;
+        }
+
+        .terminal-status.completed {
+            background: #3f2d2d;
+            color: #ffcccc;
+        }
     </style>
 </head>
 <body>
@@ -596,6 +648,27 @@
         </div>
     </div>
 
+    <!-- Terminal Viewer Modal -->
+    <div id="terminalViewerModal" class="modal">
+        <div class="modal-content terminal-modal">
+            <div class="modal-header">
+                <h3>Terminal: <span id="terminalFileName">Выполнение</span></h3>
+                <button class="modal-close" id="terminalModalCloseButton">✕</button>
+            </div>
+            <div class="terminal-status" id="terminalStatus">
+                Подключение к терминалу...
+            </div>
+            <div class="terminal-container">
+                <div class="terminal-viewer">
+                    <pre id="terminalContent" class="terminal-content"></pre>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button id="closeTerminalButton">Закрыть</button>
+            </div>
+        </div>
+    </div>
+
     <script>
         class FractalicChatClient {
             constructor() {
@@ -623,8 +696,17 @@
                 this.closeDiffButton = document.getElementById('closeDiffButton');
                 this.diffContent = document.getElementById('diffContent');
                 
+                // Terminal viewer elements
+                this.terminalViewerModal = document.getElementById('terminalViewerModal');
+                this.terminalModalCloseButton = document.getElementById('terminalModalCloseButton');
+                this.closeTerminalButton = document.getElementById('closeTerminalButton');
+                this.terminalContent = document.getElementById('terminalContent');
+                this.terminalStatus = document.getElementById('terminalStatus');
+                this.terminalFileName = document.getElementById('terminalFileName');
+                
                 this.selectedFile = null;
                 this.currentBrowserPath = '.';
+                this.activeStreams = new Map(); // execution_id -> AbortController
                 
                 this.initializeEventListeners();
                 this.connect();
@@ -649,6 +731,10 @@
                 this.diffModalCloseButton.addEventListener('click', () => this.closeDiffViewer());
                 this.closeDiffButton.addEventListener('click', () => this.closeDiffViewer());
                 
+                // Terminal viewer events
+                this.terminalModalCloseButton.addEventListener('click', () => this.closeTerminalViewer());
+                this.closeTerminalButton.addEventListener('click', () => this.closeTerminalViewer());
+                
                 // Close modals when clicking outside
                 this.fileBrowserModal.addEventListener('click', (e) => {
                     if (e.target === this.fileBrowserModal) {
@@ -659,6 +745,12 @@
                 this.diffViewerModal.addEventListener('click', (e) => {
                     if (e.target === this.diffViewerModal) {
                         this.closeDiffViewer();
+                    }
+                });
+                
+                this.terminalViewerModal.addEventListener('click', (e) => {
+                    if (e.target === this.terminalViewerModal) {
+                        this.closeTerminalViewer();
                     }
                 });
             }
@@ -779,6 +871,71 @@
                 }
             }
 
+            closeTerminalViewer() {
+                this.terminalViewerModal.style.display = 'none';
+                // Остановить все активные стримы
+                this.activeStreams.forEach((controller) => {
+                    controller.abort();
+                });
+                this.activeStreams.clear();
+            }
+
+            async showTerminalViewer(filePath, executionId) {
+                try {
+                    this.terminalFileName.textContent = filePath;
+                    this.terminalContent.textContent = '';
+                    this.terminalStatus.textContent = 'Подключение к терминалу...';
+                    this.terminalStatus.className = 'terminal-status running';
+                    this.terminalViewerModal.style.display = 'block';
+
+                    // Создаем AbortController для этого стрима
+                    const controller = new AbortController();
+                    this.activeStreams.set(executionId, controller);
+
+                    const response = await fetch(`/api/chat/terminal-stream/${encodeURIComponent(filePath)}`, {
+                        signal: controller.signal
+                    });
+
+                    if (!response.ok) {
+                        throw new Error(`HTTP error! status: ${response.status}`);
+                    }
+
+                    const reader = response.body.getReader();
+                    const decoder = new TextDecoder();
+
+                    this.terminalStatus.textContent = `Выполняется: ${filePath}`;
+                    
+                    while (true) {
+                        const { done, value } = await reader.read();
+                        
+                        if (done) {
+                            this.terminalStatus.textContent = `Завершено: ${filePath}`;
+                            this.terminalStatus.className = 'terminal-status completed';
+                            break;
+                        }
+                        
+                        const chunk = decoder.decode(value, { stream: true });
+                        this.terminalContent.textContent += chunk;
+                        
+                        // Автоскролл к концу
+                        this.terminalContent.scrollTop = this.terminalContent.scrollHeight;
+                    }
+
+                } catch (error) {
+                    if (error.name === 'AbortError') {
+                        console.log('Terminal stream aborted');
+                    } else {
+                        console.error('Error fetching terminal stream:', error);
+                        this.terminalContent.textContent += `\n[Ошибка соединения: ${error.message}]`;
+                        this.terminalStatus.textContent = 'Ошибка соединения';
+                        this.terminalStatus.className = 'terminal-status completed';
+                    }
+                } finally {
+                    // Убираем из активных стримов
+                    this.activeStreams.delete(executionId);
+                }
+            }
+
             updateInputPlaceholder() {
                 if (this.selectedFile) {
                     this.chatInput.placeholder = `Выполнить ${this.selectedFile} с вашим текстом как параметром...`;
@@ -826,7 +983,7 @@
             }
 
             handleMessage(data) {
-                const { type, message, timestamp, script_content, status, selected_file, branch_name, ctx_file, return_content } = data;
+                const { type, message, timestamp, script_content, status, selected_file, branch_name, ctx_file, return_content, execution_id } = data;
 
                 switch (type) {
                     case 'user':
@@ -852,13 +1009,16 @@
                         break;
                         
                     case 'execution':
-                        if (status === 'completed' && selected_file && (branch_name || ctx_file)) {
+                        if (status === 'running' && selected_file && execution_id) {
+                            // Показать сообщение с кнопкой терминала для активного выполнения
+                            this.addExecutionRunningMessage(message, this.formatTime(timestamp), selected_file, execution_id);
+                        } else if (status === 'completed' && selected_file && (branch_name || ctx_file)) {
                             // Добавить сообщение с кнопками действий
                             let displayMessage = message;
                             if (return_content && return_content.trim()) {
                                 displayMessage += '\n\n📋 Результат выполнения:\n' + return_content;
                             }
-                            this.addExecutionCompleteMessage(displayMessage, this.formatTime(timestamp), selected_file, branch_name);
+                            this.addExecutionCompleteMessage(displayMessage, this.formatTime(timestamp), selected_file, branch_name, execution_id);
                         } else {
                             this.addMessage('execution', message, this.formatTime(timestamp));
                         }
@@ -915,7 +1075,39 @@
                 this.scrollToBottom();
             }
 
-            addExecutionCompleteMessage(message, time, filePath, branchName) {
+            addExecutionRunningMessage(message, time, filePath, executionId) {
+                const messageDiv = document.createElement('div');
+                messageDiv.className = 'message execution';
+
+                const contentDiv = document.createElement('div');
+                contentDiv.className = 'message-content';
+                contentDiv.textContent = message;
+
+                // Добавить кнопку терминала для наблюдения в реальном времени
+                const actionsDiv = document.createElement('div');
+                actionsDiv.className = 'message-actions';
+
+                // Кнопка терминала
+                const terminalButton = document.createElement('button');
+                terminalButton.className = 'action-button primary';
+                terminalButton.innerHTML = '💻 Терминал (в реальном времени)';
+                terminalButton.onclick = () => this.showTerminalViewer(filePath, executionId);
+
+                actionsDiv.appendChild(terminalButton);
+
+                const timeDiv = document.createElement('div');
+                timeDiv.className = 'message-time';
+                timeDiv.textContent = time;
+
+                messageDiv.appendChild(contentDiv);
+                messageDiv.appendChild(actionsDiv);
+                messageDiv.appendChild(timeDiv);
+
+                this.messagesContainer.appendChild(messageDiv);
+                this.scrollToBottom();
+            }
+
+            addExecutionCompleteMessage(message, time, filePath, branchName, executionId) {
                 const messageDiv = document.createElement('div');
                 messageDiv.className = 'message execution';
 
@@ -933,7 +1125,14 @@
                 diffButton.innerHTML = '📋 Просмотр Diff';
                 diffButton.onclick = () => this.showDiffViewer(filePath, branchName);
 
+                // Кнопка терминала
+                const terminalButton = document.createElement('button');
+                terminalButton.className = 'action-button';
+                terminalButton.innerHTML = '💻 Терминал';
+                terminalButton.onclick = () => this.showTerminalViewer(filePath, executionId);
+
                 actionsDiv.appendChild(diffButton);
+                actionsDiv.appendChild(terminalButton);
 
                 const timeDiv = document.createElement('div');
                 timeDiv.className = 'message-time';

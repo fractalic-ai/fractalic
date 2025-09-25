@@ -76,6 +76,14 @@ mcp_manager_url = f"http://localhost:{mcp_manager_port}"
 # Set BASE_DIR to the root directory to allow navigation to parent directories
 BASE_DIR = Path('/').resolve()
 
+# Chat Agent globals
+active_chat_connections = []
+chat_history = []
+
+# Active execution processes tracking
+active_executions = {}  # execution_id -> {'process': process, 'file_path': str, 'start_time': datetime}
+execution_counter = 0
+
 # Mount static files (HTML, CSS, JS)
 # app.mount("/static", StaticFiles(directory="static"), name="static")
 
@@ -1524,11 +1532,15 @@ import json
 import asyncio
 from datetime import datetime
 
+# ============================================================================
+# Chat Agent Implementation
+# ============================================================================
+
 # Store active chat connections
 active_chat_connections: List[WebSocket] = []
 
-# Simple chat history storage (in production, use database)
-chat_history = []
+# Store active terminal connections
+active_terminal_connections: List[WebSocket] = []
 
 @app.websocket("/ws/chat")
 async def websocket_chat_endpoint(websocket: WebSocket):
@@ -1733,6 +1745,10 @@ async def execute_fractalic_script_in_chat(script_content: str, websocket: WebSo
 async def execute_selected_fractalic_file(file_path: str, chat_history_text: str, websocket: WebSocket):
     """Execute a selected Fractalic file with chat history as parameter"""
     
+    global execution_counter, active_executions
+    execution_counter += 1
+    execution_id = f"exec_{execution_counter}"
+    
     try:
         # Validate file exists and is markdown
         fractalic_root = get_fractalic_root()
@@ -1761,7 +1777,9 @@ async def execute_selected_fractalic_file(file_path: str, chat_history_text: str
             "type": "execution",
             "message": f"🚀 Выполняю выбранный файл: {file_path}",
             "timestamp": datetime.now().isoformat(),
-            "status": "running"
+            "status": "running",
+            "execution_id": execution_id,
+            "file_path": file_path
         }
         await websocket.send_text(json.dumps(exec_start_msg))
         
@@ -1813,6 +1831,7 @@ async def execute_selected_fractalic_file(file_path: str, chat_history_text: str
                 "timestamp": datetime.now().isoformat(),
                 "status": "completed",
                 "selected_file": file_path,
+                "execution_id": execution_id,
                 "branch_name": result.get('branch_name'),
                 "ctx_file": result.get('ctx_file'),
                 "return_content": result.get('return_content') if result.get('explicit_return') else None
@@ -1982,3 +2001,100 @@ async def get_file_diff(filePath: str):
     except Exception as e:
         logging.error(f"Error generating diff for {filePath}: {e}")
         return {"success": False, "error": str(e)}
+
+@app.get("/api/chat/terminal-stream/{file_path:path}")
+async def terminal_stream(file_path: str):
+    """Stream terminal output for executing Fractalic file"""
+    
+    async def stream_terminal_output():
+        try:
+            # Build command using centralized path management
+            fractalic_root = get_fractalic_root()
+            fractalic_path = Path(fractalic_root) / "fractalic.py"
+            
+            # Using current Python (from venv)
+            python_exe = sys.executable 
+            command = f'"{python_exe}" "{fractalic_path}" "{file_path}"'
+            
+            # Set up UTF-8 environment for the subprocess
+            env = os.environ.copy()
+            env.update({
+                'PYTHONIOENCODING': 'utf-8',
+                'LC_ALL': 'en_US.UTF-8',
+                'LANG': 'en_US.UTF-8'
+            })
+            
+            process = await asyncio.create_subprocess_shell(
+                command,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                cwd=fractalic_root,
+                env=env
+            )
+
+            # Function to check if process is still alive
+            def is_process_alive():
+                return process and process.returncode is None
+
+            # Stream stdout with UTF-8-safe chunking to preserve Rich ANSI and encoding
+            buffer = b''
+            while is_process_alive():
+                try:
+                    chunk = await asyncio.wait_for(process.stdout.read(1024), timeout=0.1)
+                    if chunk:
+                        buffer += chunk
+                        try:
+                            # Try to decode and yield complete lines
+                            text = buffer.decode('utf-8')
+                            # Split on lines but keep partial lines in buffer
+                            lines = text.split('\n')
+                            if len(lines) > 1:
+                                # Yield complete lines
+                                for line in lines[:-1]:
+                                    yield f"{line}\n"
+                                # Keep the last incomplete line in buffer
+                                remaining = lines[-1]
+                                buffer = remaining.encode('utf-8')
+                            # If no newlines, keep accumulating
+                        except UnicodeDecodeError:
+                            # Continue accumulating if we have incomplete UTF-8
+                            pass
+                    else:
+                        await asyncio.sleep(0.01)
+                except asyncio.TimeoutError:
+                    await asyncio.sleep(0.01)
+                except Exception as e:
+                    if is_process_alive():
+                        yield f"\n[Error reading stdout: {str(e)}]\n"
+                    break
+
+            # Process any remaining stdout
+            if buffer:
+                try:
+                    yield buffer.decode('utf-8', errors='replace')
+                except:
+                    pass
+
+            # Stream stderr
+            stderr_buffer = b''
+            try:
+                stderr_data = await process.stderr.read()
+                if stderr_data:
+                    stderr_text = stderr_data.decode('utf-8', errors='replace')
+                    if stderr_text.strip():
+                        yield f"\n--- STDERR ---\n{stderr_text}"
+            except Exception as e:
+                yield f"\n[Error reading stderr: {str(e)}]\n"
+
+            # Wait for process to complete and get exit code
+            if process:
+                exit_code = await process.wait()
+                if exit_code != 0:
+                    yield f"\n[Process exited with code {exit_code}]\n"
+                else:
+                    yield f"\n[Process completed successfully]\n"
+
+        except Exception as e:
+            yield f"\n[Fatal error in terminal stream: {str(e)}]\n"
+
+    return StreamingResponse(stream_terminal_output(), media_type="text/plain")
