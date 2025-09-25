@@ -1806,23 +1806,16 @@ async def execute_selected_fractalic_file(file_path: str, chat_history_text: str
         
         # Send results
         if result['success']:
-            if result.get('explicit_return') and result.get('return_content'):
-                # Show return content
-                return_msg = {
-                    "type": "assistant",
-                    "message": f"📋 Результат выполнения:\n\n{result['return_content']}",
-                    "timestamp": datetime.now().isoformat()
-                }
-                await websocket.send_text(json.dumps(return_msg))
-            
-            # Show execution completion
+            # Show execution completion with return content
             completion_msg = {
                 "type": "execution",
                 "message": f"✅ Файл {file_path} успешно выполнен",
                 "timestamp": datetime.now().isoformat(),
                 "status": "completed",
+                "selected_file": file_path,
                 "branch_name": result.get('branch_name'),
-                "ctx_file": result.get('ctx_file')
+                "ctx_file": result.get('ctx_file'),
+                "return_content": result.get('return_content') if result.get('explicit_return') else None
             }
             await websocket.send_text(json.dumps(completion_msg))
         else:
@@ -1931,4 +1924,61 @@ async def browse_directory(path: str = "."):
         }
         
     except Exception as e:
+        return {"success": False, "error": str(e)}
+
+@app.get("/api/chat/file-diff")
+async def get_file_diff(filePath: str):
+    """Get diff between original MD file and its CTX file"""
+    try:
+        fractalic_root = get_fractalic_root()
+        
+        # Original file path
+        original_file = os.path.join(fractalic_root, filePath)
+        if not os.path.exists(original_file):
+            return {"success": False, "error": f"Исходный файл не найден: {filePath}"}
+        
+        # CTX file path (same directory, same name but .ctx extension)
+        file_dir = os.path.dirname(original_file)
+        file_name = os.path.basename(original_file)
+        ctx_file_name = os.path.splitext(file_name)[0] + '.ctx'
+        ctx_file = os.path.join(file_dir, ctx_file_name)
+        
+        if not os.path.exists(ctx_file):
+            return {"success": False, "error": f"CTX файл не найден: {ctx_file_name}"}
+        
+        # Read both files
+        with open(original_file, 'r', encoding='utf-8') as f:
+            original_content = f.read()
+        
+        with open(ctx_file, 'r', encoding='utf-8') as f:
+            ctx_content = f.read()
+        
+        # Create simple diff
+        import difflib
+        
+        original_lines = original_content.splitlines(keepends=True)
+        ctx_lines = ctx_content.splitlines(keepends=True)
+        
+        diff = difflib.unified_diff(
+            original_lines, 
+            ctx_lines,
+            fromfile=f"original/{file_name}",
+            tofile=f"context/{ctx_file_name}",
+            lineterm=''
+        )
+        
+        diff_text = ''.join(diff)
+        
+        if not diff_text:
+            diff_text = "Файлы идентичны - изменений нет."
+        
+        return {
+            "success": True, 
+            "diff": diff_text,
+            "original_file": filePath,
+            "ctx_file": ctx_file_name
+        }
+        
+    except Exception as e:
+        logging.error(f"Error generating diff for {filePath}: {e}")
         return {"success": False, "error": str(e)}

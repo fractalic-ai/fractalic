@@ -71,6 +71,23 @@
             background: #f8f9fa;
         }
 
+        .chat-messages::-webkit-scrollbar {
+            width: 6px;
+        }
+
+        .chat-messages::-webkit-scrollbar-track {
+            background: #f1f1f1;
+        }
+
+        .chat-messages::-webkit-scrollbar-thumb {
+            background: #c1c1c1;
+            border-radius: 3px;
+        }
+
+        .chat-messages::-webkit-scrollbar-thumb:hover {
+            background: #a8a8a8;
+        }
+
         .message {
             margin-bottom: 20px;
             display: flex;
@@ -142,6 +159,44 @@
             overflow-x: auto;
         }
 
+        /* Action Buttons in Messages */
+        .message-actions {
+            margin-top: 12px;
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
+
+        .action-button {
+            padding: 6px 12px;
+            background: #f8f9fa;
+            border: 1px solid #e9ecef;
+            border-radius: 12px;
+            cursor: pointer;
+            font-size: 12px;
+            color: #495057;
+            text-decoration: none;
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            transition: all 0.2s;
+        }
+
+        .action-button:hover {
+            background: #e9ecef;
+            border-color: #adb5bd;
+        }
+
+        .action-button.primary {
+            background: #e8f4fd;
+            border-color: #667eea;
+            color: #495057;
+        }
+
+        .action-button.primary:hover {
+            background: #d1ecf1;
+        }
+
         .chat-input-container {
             padding: 20px;
             background: white;
@@ -206,6 +261,58 @@
         .clear-selection-button:hover {
             background: #f5c6cb;
             transform: scale(1.1);
+        }
+
+        .input-row {
+            display: flex;
+            gap: 10px;
+        }
+
+        .chat-input {
+            flex: 1;
+            padding: 15px 20px;
+            border: 2px solid #e9ecef;
+            border-radius: 25px;
+            font-size: 16px;
+            outline: none;
+            transition: border-color 0.3s;
+        }
+
+        .chat-input:focus {
+            border-color: #667eea;
+        }
+
+        .send-button {
+            padding: 15px 30px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            border-radius: 25px;
+            cursor: pointer;
+            font-size: 16px;
+            font-weight: 600;
+            transition: transform 0.2s;
+        }
+
+        .send-button:hover {
+            transform: translateY(-2px);
+        }
+
+        .send-button:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .typing-indicator {
+            display: none;
+            padding: 15px 20px;
+            color: #6c757d;
+            font-style: italic;
+        }
+
+        .typing-indicator.show {
+            display: block;
         }
 
         /* Modal Styles */
@@ -346,74 +453,64 @@
             background: #e9ecef;
         }
 
-        .input-row {
-            display: flex;
-            gap: 10px;
+        /* Diff Viewer Styles */
+        .diff-modal .modal-content {
+            width: 90%;
+            max-width: 1200px;
+            height: 80vh;
         }
 
-        .chat-input {
+        .diff-container {
             flex: 1;
-            padding: 15px 20px;
-            border: 2px solid #e9ecef;
-            border-radius: 25px;
-            font-size: 16px;
-            outline: none;
-            transition: border-color 0.3s;
+            overflow: hidden;
+            padding: 0;
         }
 
-        .chat-input:focus {
-            border-color: #667eea;
+        .diff-viewer {
+            height: 100%;
+            overflow: auto;
+            background: #f8f9fa;
+            border: 1px solid #e9ecef;
         }
 
-        .send-button {
-            padding: 15px 30px;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: white;
+        .diff-content {
+            margin: 0;
+            padding: 16px;
+            font-family: 'Courier New', 'Monaco', 'Consolas', monospace;
+            font-size: 13px;
+            line-height: 1.4;
+            white-space: pre-wrap;
+            background: #f8f9fa;
             border: none;
-            border-radius: 25px;
-            cursor: pointer;
-            font-size: 16px;
-            font-weight: 600;
-            transition: transform 0.2s;
         }
 
-        .send-button:hover {
-            transform: translateY(-2px);
-        }
-
-        .send-button:disabled {
-            opacity: 0.6;
-            cursor: not-allowed;
-            transform: none;
-        }
-
-        .typing-indicator {
-            display: none;
-            padding: 15px 20px;
-            color: #6c757d;
-            font-style: italic;
-        }
-
-        .typing-indicator.show {
+        .diff-line {
             display: block;
+            padding: 2px 4px;
+            margin: 0;
         }
 
-        /* Scrollbar styling */
-        .chat-messages::-webkit-scrollbar {
-            width: 6px;
+        .diff-line.added {
+            background-color: #d4ffe7;
+            color: #006400;
         }
 
-        .chat-messages::-webkit-scrollbar-track {
-            background: #f1f1f1;
+        .diff-line.removed {
+            background-color: #ffe7e7;
+            color: #8b0000;
         }
 
-        .chat-messages::-webkit-scrollbar-thumb {
-            background: #c1c1c1;
-            border-radius: 3px;
+        .diff-line.context {
+            background-color: #ffffff;
+            color: #333333;
         }
 
-        .chat-messages::-webkit-scrollbar-thumb:hover {
-            background: #a8a8a8;
+        .diff-header {
+            background-color: #e9ecef;
+            color: #495057;
+            font-weight: bold;
+            padding: 4px 8px;
+            border-bottom: 1px solid #dee2e6;
         }
     </style>
 </head>
@@ -481,6 +578,24 @@
         </div>
     </div>
 
+    <!-- Diff Viewer Modal -->
+    <div id="diffViewerModal" class="modal">
+        <div class="modal-content diff-modal">
+            <div class="modal-header">
+                <h3>Diff: Original vs Context</h3>
+                <button class="modal-close" id="diffModalCloseButton">✕</button>
+            </div>
+            <div class="diff-container">
+                <div class="diff-viewer">
+                    <pre id="diffContent" class="diff-content"></pre>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button id="closeDiffButton">Закрыть</button>
+            </div>
+        </div>
+    </div>
+
     <script>
         class FractalicChatClient {
             constructor() {
@@ -501,6 +616,12 @@
                 this.cancelButton = document.getElementById('cancelButton');
                 this.currentPathDisplay = document.getElementById('currentPath');
                 this.fileList = document.getElementById('fileList');
+                
+                // Diff viewer elements
+                this.diffViewerModal = document.getElementById('diffViewerModal');
+                this.diffModalCloseButton = document.getElementById('diffModalCloseButton');
+                this.closeDiffButton = document.getElementById('closeDiffButton');
+                this.diffContent = document.getElementById('diffContent');
                 
                 this.selectedFile = null;
                 this.currentBrowserPath = '.';
@@ -524,10 +645,20 @@
                 this.modalCloseButton.addEventListener('click', () => this.closeFileBrowser());
                 this.cancelButton.addEventListener('click', () => this.closeFileBrowser());
                 
-                // Close modal when clicking outside
+                // Diff viewer events
+                this.diffModalCloseButton.addEventListener('click', () => this.closeDiffViewer());
+                this.closeDiffButton.addEventListener('click', () => this.closeDiffViewer());
+                
+                // Close modals when clicking outside
                 this.fileBrowserModal.addEventListener('click', (e) => {
                     if (e.target === this.fileBrowserModal) {
                         this.closeFileBrowser();
+                    }
+                });
+                
+                this.diffViewerModal.addEventListener('click', (e) => {
+                    if (e.target === this.diffViewerModal) {
+                        this.closeDiffViewer();
                     }
                 });
             }
@@ -627,6 +758,27 @@
                 return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
             }
 
+            closeDiffViewer() {
+                this.diffViewerModal.style.display = 'none';
+            }
+
+            async showDiffViewer(filePath, branchName) {
+                try {
+                    const response = await fetch(`/api/chat/file-diff?filePath=${encodeURIComponent(filePath)}`);
+                    const data = await response.json();
+                    
+                    if (data.success) {
+                        this.diffContent.textContent = data.diff;
+                        this.diffViewerModal.style.display = 'block';
+                    } else {
+                        alert('Ошибка получения diff: ' + data.error);
+                    }
+                } catch (error) {
+                    console.error('Error fetching diff:', error);
+                    alert('Ошибка соединения при получении diff');
+                }
+            }
+
             updateInputPlaceholder() {
                 if (this.selectedFile) {
                     this.chatInput.placeholder = `Выполнить ${this.selectedFile} с вашим текстом как параметром...`;
@@ -674,7 +826,7 @@
             }
 
             handleMessage(data) {
-                const { type, message, timestamp, script_content, status, selected_file } = data;
+                const { type, message, timestamp, script_content, status, selected_file, branch_name, ctx_file, return_content } = data;
 
                 switch (type) {
                     case 'user':
@@ -690,12 +842,27 @@
                             // Показать сообщение с кодом
                             this.addMessageWithCode('assistant', message, script_content, this.formatTime(timestamp));
                         } else {
-                            this.addMessage('assistant', message, this.formatTime(timestamp));
+                            // Проверим, есть ли return_content для отображения
+                            let finalMessage = message;
+                            if (return_content && return_content.trim()) {
+                                finalMessage += '\n\n**Результат из @return блока:**\n' + return_content;
+                            }
+                            this.addMessage('assistant', finalMessage, this.formatTime(timestamp));
                         }
                         break;
                         
                     case 'execution':
-                        this.addMessage('execution', message, this.formatTime(timestamp));
+                        if (status === 'completed' && selected_file && (branch_name || ctx_file)) {
+                            // Добавить сообщение с кнопками действий
+                            let displayMessage = message;
+                            if (return_content && return_content.trim()) {
+                                displayMessage += '\n\n📋 Результат выполнения:\n' + return_content;
+                            }
+                            this.addExecutionCompleteMessage(displayMessage, this.formatTime(timestamp), selected_file, branch_name);
+                        } else {
+                            this.addMessage('execution', message, this.formatTime(timestamp));
+                        }
+                        
                         if (status === 'running') {
                             this.showTyping(true);
                         } else if (status === 'completed') {
@@ -742,6 +909,38 @@
                 timeDiv.textContent = time;
 
                 messageDiv.appendChild(contentDiv);
+                messageDiv.appendChild(timeDiv);
+
+                this.messagesContainer.appendChild(messageDiv);
+                this.scrollToBottom();
+            }
+
+            addExecutionCompleteMessage(message, time, filePath, branchName) {
+                const messageDiv = document.createElement('div');
+                messageDiv.className = 'message execution';
+
+                const contentDiv = document.createElement('div');
+                contentDiv.className = 'message-content';
+                contentDiv.textContent = message;
+
+                // Добавить кнопки действий
+                const actionsDiv = document.createElement('div');
+                actionsDiv.className = 'message-actions';
+
+                // Кнопка просмотра diff
+                const diffButton = document.createElement('button');
+                diffButton.className = 'action-button primary';
+                diffButton.innerHTML = '📋 Просмотр Diff';
+                diffButton.onclick = () => this.showDiffViewer(filePath, branchName);
+
+                actionsDiv.appendChild(diffButton);
+
+                const timeDiv = document.createElement('div');
+                timeDiv.className = 'message-time';
+                timeDiv.textContent = time;
+
+                messageDiv.appendChild(contentDiv);
+                messageDiv.appendChild(actionsDiv);
                 messageDiv.appendChild(timeDiv);
 
                 this.messagesContainer.appendChild(messageDiv);
