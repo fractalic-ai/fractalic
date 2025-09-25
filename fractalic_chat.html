@@ -1,0 +1,813 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Fractalic Chat Agent</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+
+        .chat-container {
+            width: 90%;
+            max-width: 1200px;
+            height: 90vh;
+            background: white;
+            border-radius: 20px;
+            box-shadow: 0 25px 50px rgba(0,0,0,0.1);
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        .chat-header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 20px;
+            text-align: center;
+        }
+
+        .chat-header h1 {
+            font-size: 24px;
+            font-weight: 600;
+        }
+
+        .chat-header p {
+            opacity: 0.9;
+            margin-top: 5px;
+        }
+
+        .connection-status {
+            padding: 10px 20px;
+            background: #f8f9fa;
+            border-bottom: 1px solid #e9ecef;
+            font-size: 14px;
+        }
+
+        .status-connected {
+            color: #28a745;
+        }
+
+        .status-disconnected {
+            color: #dc3545;
+        }
+
+        .chat-messages {
+            flex: 1;
+            padding: 20px;
+            overflow-y: auto;
+            background: #f8f9fa;
+        }
+
+        .message {
+            margin-bottom: 20px;
+            display: flex;
+            align-items: flex-start;
+        }
+
+        .message.user {
+            justify-content: flex-end;
+        }
+
+        .message-content {
+            max-width: 70%;
+            padding: 15px 20px;
+            border-radius: 18px;
+            word-wrap: break-word;
+        }
+
+        .message.user .message-content {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }
+
+        .message.assistant .message-content {
+            background: white;
+            border: 1px solid #e9ecef;
+            color: #333;
+        }
+
+        .message.execution .message-content {
+            background: #fff3cd;
+            border: 1px solid #ffeaa7;
+            color: #856404;
+        }
+
+        .message.execution_output .message-content {
+            background: #f8f9fa;
+            border: 1px solid #dee2e6;
+            color: #495057;
+            font-family: 'Monaco', 'Consolas', monospace;
+            font-size: 13px;
+            white-space: pre-wrap;
+        }
+
+        .message.error .message-content {
+            background: #f8d7da;
+            border: 1px solid #f5c6cb;
+            color: #721c24;
+        }
+
+        .message-time {
+            font-size: 12px;
+            color: #6c757d;
+            margin: 5px 15px 0;
+        }
+
+        .message.user .message-time {
+            text-align: right;
+        }
+
+        .code-block {
+            background: #2d3748;
+            color: #e2e8f0;
+            padding: 15px;
+            border-radius: 8px;
+            font-family: 'Monaco', 'Consolas', monospace;
+            font-size: 13px;
+            white-space: pre-wrap;
+            margin: 10px 0;
+            overflow-x: auto;
+        }
+
+        .chat-input-container {
+            padding: 20px;
+            background: white;
+            border-top: 1px solid #e9ecef;
+        }
+
+        .file-selector-container {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 10px;
+            align-items: center;
+        }
+
+        .file-select-button {
+            padding: 12px 20px;
+            background: #f8f9fa;
+            border: 2px solid #e9ecef;
+            border-radius: 20px;
+            cursor: pointer;
+            font-size: 14px;
+            transition: all 0.2s;
+            white-space: nowrap;
+        }
+
+        .file-select-button:hover {
+            background: #e9ecef;
+            border-color: #667eea;
+        }
+
+        .selected-file-display {
+            flex: 1;
+            padding: 12px 16px;
+            background: #f8f9fa;
+            border: 2px solid #e9ecef;
+            border-radius: 20px;
+            font-size: 14px;
+            color: #6c757d;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .selected-file-display.has-file {
+            background: #e8f4fd;
+            border-color: #667eea;
+            color: #495057;
+        }
+
+        .clear-selection-button {
+            padding: 12px;
+            background: #ffeaea;
+            border: 2px solid #f5c6cb;
+            border-radius: 50%;
+            cursor: pointer;
+            font-size: 16px;
+            transition: all 0.2s;
+            min-width: 45px;
+            height: 45px;
+            color: #721c24;
+        }
+
+        .clear-selection-button:hover {
+            background: #f5c6cb;
+            transform: scale(1.1);
+        }
+
+        /* Modal Styles */
+        .modal {
+            display: none;
+            position: fixed;
+            z-index: 1000;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0,0,0,0.5);
+            backdrop-filter: blur(5px);
+        }
+
+        .modal-content {
+            background-color: white;
+            margin: 5% auto;
+            border-radius: 15px;
+            width: 80%;
+            max-width: 800px;
+            max-height: 80vh;
+            display: flex;
+            flex-direction: column;
+            box-shadow: 0 10px 25px rgba(0,0,0,0.1);
+        }
+
+        .modal-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 20px;
+            border-bottom: 1px solid #e9ecef;
+        }
+
+        .modal-header h3 {
+            margin: 0;
+            color: #495057;
+        }
+
+        .modal-close {
+            background: none;
+            border: none;
+            font-size: 24px;
+            cursor: pointer;
+            color: #6c757d;
+            transition: color 0.2s;
+        }
+
+        .modal-close:hover {
+            color: #dc3545;
+        }
+
+        .breadcrumb {
+            padding: 10px 20px;
+            background: #f8f9fa;
+            border-bottom: 1px solid #e9ecef;
+            font-family: 'Courier New', monospace;
+            font-size: 14px;
+            color: #495057;
+        }
+
+        .file-browser {
+            flex: 1;
+            overflow-y: auto;
+            max-height: 400px;
+        }
+
+        .file-list {
+            padding: 0;
+        }
+
+        .file-item {
+            display: flex;
+            align-items: center;
+            padding: 12px 20px;
+            border-bottom: 1px solid #f1f3f4;
+            cursor: pointer;
+            transition: background-color 0.2s;
+        }
+
+        .file-item:hover {
+            background: #f8f9fa;
+        }
+
+        .file-item.directory {
+            background: #f8f9fa;
+        }
+
+        .file-item.directory:hover {
+            background: #e9ecef;
+        }
+
+        .file-icon {
+            margin-right: 12px;
+            font-size: 18px;
+        }
+
+        .file-info {
+            flex: 1;
+        }
+
+        .file-name {
+            font-weight: 500;
+            color: #495057;
+            margin-bottom: 2px;
+        }
+
+        .file-description {
+            font-size: 12px;
+            color: #6c757d;
+            line-height: 1.3;
+        }
+
+        .file-meta {
+            font-size: 11px;
+            color: #adb5bd;
+            text-align: right;
+        }
+
+        .modal-footer {
+            padding: 20px;
+            border-top: 1px solid #e9ecef;
+            text-align: right;
+        }
+
+        .modal-footer button {
+            padding: 10px 20px;
+            background: #f8f9fa;
+            border: 2px solid #e9ecef;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 14px;
+            transition: all 0.2s;
+        }
+
+        .modal-footer button:hover {
+            background: #e9ecef;
+        }
+
+        .input-row {
+            display: flex;
+            gap: 10px;
+        }
+
+        .chat-input {
+            flex: 1;
+            padding: 15px 20px;
+            border: 2px solid #e9ecef;
+            border-radius: 25px;
+            font-size: 16px;
+            outline: none;
+            transition: border-color 0.3s;
+        }
+
+        .chat-input:focus {
+            border-color: #667eea;
+        }
+
+        .send-button {
+            padding: 15px 30px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            border-radius: 25px;
+            cursor: pointer;
+            font-size: 16px;
+            font-weight: 600;
+            transition: transform 0.2s;
+        }
+
+        .send-button:hover {
+            transform: translateY(-2px);
+        }
+
+        .send-button:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .typing-indicator {
+            display: none;
+            padding: 15px 20px;
+            color: #6c757d;
+            font-style: italic;
+        }
+
+        .typing-indicator.show {
+            display: block;
+        }
+
+        /* Scrollbar styling */
+        .chat-messages::-webkit-scrollbar {
+            width: 6px;
+        }
+
+        .chat-messages::-webkit-scrollbar-track {
+            background: #f1f1f1;
+        }
+
+        .chat-messages::-webkit-scrollbar-thumb {
+            background: #c1c1c1;
+            border-radius: 3px;
+        }
+
+        .chat-messages::-webkit-scrollbar-thumb:hover {
+            background: #a8a8a8;
+        }
+    </style>
+</head>
+<body>
+    <div class="chat-container">
+        <div class="chat-header">
+            <h1>🤖 Fractalic Chat Agent</h1>
+            <p>Интеллектуальный помощник с прозрачным процессом выполнения</p>
+        </div>
+
+        <div class="connection-status">
+            <span id="connectionStatus" class="status-disconnected">🔴 Подключение...</span>
+        </div>
+
+        <div class="chat-messages" id="chatMessages">
+            <div class="message assistant">
+                <div class="message-content">
+                    👋 Привет! Я Fractalic Chat Agent. Я могу помочь вам с различными задачами, и вы сможете видеть, как именно я выполняю ваши запросы через Fractalic скрипты.
+                    
+                    Попробуйте задать вопрос или попросить меня что-то сделать!
+                </div>
+                <div class="message-time">Система</div>
+            </div>
+        </div>
+
+        <div class="typing-indicator" id="typingIndicator">
+            Агент обрабатывает ваш запрос...
+        </div>
+
+        <div class="chat-input-container">
+            <div class="file-selector-container">
+                <button class="file-select-button" id="selectFileButton">
+                    📁 Выбрать MD файл
+                </button>
+                <span class="selected-file-display" id="selectedFileDisplay">💬 Новый запрос (генерировать скрипт)</span>
+                <button class="clear-selection-button" id="clearSelectionButton" style="display: none;" title="Очистить выбор">✕</button>
+            </div>
+            <div class="input-row">
+                <input type="text" class="chat-input" id="chatInput" 
+                       placeholder="Напишите ваш вопрос или задачу..." 
+                       maxlength="1000">
+                <button class="send-button" id="sendButton">Отправить</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- File Browser Modal -->
+    <div id="fileBrowserModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>Выбор MD файла</h3>
+                <button class="modal-close" id="modalCloseButton">✕</button>
+            </div>
+            <div class="breadcrumb">
+                <span id="currentPath">.</span>
+            </div>
+            <div class="file-browser">
+                <div id="fileList" class="file-list">
+                    <!-- Files will be loaded here -->
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button id="cancelButton">Отмена</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        class FractalicChatClient {
+            constructor() {
+                this.socket = null;
+                this.isConnected = false;
+                this.messagesContainer = document.getElementById('chatMessages');
+                this.chatInput = document.getElementById('chatInput');
+                this.sendButton = document.getElementById('sendButton');
+                this.connectionStatus = document.getElementById('connectionStatus');
+                this.typingIndicator = document.getElementById('typingIndicator');
+                
+                // File browser elements
+                this.selectFileButton = document.getElementById('selectFileButton');
+                this.selectedFileDisplay = document.getElementById('selectedFileDisplay');
+                this.clearSelectionButton = document.getElementById('clearSelectionButton');
+                this.fileBrowserModal = document.getElementById('fileBrowserModal');
+                this.modalCloseButton = document.getElementById('modalCloseButton');
+                this.cancelButton = document.getElementById('cancelButton');
+                this.currentPathDisplay = document.getElementById('currentPath');
+                this.fileList = document.getElementById('fileList');
+                
+                this.selectedFile = null;
+                this.currentBrowserPath = '.';
+                
+                this.initializeEventListeners();
+                this.connect();
+            }
+
+            initializeEventListeners() {
+                this.sendButton.addEventListener('click', () => this.sendMessage());
+                this.chatInput.addEventListener('keypress', (e) => {
+                    if (e.key === 'Enter' && !e.shiftKey) {
+                        e.preventDefault();
+                        this.sendMessage();
+                    }
+                });
+                
+                // File browser events
+                this.selectFileButton.addEventListener('click', () => this.openFileBrowser());
+                this.clearSelectionButton.addEventListener('click', () => this.clearFileSelection());
+                this.modalCloseButton.addEventListener('click', () => this.closeFileBrowser());
+                this.cancelButton.addEventListener('click', () => this.closeFileBrowser());
+                
+                // Close modal when clicking outside
+                this.fileBrowserModal.addEventListener('click', (e) => {
+                    if (e.target === this.fileBrowserModal) {
+                        this.closeFileBrowser();
+                    }
+                });
+            }
+
+            async openFileBrowser() {
+                this.currentBrowserPath = '.';
+                await this.loadDirectoryContents('.');
+                this.fileBrowserModal.style.display = 'block';
+            }
+
+            closeFileBrowser() {
+                this.fileBrowserModal.style.display = 'none';
+            }
+
+            async loadDirectoryContents(path) {
+                try {
+                    const response = await fetch(`/api/chat/browse-directory?path=${encodeURIComponent(path)}`);
+                    const data = await response.json();
+                    
+                    if (data.success) {
+                        this.currentBrowserPath = data.currentPath;
+                        this.currentPathDisplay.textContent = data.currentPath === '.' ? '/' : '/' + data.currentPath;
+                        this.renderFileList(data.items);
+                    } else {
+                        console.error('Failed to load directory:', data.error);
+                        alert('Ошибка загрузки папки: ' + data.error);
+                    }
+                } catch (error) {
+                    console.error('Error loading directory:', error);
+                    alert('Ошибка соединения');
+                }
+            }
+
+            renderFileList(items) {
+                this.fileList.innerHTML = '';
+                
+                items.forEach(item => {
+                    const itemElement = document.createElement('div');
+                    itemElement.className = `file-item ${item.type}`;
+                    
+                    if (item.type === 'directory') {
+                        itemElement.innerHTML = `
+                            <span class="file-icon">📁</span>
+                            <div class="file-info">
+                                <div class="file-name">${item.name}</div>
+                            </div>
+                        `;
+                        itemElement.addEventListener('click', () => {
+                            this.loadDirectoryContents(item.path);
+                        });
+                    } else if (item.type === 'file') {
+                        const fileSize = this.formatFileSize(item.size);
+                        const fileDate = new Date(item.modified).toLocaleDateString('ru-RU');
+                        
+                        itemElement.innerHTML = `
+                            <span class="file-icon">📄</span>
+                            <div class="file-info">
+                                <div class="file-name">${item.name}</div>
+                                <div class="file-description">${item.description}</div>
+                            </div>
+                            <div class="file-meta">
+                                ${fileSize}<br>
+                                ${fileDate}
+                            </div>
+                        `;
+                        itemElement.addEventListener('click', () => {
+                            this.selectFile(item.path, item.name);
+                        });
+                    }
+                    
+                    this.fileList.appendChild(itemElement);
+                });
+            }
+
+            selectFile(path, name) {
+                this.selectedFile = path;
+                this.selectedFileDisplay.textContent = `📄 ${name}`;
+                this.selectedFileDisplay.classList.add('has-file');
+                this.clearSelectionButton.style.display = 'block';
+                this.updateInputPlaceholder();
+                this.closeFileBrowser();
+            }
+
+            clearFileSelection() {
+                this.selectedFile = null;
+                this.selectedFileDisplay.textContent = '💬 Новый запрос (генерировать скрипт)';
+                this.selectedFileDisplay.classList.remove('has-file');
+                this.clearSelectionButton.style.display = 'none';
+                this.updateInputPlaceholder();
+            }
+
+            formatFileSize(bytes) {
+                if (bytes === 0) return '0 B';
+                const k = 1024;
+                const sizes = ['B', 'KB', 'MB'];
+                const i = Math.floor(Math.log(bytes) / Math.log(k));
+                return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
+            }
+
+            updateInputPlaceholder() {
+                if (this.selectedFile) {
+                    this.chatInput.placeholder = `Выполнить ${this.selectedFile} с вашим текстом как параметром...`;
+                } else {
+                    this.chatInput.placeholder = 'Напишите ваш вопрос или задачу...';
+                }
+            }
+
+            connect() {
+                const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+                const wsUrl = `${protocol}//${window.location.host}/ws/chat`;
+                
+                this.socket = new WebSocket(wsUrl);
+
+                this.socket.onopen = () => {
+                    this.isConnected = true;
+                    this.connectionStatus.textContent = '🟢 Подключено';
+                    this.connectionStatus.className = 'status-connected';
+                    this.sendButton.disabled = false;
+                };
+
+                this.socket.onclose = () => {
+                    this.isConnected = false;
+                    this.connectionStatus.textContent = '🔴 Отключено';
+                    this.connectionStatus.className = 'status-disconnected';
+                    this.sendButton.disabled = true;
+                    
+                    // Попытка переподключения через 3 секунды
+                    setTimeout(() => this.connect(), 3000);
+                };
+
+                this.socket.onerror = (error) => {
+                    console.error('WebSocket error:', error);
+                    this.addMessage('error', 'Ошибка подключения к серверу', 'Система');
+                };
+
+                this.socket.onmessage = (event) => {
+                    try {
+                        const data = JSON.parse(event.data);
+                        this.handleMessage(data);
+                    } catch (e) {
+                        console.error('Error parsing message:', e);
+                    }
+                };
+            }
+
+            handleMessage(data) {
+                const { type, message, timestamp, script_content, status, selected_file } = data;
+
+                switch (type) {
+                    case 'user':
+                        let displayMessage = message;
+                        if (selected_file) {
+                            displayMessage = `📄 [${selected_file}]\n${message}`;
+                        }
+                        this.addMessage('user', displayMessage, this.formatTime(timestamp));
+                        break;
+                        
+                    case 'assistant':
+                        if (script_content) {
+                            // Показать сообщение с кодом
+                            this.addMessageWithCode('assistant', message, script_content, this.formatTime(timestamp));
+                        } else {
+                            this.addMessage('assistant', message, this.formatTime(timestamp));
+                        }
+                        break;
+                        
+                    case 'execution':
+                        this.addMessage('execution', message, this.formatTime(timestamp));
+                        if (status === 'running') {
+                            this.showTyping(true);
+                        } else if (status === 'completed') {
+                            this.showTyping(false);
+                        }
+                        break;
+                        
+                    case 'execution_output':
+                        this.addMessage('execution_output', message, this.formatTime(timestamp));
+                        break;
+                        
+                    case 'error':
+                        this.addMessage('error', message, this.formatTime(timestamp));
+                        this.showTyping(false);
+                        break;
+                }
+            }
+
+            sendMessage() {
+                const message = this.chatInput.value.trim();
+                if (!message || !this.isConnected) return;
+
+                const messageData = {
+                    type: 'user',
+                    message: message,
+                    selected_file: this.selectedFile || null
+                };
+
+                this.socket.send(JSON.stringify(messageData));
+                this.chatInput.value = '';
+                this.showTyping(true);
+            }
+
+            addMessage(type, content, time) {
+                const messageDiv = document.createElement('div');
+                messageDiv.className = `message ${type}`;
+
+                const contentDiv = document.createElement('div');
+                contentDiv.className = 'message-content';
+                contentDiv.textContent = content;
+
+                const timeDiv = document.createElement('div');
+                timeDiv.className = 'message-time';
+                timeDiv.textContent = time;
+
+                messageDiv.appendChild(contentDiv);
+                messageDiv.appendChild(timeDiv);
+
+                this.messagesContainer.appendChild(messageDiv);
+                this.scrollToBottom();
+            }
+
+            addMessageWithCode(type, message, code, time) {
+                const messageDiv = document.createElement('div');
+                messageDiv.className = `message ${type}`;
+
+                const contentDiv = document.createElement('div');
+                contentDiv.className = 'message-content';
+                
+                // Разделить сообщение и код
+                const parts = message.split('```markdown');
+                if (parts.length > 1) {
+                    const textPart = parts[0].trim();
+                    if (textPart) {
+                        const textNode = document.createTextNode(textPart);
+                        contentDiv.appendChild(textNode);
+                    }
+                    
+                    const codeDiv = document.createElement('div');
+                    codeDiv.className = 'code-block';
+                    codeDiv.textContent = code;
+                    contentDiv.appendChild(codeDiv);
+                } else {
+                    contentDiv.textContent = message;
+                }
+
+                const timeDiv = document.createElement('div');
+                timeDiv.className = 'message-time';
+                timeDiv.textContent = time;
+
+                messageDiv.appendChild(contentDiv);
+                messageDiv.appendChild(timeDiv);
+
+                this.messagesContainer.appendChild(messageDiv);
+                this.scrollToBottom();
+            }
+
+            showTyping(show) {
+                this.typingIndicator.className = show ? 'typing-indicator show' : 'typing-indicator';
+                this.sendButton.disabled = show;
+                this.scrollToBottom();
+            }
+
+            scrollToBottom() {
+                setTimeout(() => {
+                    this.messagesContainer.scrollTop = this.messagesContainer.scrollHeight;
+                }, 100);
+            }
+
+            formatTime(isoString) {
+                const date = new Date(isoString);
+                return date.toLocaleTimeString('ru-RU', {
+                    hour: '2-digit',
+                    minute: '2-digit'
+                });
+            }
+        }
+
+        // Инициализация чата при загрузке страницы
+        document.addEventListener('DOMContentLoaded', () => {
+            new FractalicChatClient();
+        });
+    </script>
+</body>
+</html>

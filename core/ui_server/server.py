@@ -6,7 +6,7 @@ import threading
 import uuid
 import aiohttp
 import shutil
-from fastapi import FastAPI, HTTPException, Query, Request, Response
+from fastapi import FastAPI, HTTPException, Query, Request, Response, WebSocket, WebSocketDisconnect
 from fastapi.responses import PlainTextResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
@@ -1224,6 +1224,17 @@ async def health_check():
         "mcp_manager": mcp_status
     }
 
+@app.get("/chat")
+async def chat_interface():
+    """Serve the Fractalic Chat Agent HTML interface"""
+    fractalic_root = get_fractalic_root()
+    chat_file_path = os.path.join(fractalic_root, "fractalic_chat.html")
+    
+    if os.path.exists(chat_file_path):
+        return FileResponse(chat_file_path, media_type="text/html")
+    else:
+        raise HTTPException(status_code=404, detail="Chat interface not found")
+
 @app.get("/info")
 async def get_info():
     """Get information about the application"""
@@ -1235,7 +1246,8 @@ async def get_info():
             "git_operations": True,
             "file_management": True,
             "mcp_manager_control": True,
-            "mcp_server_proxy": True
+            "mcp_server_proxy": True,
+            "chat_agent": True
         },
         "mcp_manager": mcp_status
     }
@@ -1501,3 +1513,422 @@ async def deploy_docker_registry_with_progress(request: Request):
         raise  # Re-raise HTTPExceptions to preserve status codes
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to start deployment: {str(e)}")
+
+# ============================================================================
+# Chat Agent WebSocket Endpoint  
+# ============================================================================
+
+from fastapi import WebSocket, WebSocketDisconnect
+from typing import List
+import json
+import asyncio
+from datetime import datetime
+
+# Store active chat connections
+active_chat_connections: List[WebSocket] = []
+
+# Simple chat history storage (in production, use database)
+chat_history = []
+
+@app.websocket("/ws/chat")
+async def websocket_chat_endpoint(websocket: WebSocket):
+    """WebSocket endpoint for chat with Fractalic agent"""
+    await websocket.accept()
+    active_chat_connections.append(websocket)
+    
+    try:
+        # Send chat history to new client
+        for message in chat_history[-10:]:  # Last 10 messages
+            await websocket.send_text(json.dumps(message))
+        
+        while True:
+            # Receive message from client
+            data = await websocket.receive_text()
+            message_data = json.loads(data)
+            
+            user_message = message_data.get("message", "")
+            message_type = message_data.get("type", "user")
+            selected_file = message_data.get("selected_file", None)
+            
+            if message_type == "user":
+                # Store user message
+                timestamp = datetime.now().isoformat()
+                user_msg = {
+                    "type": "user", 
+                    "message": user_message,
+                    "timestamp": timestamp,
+                    "selected_file": selected_file
+                }
+                chat_history.append(user_msg)
+                
+                # Broadcast to all connected clients
+                for connection in active_chat_connections:
+                    try:
+                        await connection.send_text(json.dumps(user_msg))
+                    except:
+                        continue
+                
+                # If user selected a file, execute it directly
+                if selected_file:
+                    await execute_selected_fractalic_file(selected_file, user_message, websocket)
+                else:
+                    # Generate and execute new script
+                    fractalic_script = await generate_fractalic_script_for_request(user_message)
+                    
+                    # Show generated script to user
+                    script_msg = {
+                        "type": "assistant",
+                        "message": f"Я сгенерировал следующий Fractalic script для выполнения вашего запроса:\n\n```markdown\n{fractalic_script}\n```",
+                        "timestamp": datetime.now().isoformat(),
+                        "script_content": fractalic_script
+                    }
+                    chat_history.append(script_msg)
+                    
+                    for connection in active_chat_connections:
+                        try:
+                            await connection.send_text(json.dumps(script_msg))
+                        except:
+                            continue
+                    
+                    # Execute the generated script
+                    await execute_fractalic_script_in_chat(fractalic_script, websocket)
+                
+    except WebSocketDisconnect:
+        active_chat_connections.remove(websocket)
+    except Exception as e:
+        print(f"Chat WebSocket error: {e}")
+        if websocket in active_chat_connections:
+            active_chat_connections.remove(websocket)
+
+async def generate_fractalic_script_for_request(user_request: str) -> str:
+    """Generate a Fractalic markdown script based on user request"""
+    
+    # Simple template for now - in production, use LLM to generate this
+    script_template = f"""# User Request Handler {{id=main}}
+
+@llm
+model: gpt-3.5-turbo
+prompt: |
+  User request: {user_request}
+  
+  Please provide a helpful response to this request.
+to: response
+
+# Response {{id=response}}
+
+@return  
+blocks: [response]
+"""
+    return script_template
+
+async def execute_fractalic_script_in_chat(script_content: str, websocket: WebSocket):
+    """Execute Fractalic script and stream results to chat"""
+    
+    try:
+        # Create temporary file for the script
+        import tempfile
+        import os
+        
+        temp_dir = tempfile.mkdtemp()
+        script_file = os.path.join(temp_dir, "chat_script.md")
+        
+        with open(script_file, 'w', encoding='utf-8') as f:
+            f.write(script_content)
+        
+        # Send execution start message
+        exec_start_msg = {
+            "type": "execution",
+            "message": "🚀 Выполняю Fractalic script...",
+            "timestamp": datetime.now().isoformat(),
+            "status": "running"
+        }
+        await websocket.send_text(json.dumps(exec_start_msg))
+        
+        # Execute using the same logic as /ws/run_fractalic
+        fractalic_root = get_fractalic_root()
+        fractalic_path = Path(fractalic_root) / "fractalic.py"
+        python_exe = sys.executable 
+        command = f'"{python_exe}" "{fractalic_path}" "{script_file}"'
+        
+        # Set up environment
+        env = os.environ.copy()
+        env.update({
+            'PYTHONIOENCODING': 'utf-8',
+            'LC_ALL': 'en_US.UTF-8',
+            'LANG': 'en_US.UTF-8'
+        })
+        
+        process = await asyncio.create_subprocess_shell(
+            command,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            cwd=fractalic_root,
+            env=env
+        )
+        
+        # Stream output to chat
+        buffer = b''
+        while process.returncode is None:
+            try:
+                chunk = await asyncio.wait_for(
+                    read_utf8_safe_chunk(process.stdout, 1024), 
+                    timeout=1.0
+                )
+                if not chunk:
+                    break
+                
+                buffer += chunk
+                try:
+                    decoded_chunk = buffer.decode('utf-8', errors='strict')
+                    
+                    # Send output chunk to chat
+                    output_msg = {
+                        "type": "execution_output",
+                        "message": decoded_chunk,
+                        "timestamp": datetime.now().isoformat()
+                    }
+                    await websocket.send_text(json.dumps(output_msg))
+                    
+                    buffer = b''
+                except UnicodeDecodeError:
+                    decoded_chunk = buffer.decode('utf-8', errors='replace')
+                    output_msg = {
+                        "type": "execution_output", 
+                        "message": decoded_chunk,
+                        "timestamp": datetime.now().isoformat()
+                    }
+                    await websocket.send_text(json.dumps(output_msg))
+                    buffer = b''
+                    
+            except asyncio.TimeoutError:
+                continue
+            except Exception as e:
+                break
+        
+        # Wait for process completion
+        await process.wait()
+        
+        # Send completion message
+        exec_complete_msg = {
+            "type": "execution",
+            "message": f"✅ Выполнение завершено (код: {process.returncode})",
+            "timestamp": datetime.now().isoformat(), 
+            "status": "completed",
+            "exit_code": process.returncode
+        }
+        await websocket.send_text(json.dumps(exec_complete_msg))
+        
+        # Cleanup
+        os.unlink(script_file)
+        os.rmdir(temp_dir)
+        
+    except Exception as e:
+        error_msg = {
+            "type": "error",
+            "message": f"❌ Ошибка выполнения: {str(e)}",
+            "timestamp": datetime.now().isoformat()
+        }
+        await websocket.send_text(json.dumps(error_msg))
+
+async def execute_selected_fractalic_file(file_path: str, chat_history_text: str, websocket: WebSocket):
+    """Execute a selected Fractalic file with chat history as parameter"""
+    
+    try:
+        # Validate file exists and is markdown
+        fractalic_root = get_fractalic_root()
+        full_file_path = os.path.join(fractalic_root, file_path)
+        
+        if not os.path.exists(full_file_path):
+            error_msg = {
+                "type": "error",
+                "message": f"❌ Файл не найден: {file_path}",
+                "timestamp": datetime.now().isoformat()
+            }
+            await websocket.send_text(json.dumps(error_msg))
+            return
+        
+        if not file_path.lower().endswith('.md'):
+            error_msg = {
+                "type": "error", 
+                "message": f"❌ Файл должен быть .md: {file_path}",
+                "timestamp": datetime.now().isoformat()
+            }
+            await websocket.send_text(json.dumps(error_msg))
+            return
+        
+        # Send execution start message
+        exec_start_msg = {
+            "type": "execution",
+            "message": f"🚀 Выполняю выбранный файл: {file_path}",
+            "timestamp": datetime.now().isoformat(),
+            "status": "running"
+        }
+        await websocket.send_text(json.dumps(exec_start_msg))
+        
+        # Create chat history parameter - same approach as AI Server
+        import tempfile
+        temp_dir = tempfile.mkdtemp()
+        task_file = os.path.join(temp_dir, "chat_history.md")
+        
+        # Format chat history for Fractalic
+        chat_content = "# Chat History {id=chat-history}\n\n"
+        if chat_history_text:
+            chat_content += chat_history_text + "\n\n"
+        
+        # Add recent messages from chat_history global
+        recent_messages = chat_history[-5:]  # Last 5 messages
+        for msg in recent_messages:
+            if msg.get("type") == "user":
+                chat_content += f"**Пользователь** ({msg.get('timestamp', 'unknown')}):\n{msg.get('message', '')}\n\n"
+            elif msg.get("type") == "assistant":
+                message = msg.get('message', '')
+                # Remove code blocks for cleaner history
+                if '```markdown' in message:
+                    parts = message.split('```markdown')
+                    message = parts[0].strip()
+                chat_content += f"**Ассистент** ({msg.get('timestamp', 'unknown')}):\n{message}\n\n"
+        
+        with open(task_file, 'w', encoding='utf-8') as f:
+            f.write(chat_content)
+        
+        # Execute using fractalic API with parameter injection
+        from fractalic import run_fractalic
+        
+        result = run_fractalic(
+            input_file=full_file_path,
+            task_file=task_file,
+            param_input_user_request='chat-history'
+        )
+        
+        # Cleanup
+        os.unlink(task_file)
+        os.rmdir(temp_dir)
+        
+        # Send results
+        if result['success']:
+            if result.get('explicit_return') and result.get('return_content'):
+                # Show return content
+                return_msg = {
+                    "type": "assistant",
+                    "message": f"📋 Результат выполнения:\n\n{result['return_content']}",
+                    "timestamp": datetime.now().isoformat()
+                }
+                await websocket.send_text(json.dumps(return_msg))
+            
+            # Show execution completion
+            completion_msg = {
+                "type": "execution",
+                "message": f"✅ Файл {file_path} успешно выполнен",
+                "timestamp": datetime.now().isoformat(),
+                "status": "completed",
+                "branch_name": result.get('branch_name'),
+                "ctx_file": result.get('ctx_file')
+            }
+            await websocket.send_text(json.dumps(completion_msg))
+        else:
+            error_msg = {
+                "type": "error",
+                "message": f"❌ Ошибка выполнения файла {file_path}: {result.get('error', 'Unknown error')}",
+                "timestamp": datetime.now().isoformat()
+            }
+            await websocket.send_text(json.dumps(error_msg))
+            
+    except Exception as e:
+        error_msg = {
+            "type": "error",
+            "message": f"❌ Исключение при выполнении файла: {str(e)}",
+            "timestamp": datetime.now().isoformat()
+        }
+        await websocket.send_text(json.dumps(error_msg))
+
+# ============================================================================
+# End Chat Agent Implementation
+# ============================================================================
+
+@app.get("/api/chat/browse-directory")
+async def browse_directory(path: str = "."):
+    """Browse directory structure for file navigation"""
+    try:
+        fractalic_root = get_fractalic_root()
+        current_path = os.path.join(fractalic_root, path) if path != "." else fractalic_root
+        
+        # Security check - ensure we stay within workspace
+        if not os.path.abspath(current_path).startswith(os.path.abspath(fractalic_root)):
+            return {"success": False, "error": "Access denied: path outside workspace"}
+        
+        if not os.path.exists(current_path) or not os.path.isdir(current_path):
+            return {"success": False, "error": "Directory not found"}
+        
+        items = []
+        
+        # Add parent directory if not at root
+        if os.path.abspath(current_path) != os.path.abspath(fractalic_root):
+            parent_path = os.path.dirname(path)
+            if parent_path == "":
+                parent_path = "."
+            items.append({
+                "name": "..",
+                "type": "directory",
+                "path": parent_path
+            })
+        
+        # Get directories and files
+        try:
+            for item in sorted(os.listdir(current_path)):
+                # Skip hidden items and __pycache__
+                if item.startswith('.') or item == '__pycache__':
+                    continue
+                
+                item_path = os.path.join(current_path, item)
+                relative_path = os.path.join(path, item) if path != "." else item
+                
+                if os.path.isdir(item_path):
+                    items.append({
+                        "name": item,
+                        "type": "directory",
+                        "path": relative_path
+                    })
+                elif item.lower().endswith('.md'):
+                    # Get file info
+                    stat_info = os.stat(item_path)
+                    
+                    # Try to read description
+                    description = "No description"
+                    try:
+                        with open(item_path, 'r', encoding='utf-8') as f:
+                            content = f.read(200)
+                            lines = content.split('\n')
+                            description_lines = []
+                            for line in lines[:2]:
+                                clean_line = line.strip().replace('#', '').replace('---', '').strip()
+                                if clean_line and not clean_line.startswith(('title:', 'description:')):
+                                    description_lines.append(clean_line)
+                            description = ' '.join(description_lines)[:80]
+                            if len(description) == 80:
+                                description += "..."
+                            if not description:
+                                description = "No description"
+                    except:
+                        description = "No description"
+                    
+                    file_info = {
+                        "name": item,
+                        "type": "file",
+                        "path": relative_path,
+                        "size": stat_info.st_size,
+                        "modified": datetime.fromtimestamp(stat_info.st_mtime).isoformat(),
+                        "description": description
+                    }
+                    items.append(file_info)
+        
+        except PermissionError:
+            return {"success": False, "error": "Permission denied"}
+        
+        return {
+            "success": True,
+            "currentPath": path,
+            "items": items
+        }
+        
+    except Exception as e:
+        return {"success": False, "error": str(e)}
