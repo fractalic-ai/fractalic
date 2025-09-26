@@ -568,13 +568,15 @@
 </head>
 <body>
     <div class="chat-container">
-        <div class="chat-header">
-            <h1>🤖 Fractalic Chat Agent</h1>
-            <p>Интеллектуальный помощник с прозрачным процессом выполнения</p>
-        </div>
-
-        <div class="connection-status">
+        <div class="connection-status" style="display:flex;align-items:center;gap:16px;flex-wrap:wrap;">
             <span id="connectionStatus" class="status-disconnected">🔴 Подключение...</span>
+            <div class="file-selector-container" style="margin:0;">
+                <button class="file-select-button" id="selectFileButton">
+                    📁 Выбрать MD файл
+                </button>
+                <span class="selected-file-display" id="selectedFileDisplay">Файл не выбран</span>
+                <button class="clear-selection-button" id="clearSelectionButton" style="display: none;" title="Очистить выбор">✕</button>
+            </div>
         </div>
 
         <div class="chat-messages" id="chatMessages">
@@ -593,18 +595,11 @@
         </div>
 
         <div class="chat-input-container">
-            <div class="file-selector-container">
-                <button class="file-select-button" id="selectFileButton">
-                    📁 Выбрать MD файл
-                </button>
-                <span class="selected-file-display" id="selectedFileDisplay">💬 Новый запрос (генерировать скрипт)</span>
-                <button class="clear-selection-button" id="clearSelectionButton" style="display: none;" title="Очистить выбор">✕</button>
-            </div>
             <div class="input-row">
-                <input type="text" class="chat-input" id="chatInput" 
-                       placeholder="Напишите ваш вопрос или задачу..." 
-                       maxlength="1000">
-                <button class="send-button" id="sendButton">Отправить</button>
+        <input type="text" class="chat-input" id="chatInput" 
+               placeholder="Сначала выберите markdown файл выше" 
+            maxlength="1000" disabled>
+        <button class="send-button" id="sendButton" disabled>Отправить</button>
             </div>
         </div>
     </div>
@@ -832,14 +827,18 @@
                 this.clearSelectionButton.style.display = 'block';
                 this.updateInputPlaceholder();
                 this.closeFileBrowser();
+                    this.sendButton.disabled = false;
+                    this.chatInput.disabled = false;
             }
 
             clearFileSelection() {
                 this.selectedFile = null;
-                this.selectedFileDisplay.textContent = '💬 Новый запрос (генерировать скрипт)';
+                    this.selectedFileDisplay.textContent = 'Файл не выбран';
                 this.selectedFileDisplay.classList.remove('has-file');
                 this.clearSelectionButton.style.display = 'none';
                 this.updateInputPlaceholder();
+                    this.sendButton.disabled = true;
+                    this.chatInput.disabled = true;
             }
 
             formatFileSize(bytes) {
@@ -937,11 +936,7 @@
             }
 
             updateInputPlaceholder() {
-                if (this.selectedFile) {
-                    this.chatInput.placeholder = `Выполнить ${this.selectedFile} с вашим текстом как параметром...`;
-                } else {
-                    this.chatInput.placeholder = 'Напишите ваш вопрос или задачу...';
-                }
+                    this.chatInput.placeholder = this.selectedFile ? 'Введите запрос и нажмите Отправить' : 'Сначала выберите markdown файл выше';
             }
 
             connect() {

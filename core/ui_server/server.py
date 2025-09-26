@@ -1588,26 +1588,8 @@ async def websocket_chat_endpoint(websocket: WebSocket):
                 if selected_file:
                     await execute_selected_fractalic_file(selected_file, user_message, websocket)
                 else:
-                    # Generate and execute new script
-                    fractalic_script = await generate_fractalic_script_for_request(user_message)
-                    
-                    # Show generated script to user
-                    script_msg = {
-                        "type": "assistant",
-                        "message": f"Я сгенерировал следующий Fractalic script для выполнения вашего запроса:\n\n```markdown\n{fractalic_script}\n```",
-                        "timestamp": datetime.now().isoformat(),
-                        "script_content": fractalic_script
-                    }
-                    chat_history.append(script_msg)
-                    
-                    for connection in active_chat_connections:
-                        try:
-                            await connection.send_text(json.dumps(script_msg))
-                        except:
-                            continue
-                    
-                    # Execute the generated script
-                    await execute_fractalic_script_in_chat(fractalic_script, websocket)
+                    # Silently ignore user input when no file selected
+                    continue
                 
     except WebSocketDisconnect:
         active_chat_connections.remove(websocket)
