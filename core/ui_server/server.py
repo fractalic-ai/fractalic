@@ -1550,9 +1550,12 @@ async def websocket_chat_endpoint(websocket: WebSocket):
     active_chat_connections.append(websocket)
     
     try:
-        # Send chat history to new client
-        for message in chat_history[-10:]:  # Last 10 messages
-            await websocket.send_text(json.dumps(message))
+        # Send minimal chat history to new client (last 3) to avoid duplicate clutter
+        for message in chat_history[-3:]:
+            try:
+                await websocket.send_text(json.dumps(message))
+            except Exception:
+                pass
         
         while True:
             # Receive message from client
@@ -1897,11 +1900,13 @@ async def execute_selected_fractalic_file(file_path: str, chat_history_text: str
                             # Return content capture based on EventMessage markers printed by fractalic.py
                             # Start: [EventMessage: Return-Content-Start]
                             # End:   [EventMessage: Return-Content-End]
-                            if '[EventMessage: Return-Content-Start]' in line:
+                            # Start return capture (allow wrapped/partial markers)
+                            if 'Return-Content-Start' in line:
                                 capturing_return = True
                                 active_executions[execution_id]['return_content'] = ""
                                 continue
-                            if capturing_return and '[EventMessage: Return-Content-End]' in line:
+                            # End return capture (accept substring to survive wrapping)
+                            if capturing_return and 'Return-Content-End' in line:
                                 capturing_return = False
                                 active_executions[execution_id]['return_content'] = active_executions[execution_id]['return_content'].strip()
                                 continue
@@ -1945,6 +1950,10 @@ async def execute_selected_fractalic_file(file_path: str, chat_history_text: str
         branch_name = exec_info.get('branch_name')
         ctx_file = exec_info.get('ctx_file')
         return_content = exec_info.get('return_content', "")
+        start_time_dt = exec_info.get('start_time')
+        duration_ms = None
+        if start_time_dt:
+            duration_ms = int((datetime.now() - start_time_dt).total_seconds() * 1000)
         
         # Clear active execution
         if execution_id in active_executions:
@@ -1965,6 +1974,7 @@ async def execute_selected_fractalic_file(file_path: str, chat_history_text: str
                 "branch_name": branch_name,
                 "ctx_file": ctx_file,
                 "return_content": return_content if return_content else None,
+                "duration_ms": duration_ms,
                 "timestamp": datetime.now().isoformat()
             }
             try:

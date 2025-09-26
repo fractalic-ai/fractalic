@@ -987,6 +987,11 @@
 
                 switch (type) {
                     case 'user':
+                        // Dedup on reconnect (history replay)
+                        if (timestamp && message) {
+                            const key = `user|${timestamp}|${message}`;
+                            if (this.messageKeys && this.messageKeys.has(key)) return;
+                        }
                         let displayMessage = message;
                         if (selected_file) {
                             displayMessage = `📄 [${selected_file}]\n${message}`;
@@ -995,6 +1000,10 @@
                         break;
                         
                     case 'assistant':
+                        if (timestamp && message) {
+                            const key = `assistant|${timestamp}|${message}`;
+                            if (this.messageKeys && this.messageKeys.has(key)) return;
+                        }
                         if (script_content) {
                             // Показать сообщение с кодом
                             this.addMessageWithCode('assistant', message, script_content, this.formatTime(timestamp));
@@ -1087,9 +1096,17 @@
                 }
 
                 // Обновить тело: при желании можно обновить текст выполнения
-                if (message) {
-                    const bodyContent = messageElement.querySelector('.message-body .message-content');
-                    if (bodyContent && bodyContent.textContent !== message) {
+                const bodyContent = messageElement.querySelector('.message-body .message-content');
+                if (bodyContent) {
+                    // Integrate return_content inline instead of separate block
+                    if (return_content && return_content.trim()) {
+                        const esc = (str) => str
+                            .replace(/&/g, '&amp;')
+                            .replace(/</g, '&lt;')
+                            .replace(/>/g, '&gt;');
+                        const baseMsg = message || bodyContent.textContent || '';
+                        bodyContent.innerHTML = `${esc(baseMsg)}<br><br><pre style="margin:0; padding:8px; background:#f5f9f5; border:1px solid #4CAF50; border-radius:6px; white-space:pre-wrap; font-size:14px;">${esc(return_content)}</pre>`;
+                    } else if (message && bodyContent.textContent !== message) {
                         bodyContent.textContent = message;
                     }
                 }
@@ -1106,22 +1123,7 @@
                     }
                 }
 
-                // Добавить return_content (один раз)
-                if (return_content && return_content.trim() && !messageElement.querySelector('.return-content')) {
-                    const messageBody = messageElement.querySelector('.message-body');
-                    if (messageBody) {
-                        const returnContentDiv = document.createElement('div');
-                        returnContentDiv.className = 'return-content';
-                        returnContentDiv.style.marginTop = '12px';
-                        returnContentDiv.style.padding = '12px';
-                        returnContentDiv.style.backgroundColor = '#e8f5e8';
-                        returnContentDiv.style.border = '1px solid #4CAF50';
-                        returnContentDiv.style.borderRadius = '6px';
-                        returnContentDiv.style.fontSize = '14px';
-                        returnContentDiv.innerHTML = `<strong>📋 Результат выполнения:</strong><br><pre style="margin: 8px 0 0 0; white-space: pre-wrap;">${return_content}</pre>`;
-                        messageBody.appendChild(returnContentDiv);
-                    }
-                }
+                // (Удалено добавление отдельного return-content блока — теперь inline)
 
                 console.log('Updated execution message:', execution_id);
             }
@@ -1255,6 +1257,31 @@
                 messageDiv.appendChild(contentDiv);
                 messageDiv.appendChild(timeDiv);
 
+                this.messagesContainer.appendChild(messageDiv);
+                this.scrollToBottom();
+            }
+
+            // Track message keys to avoid duplicates after reconnect
+            addMessage(type, message, time) {
+                if (!this.messageKeys) this.messageKeys = new Set();
+                const key = `${type}|${time}|${message}`;
+                if (this.messageKeys.has(key)) return; // skip duplicate
+                this.messageKeys.add(key);
+
+                const messageDiv = document.createElement('div');
+                messageDiv.className = `message ${type}`;
+                messageDiv.dataset.msgKey = key;
+
+                const contentDiv = document.createElement('div');
+                contentDiv.className = 'message-content';
+                contentDiv.textContent = message;
+
+                const timeDiv = document.createElement('div');
+                timeDiv.className = 'message-time';
+                timeDiv.textContent = time;
+
+                messageDiv.appendChild(contentDiv);
+                messageDiv.appendChild(timeDiv);
                 this.messagesContainer.appendChild(messageDiv);
                 this.scrollToBottom();
             }
