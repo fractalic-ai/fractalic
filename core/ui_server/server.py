@@ -966,6 +966,7 @@ async def run_fractalic(request: Request):
             env = os.environ.copy()
             env.update({
                 'PYTHONIOENCODING': 'utf-8',
+                'PYTHONUNBUFFERED': '1',
                 'LC_ALL': 'en_US.UTF-8',
                 'LANG': 'en_US.UTF-8'
             })
@@ -1666,6 +1667,7 @@ async def execute_fractalic_script_in_chat(script_content: str, websocket: WebSo
         env = os.environ.copy()
         env.update({
             'PYTHONIOENCODING': 'utf-8',
+            'PYTHONUNBUFFERED': '1',
             'LC_ALL': 'en_US.UTF-8',
             'LANG': 'en_US.UTF-8'
         })
@@ -1743,7 +1745,7 @@ async def execute_fractalic_script_in_chat(script_content: str, websocket: WebSo
         await websocket.send_text(json.dumps(error_msg))
 
 async def execute_selected_fractalic_file(file_path: str, chat_history_text: str, websocket: WebSocket):
-    """Execute a selected Fractalic file with chat history as parameter"""
+    """Execute a selected Fractalic file with chat history as parameter using a subprocess PTY."""
     
     global execution_counter, active_executions
     execution_counter += 1
@@ -1779,73 +1781,213 @@ async def execute_selected_fractalic_file(file_path: str, chat_history_text: str
             "timestamp": datetime.now().isoformat(),
             "status": "running",
             "execution_id": execution_id,
-            "file_path": file_path
+            "selected_file": file_path
         }
         await websocket.send_text(json.dumps(exec_start_msg))
         
-        # Create chat history parameter - same approach as AI Server
+        # Create chat history parameter file
         import tempfile
         temp_dir = tempfile.mkdtemp()
         task_file = os.path.join(temp_dir, "chat_history.md")
         
-        # Format chat history for Fractalic
         chat_content = "# Chat History {id=chat-history}\n\n"
         if chat_history_text:
             chat_content += chat_history_text + "\n\n"
         
-        # Add recent messages from chat_history global
-        recent_messages = chat_history[-5:]  # Last 5 messages
+        recent_messages = chat_history[-5:]
         for msg in recent_messages:
             if msg.get("type") == "user":
                 chat_content += f"**Пользователь** ({msg.get('timestamp', 'unknown')}):\n{msg.get('message', '')}\n\n"
             elif msg.get("type") == "assistant":
                 message = msg.get('message', '')
-                # Remove code blocks for cleaner history
                 if '```markdown' in message:
                     parts = message.split('```markdown')
                     message = parts[0].strip()
                 chat_content += f"**Ассистент** ({msg.get('timestamp', 'unknown')}):\n{message}\n\n"
-        
         with open(task_file, 'w', encoding='utf-8') as f:
             f.write(chat_content)
         
-        # Execute using fractalic API with parameter injection
-        from fractalic import run_fractalic
+        # Launch Fractalic in a PTY subprocess to enable real-time streaming
+        import pty, asyncio
+        python_exe = sys.executable
+        from pathlib import Path as _Path
+        fractalic_path = _Path(fractalic_root) / "fractalic.py"
         
-        result = run_fractalic(
-            input_file=full_file_path,
-            task_file=task_file,
-            param_input_user_request='chat-history'
+        cmd = [python_exe, str(fractalic_path), file_path, "--task_file", task_file, "--param_input_user_request", "chat-history"]
+        
+        env = os.environ.copy()
+        env.update({
+            'PYTHONIOENCODING': 'utf-8',
+            'PYTHONUNBUFFERED': '1',
+            'LC_ALL': 'en_US.UTF-8',
+            'LANG': 'en_US.UTF-8',
+            'TERM': 'xterm-256color',
+            'RICH_FORCE_TERMINAL': '1'
+        })
+        
+        master_fd, slave_fd = pty.openpty()
+        process = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdin=slave_fd,
+            stdout=slave_fd,
+            stderr=slave_fd,
+            cwd=fractalic_root,
+            env=env
         )
+        os.close(slave_fd)  # close slave in parent
         
-        # Cleanup
-        os.unlink(task_file)
-        os.rmdir(temp_dir)
+        # Per-execution stream queue for terminal subscribers
+        stream_queue: asyncio.Queue[str] = asyncio.Queue()
+        return_content = ""
         
-        # Send results
-        if result['success']:
-            # Show execution completion with return content
+        # Track active execution
+        active_executions[execution_id] = {
+            'process': process,
+            'pty_master_fd': master_fd,
+            'file_path': file_path,
+            'start_time': datetime.now(),
+            'status': 'running',
+            'stream_queue': stream_queue,
+            'branch_name': None,
+            'ctx_file': None,
+            'return_content': ""
+        }
+        
+        # Reader task: read from PTY, forward to websocket and queue, parse event markers
+        async def _reader_task():
+            buf = b''
+            capturing_return = False  # Are we currently capturing a @return block
+            try:
+                while True:
+                    try:
+                        chunk = await asyncio.to_thread(os.read, master_fd, 1024)
+                    except Exception:
+                        break
+                    if not chunk:
+                        break
+                    buf += chunk
+                    try:
+                        text = buf.decode('utf-8')
+                        buf = b''
+                    except UnicodeDecodeError:
+                        # keep accumulating until valid utf-8
+                        continue
+                    # Enqueue raw text for any terminal subscribers
+                    try:
+                        await stream_queue.put(text)
+                    except Exception:
+                        pass
+                    # Parse structured event lines
+                    try:
+                        for line in text.splitlines():
+                            # Branch/context events
+                            if line.startswith('[EventMessage: Root-Context-Saved]'):
+                                try:
+                                    parts = line.split('ID:')[-1].strip()
+                                    branch = parts.split(',')[0].strip()
+                                    active_executions[execution_id]['branch_name'] = branch
+                                except Exception:
+                                    pass
+                            if 'Details saved to' in line:
+                                try:
+                                    ctx = line.split('Details saved to', 1)[1].strip()
+                                    active_executions[execution_id]['ctx_file'] = ctx
+                                except Exception:
+                                    pass
+                            # Return content capture based on EventMessage markers printed by fractalic.py
+                            # Start: [EventMessage: Return-Content-Start]
+                            # End:   [EventMessage: Return-Content-End]
+                            if '[EventMessage: Return-Content-Start]' in line:
+                                capturing_return = True
+                                active_executions[execution_id]['return_content'] = ""
+                                continue
+                            if capturing_return and '[EventMessage: Return-Content-End]' in line:
+                                capturing_return = False
+                                active_executions[execution_id]['return_content'] = active_executions[execution_id]['return_content'].strip()
+                                continue
+                            if capturing_return:
+                                active_executions[execution_id]['return_content'] += line + "\n"
+                    except Exception:
+                        pass
+            finally:
+                # Finalize return_content if we were still capturing when stream ended
+                try:
+                    if capturing_return and active_executions.get(execution_id, {}).get('return_content'):
+                        active_executions[execution_id]['return_content'] = active_executions[execution_id]['return_content'].strip()
+                except Exception:
+                    pass
+                try:
+                    os.close(master_fd)
+                except Exception:
+                    pass
+        
+        reader_task = asyncio.create_task(_reader_task())
+        active_executions[execution_id]['reader_task'] = reader_task
+        
+        # Wait for process to complete
+        exit_code = await process.wait()
+        
+        # Ensure reader task finishes
+        try:
+            await asyncio.wait_for(reader_task, timeout=1)
+        except Exception:
+            reader_task.cancel()
+        
+        # Cleanup temp files
+        try:
+            os.unlink(task_file)
+            os.rmdir(temp_dir)
+        except Exception:
+            pass
+        
+        # Prepare completion data
+        exec_info = active_executions.get(execution_id, {})
+        branch_name = exec_info.get('branch_name')
+        ctx_file = exec_info.get('ctx_file')
+        return_content = exec_info.get('return_content', "")
+        
+        # Clear active execution
+        if execution_id in active_executions:
+            # Close queue to signal end to subscribers by sending a sentinel
+            try:
+                await stream_queue.put("\n[Process finished]\n")
+            except Exception:
+                pass
+            active_executions.pop(execution_id, None)
+        
+        if exit_code == 0:
+            # Send update to mark execution as completed (inline update on client)
             completion_msg = {
-                "type": "execution",
-                "message": f"✅ Файл {file_path} успешно выполнен",
-                "timestamp": datetime.now().isoformat(),
-                "status": "completed",
-                "selected_file": file_path,
+                "type": "execution_update",
                 "execution_id": execution_id,
-                "branch_name": result.get('branch_name'),
-                "ctx_file": result.get('ctx_file'),
-                "return_content": result.get('return_content') if result.get('explicit_return') else None
+                "status": "completed",
+                "message": f"✅ Выполнение завершено (код: {exit_code})",
+                "branch_name": branch_name,
+                "ctx_file": ctx_file,
+                "return_content": return_content if return_content else None,
+                "timestamp": datetime.now().isoformat()
             }
-            await websocket.send_text(json.dumps(completion_msg))
+            try:
+                await websocket.send_text(json.dumps(completion_msg))
+            except Exception:
+                pass
         else:
             error_msg = {
-                "type": "error",
-                "message": f"❌ Ошибка выполнения файла {file_path}: {result.get('error', 'Unknown error')}",
+                "type": "execution_update", 
+                "execution_id": execution_id,
+                "status": "error",
+                "error_message": f"exit code {exit_code}",
                 "timestamp": datetime.now().isoformat()
             }
             await websocket.send_text(json.dumps(error_msg))
             
     except Exception as e:
+        # Clear active execution on exception
+        try:
+            if execution_id in active_executions:
+                active_executions.pop(execution_id, None)
+        except Exception:
+            pass
         error_msg = {
             "type": "error",
             "message": f"❌ Исключение при выполнении файла: {str(e)}",
@@ -2002,99 +2144,36 @@ async def get_file_diff(filePath: str):
         logging.error(f"Error generating diff for {filePath}: {e}")
         return {"success": False, "error": str(e)}
 
-@app.get("/api/chat/terminal-stream/{file_path:path}")
-async def terminal_stream(file_path: str):
-    """Stream terminal output for executing Fractalic file"""
-    
-    async def stream_terminal_output():
+@app.get("/api/chat/terminal-stream/{execution_id}")
+async def terminal_stream_live(execution_id: str):
+    """Attach to the live output of a running execution by execution_id.
+    We consume from a per-execution asyncio.Queue filled by the PTY reader task.
+    """
+    async def _gen():
         try:
-            # Build command using centralized path management
-            fractalic_root = get_fractalic_root()
-            fractalic_path = Path(fractalic_root) / "fractalic.py"
-            
-            # Using current Python (from venv)
-            python_exe = sys.executable 
-            command = f'"{python_exe}" "{fractalic_path}" "{file_path}"'
-            
-            # Set up UTF-8 environment for the subprocess
-            env = os.environ.copy()
-            env.update({
-                'PYTHONIOENCODING': 'utf-8',
-                'LC_ALL': 'en_US.UTF-8',
-                'LANG': 'en_US.UTF-8'
-            })
-            
-            process = await asyncio.create_subprocess_shell(
-                command,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-                cwd=fractalic_root,
-                env=env
-            )
-
-            # Function to check if process is still alive
-            def is_process_alive():
-                return process and process.returncode is None
-
-            # Stream stdout with UTF-8-safe chunking to preserve Rich ANSI and encoding
-            buffer = b''
-            while is_process_alive():
+            info = active_executions.get(execution_id)
+            if not info:
+                yield "[No active execution with this ID]\n"
+                return
+            q: asyncio.Queue = info.get('stream_queue')
+            if not q:
+                yield "[Stream not available]\n"
+                return
+            # Stream items as they arrive
+            while True:
                 try:
-                    chunk = await asyncio.wait_for(process.stdout.read(1024), timeout=0.1)
-                    if chunk:
-                        buffer += chunk
-                        try:
-                            # Try to decode and yield complete lines
-                            text = buffer.decode('utf-8')
-                            # Split on lines but keep partial lines in buffer
-                            lines = text.split('\n')
-                            if len(lines) > 1:
-                                # Yield complete lines
-                                for line in lines[:-1]:
-                                    yield f"{line}\n"
-                                # Keep the last incomplete line in buffer
-                                remaining = lines[-1]
-                                buffer = remaining.encode('utf-8')
-                            # If no newlines, keep accumulating
-                        except UnicodeDecodeError:
-                            # Continue accumulating if we have incomplete UTF-8
-                            pass
-                    else:
-                        await asyncio.sleep(0.01)
+                    chunk = await asyncio.wait_for(q.get(), timeout=1.0)
+                    if "[Process finished]" in chunk:
+                        yield chunk
+                        break
+                    yield chunk
                 except asyncio.TimeoutError:
-                    await asyncio.sleep(0.01)
-                except Exception as e:
-                    if is_process_alive():
-                        yield f"\n[Error reading stdout: {str(e)}]\n"
-                    break
-
-            # Process any remaining stdout
-            if buffer:
-                try:
-                    yield buffer.decode('utf-8', errors='replace')
-                except:
-                    pass
-
-            # Stream stderr
-            stderr_buffer = b''
-            try:
-                stderr_data = await process.stderr.read()
-                if stderr_data:
-                    stderr_text = stderr_data.decode('utf-8', errors='replace')
-                    if stderr_text.strip():
-                        yield f"\n--- STDERR ---\n{stderr_text}"
-            except Exception as e:
-                yield f"\n[Error reading stderr: {str(e)}]\n"
-
-            # Wait for process to complete and get exit code
-            if process:
-                exit_code = await process.wait()
-                if exit_code != 0:
-                    yield f"\n[Process exited with code {exit_code}]\n"
-                else:
-                    yield f"\n[Process completed successfully]\n"
-
+                    # Keep connection alive, check if execution still exists
+                    if execution_id not in active_executions:
+                        yield "[Execution completed]\n"
+                        break
+                    continue
         except Exception as e:
-            yield f"\n[Fatal error in terminal stream: {str(e)}]\n"
-
-    return StreamingResponse(stream_terminal_output(), media_type="text/plain")
+            yield f"\n[Terminal attach error: {str(e)}]\n"
+    headers = {"X-Accel-Buffering": "no", "Cache-Control": "no-cache"}
+    return StreamingResponse(_gen(), media_type="text/plain", headers=headers)

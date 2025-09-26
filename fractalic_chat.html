@@ -892,7 +892,7 @@
                     const controller = new AbortController();
                     this.activeStreams.set(executionId, controller);
 
-                    const response = await fetch(`/api/chat/terminal-stream/${encodeURIComponent(filePath)}`, {
+                    const response = await fetch(`/api/chat/terminal-stream/${encodeURIComponent(executionId)}`, {
                         signal: controller.signal
                     });
 
@@ -983,7 +983,7 @@
             }
 
             handleMessage(data) {
-                const { type, message, timestamp, script_content, status, selected_file, branch_name, ctx_file, return_content, execution_id } = data;
+                const { type, message, timestamp, script_content, status, selected_file, file_path, branch_name, ctx_file, return_content, execution_id } = data;
 
                 switch (type) {
                     case 'user':
@@ -1009,25 +1009,26 @@
                         break;
                         
                     case 'execution':
-                        if (status === 'running' && selected_file && execution_id) {
-                            // Показать сообщение с кнопкой терминала для активного выполнения
-                            this.addExecutionRunningMessage(message, this.formatTime(timestamp), selected_file, execution_id);
-                        } else if (status === 'completed' && selected_file && (branch_name || ctx_file)) {
-                            // Добавить сообщение с кнопками действий
-                            let displayMessage = message;
-                            if (return_content && return_content.trim()) {
-                                displayMessage += '\n\n📋 Результат выполнения:\n' + return_content;
-                            }
-                            this.addExecutionCompleteMessage(displayMessage, this.formatTime(timestamp), selected_file, branch_name, execution_id);
+                        // Support both selected_file and file_path (older server may send file_path)
+                        const filePathForRun = selected_file || file_path;
+                        console.log('DEBUG: Execution message received:', { status, selected_file, file_path, execution_id, branch_name, ctx_file });
+                        
+                        if (status === 'running' && filePathForRun && execution_id) {
+                            console.log('DEBUG: Calling addExecutionRunningMessage');
+                            this.addExecutionRunningMessage(message, this.formatTime(timestamp), filePathForRun, execution_id);
+                        } else if (status === 'completed' && execution_id) {
+                            // Вместо нового сообщения – обновляем уже существующее (инлайново)
+                            this.updateExecutionMessage({ execution_id, return_content, message, branch_name, file_path: filePathForRun });
                         } else {
                             this.addMessage('execution', message, this.formatTime(timestamp));
                         }
                         
-                        if (status === 'running') {
-                            this.showTyping(true);
-                        } else if (status === 'completed') {
-                            this.showTyping(false);
-                        }
+                        this.showTyping(status === 'running');
+                        break;
+
+                    case 'execution_update':
+                        this.updateExecutionMessage(data);
+                        this.showTyping(false);
                         break;
                         
                     case 'execution_output':
@@ -1041,44 +1042,121 @@
                 }
             }
 
+            // === Restored method (was accidentally removed) ===
             sendMessage() {
                 const message = this.chatInput.value.trim();
                 if (!message || !this.isConnected) return;
-
                 const messageData = {
                     type: 'user',
                     message: message,
                     selected_file: this.selectedFile || null
                 };
-
-                this.socket.send(JSON.stringify(messageData));
-                this.chatInput.value = '';
-                this.showTyping(true);
+                try {
+                    this.socket.send(JSON.stringify(messageData));
+                    this.chatInput.value = '';
+                    this.showTyping(true);
+                } catch (e) {
+                    console.error('Failed to send message:', e);
+                }
             }
 
-            addMessage(type, content, time) {
-                const messageDiv = document.createElement('div');
-                messageDiv.className = `message ${type}`;
+            updateExecutionMessage(data) {
+                const { execution_id, return_content, message, branch_name, file_path } = data;
+                const messageElement = document.querySelector(`[data-execution-id="${execution_id}"]`);
+                if (!messageElement) {
+                    console.warn('Message element not found for execution_id:', execution_id);
+                    return;
+                }
 
-                const contentDiv = document.createElement('div');
-                contentDiv.className = 'message-content';
-                contentDiv.textContent = content;
+                // Заголовок
+                const headerElement = messageElement.querySelector('.message-header');
+                if (headerElement && !headerElement.querySelector('.completion-status')) {
+                    // Добавить зеленую галочку слева (без фона)
+                    const checkSpan = document.createElement('span');
+                    checkSpan.className = 'completion-status';
+                    checkSpan.textContent = '✅';
+                    checkSpan.style.color = '#2e8b57';
+                    checkSpan.style.marginRight = '6px';
+                    headerElement.insertBefore(checkSpan, headerElement.firstChild);
 
-                const timeDiv = document.createElement('div');
-                timeDiv.className = 'message-time';
-                timeDiv.textContent = time;
+                    // Обновить текст статуса, если он "Выполняется..."
+                    const titleSpan = headerElement.querySelector('span');
+                    if (titleSpan && /Выполняется\.\.\./.test(titleSpan.textContent)) {
+                        titleSpan.textContent = 'Готово';
+                    }
+                }
 
-                messageDiv.appendChild(contentDiv);
-                messageDiv.appendChild(timeDiv);
+                // Обновить тело: при желании можно обновить текст выполнения
+                if (message) {
+                    const bodyContent = messageElement.querySelector('.message-body .message-content');
+                    if (bodyContent && bodyContent.textContent !== message) {
+                        bodyContent.textContent = message;
+                    }
+                }
 
-                this.messagesContainer.appendChild(messageDiv);
-                this.scrollToBottom();
+                // Добавить кнопку Diff если её еще нет и есть данные
+                if (branch_name && file_path) {
+                    const actionsDiv = messageElement.querySelector('.message-body .message-actions');
+                    if (actionsDiv && !actionsDiv.querySelector('.diff-button')) {
+                        const diffButton = document.createElement('button');
+                        diffButton.className = 'action-button primary diff-button';
+                        diffButton.innerHTML = '📋 Просмотр Diff';
+                        diffButton.onclick = () => this.showDiffViewer(file_path, branch_name);
+                        actionsDiv.insertBefore(diffButton, actionsDiv.firstChild);
+                    }
+                }
+
+                // Добавить return_content (один раз)
+                if (return_content && return_content.trim() && !messageElement.querySelector('.return-content')) {
+                    const messageBody = messageElement.querySelector('.message-body');
+                    if (messageBody) {
+                        const returnContentDiv = document.createElement('div');
+                        returnContentDiv.className = 'return-content';
+                        returnContentDiv.style.marginTop = '12px';
+                        returnContentDiv.style.padding = '12px';
+                        returnContentDiv.style.backgroundColor = '#e8f5e8';
+                        returnContentDiv.style.border = '1px solid #4CAF50';
+                        returnContentDiv.style.borderRadius = '6px';
+                        returnContentDiv.style.fontSize = '14px';
+                        returnContentDiv.innerHTML = `<strong>📋 Результат выполнения:</strong><br><pre style="margin: 8px 0 0 0; white-space: pre-wrap;">${return_content}</pre>`;
+                        messageBody.appendChild(returnContentDiv);
+                    }
+                }
+
+                console.log('Updated execution message:', execution_id);
             }
 
             addExecutionRunningMessage(message, time, filePath, executionId) {
+                console.log('DEBUG: addExecutionRunningMessage called with:', { message, time, filePath, executionId });
+                
                 const messageDiv = document.createElement('div');
                 messageDiv.className = 'message execution';
+                messageDiv.setAttribute('data-execution-id', executionId);
 
+                // Заголовок с временем
+                const headerDiv = document.createElement('div');
+                headerDiv.className = 'message-header';
+                headerDiv.style.display = 'flex';
+                headerDiv.style.justifyContent = 'space-between';
+                headerDiv.style.alignItems = 'center';
+                headerDiv.style.marginBottom = '8px';
+                headerDiv.style.fontSize = '12px';
+                headerDiv.style.color = '#666';
+
+                const titleSpan = document.createElement('span');
+                titleSpan.textContent = 'Выполняется...';
+                
+                const timeSpan = document.createElement('span');
+                timeSpan.className = 'message-time';
+                timeSpan.textContent = time;
+
+                headerDiv.appendChild(titleSpan);
+                headerDiv.appendChild(timeSpan);
+
+                // Содержимое сообщения
+                const bodyDiv = document.createElement('div');
+                bodyDiv.className = 'message-body';
+                
                 const contentDiv = document.createElement('div');
                 contentDiv.className = 'message-content';
                 contentDiv.textContent = message;
@@ -1095,16 +1173,16 @@
 
                 actionsDiv.appendChild(terminalButton);
 
-                const timeDiv = document.createElement('div');
-                timeDiv.className = 'message-time';
-                timeDiv.textContent = time;
+                bodyDiv.appendChild(contentDiv);
+                bodyDiv.appendChild(actionsDiv);
 
-                messageDiv.appendChild(contentDiv);
-                messageDiv.appendChild(actionsDiv);
-                messageDiv.appendChild(timeDiv);
+                messageDiv.appendChild(headerDiv);
+                messageDiv.appendChild(bodyDiv);
 
                 this.messagesContainer.appendChild(messageDiv);
                 this.scrollToBottom();
+                
+                console.log('DEBUG: addExecutionRunningMessage completed, message added to DOM');
             }
 
             addExecutionCompleteMessage(message, time, filePath, branchName, executionId) {
@@ -1169,6 +1247,26 @@
                 } else {
                     contentDiv.textContent = message;
                 }
+
+                const timeDiv = document.createElement('div');
+                timeDiv.className = 'message-time';
+                timeDiv.textContent = time;
+
+                messageDiv.appendChild(contentDiv);
+                messageDiv.appendChild(timeDiv);
+
+                this.messagesContainer.appendChild(messageDiv);
+                this.scrollToBottom();
+            }
+
+            // Generic addMessage (restored) used by handleMessage for user/assistant/error
+            addMessage(type, message, time) {
+                const messageDiv = document.createElement('div');
+                messageDiv.className = `message ${type}`;
+
+                const contentDiv = document.createElement('div');
+                contentDiv.className = 'message-content';
+                contentDiv.textContent = message;
 
                 const timeDiv = document.createElement('div');
                 timeDiv.className = 'message-time';
