@@ -579,16 +579,7 @@
             </div>
         </div>
 
-        <div class="chat-messages" id="chatMessages">
-            <div class="message assistant">
-                <div class="message-content">
-                    👋 Привет! Я Fractalic Chat Agent. Я могу помочь вам с различными задачами, и вы сможете видеть, как именно я выполняю ваши запросы через Fractalic скрипты.
-                    
-                    Попробуйте задать вопрос или попросить меня что-то сделать!
-                </div>
-                <div class="message-time">Система</div>
-            </div>
-        </div>
+        <div class="chat-messages" id="chatMessages"></div>
 
         <div class="typing-indicator" id="typingIndicator">
             Агент обрабатывает ваш запрос...
@@ -823,22 +814,24 @@
             selectFile(path, name) {
                 this.selectedFile = path;
                 this.selectedFileDisplay.textContent = `📄 ${name}`;
+                this.selectedFileDisplay.title = path; // tooltip with full path
                 this.selectedFileDisplay.classList.add('has-file');
                 this.clearSelectionButton.style.display = 'block';
                 this.updateInputPlaceholder();
                 this.closeFileBrowser();
-                    this.sendButton.disabled = false;
-                    this.chatInput.disabled = false;
+                this.sendButton.disabled = false;
+                this.chatInput.disabled = false;
             }
 
             clearFileSelection() {
                 this.selectedFile = null;
-                    this.selectedFileDisplay.textContent = 'Файл не выбран';
+                this.selectedFileDisplay.textContent = 'Файл не выбран';
+                this.selectedFileDisplay.removeAttribute('title');
                 this.selectedFileDisplay.classList.remove('has-file');
                 this.clearSelectionButton.style.display = 'none';
                 this.updateInputPlaceholder();
-                    this.sendButton.disabled = true;
-                    this.chatInput.disabled = true;
+                this.sendButton.disabled = true;
+                this.chatInput.disabled = true;
             }
 
             formatFileSize(bytes) {
@@ -1065,7 +1058,7 @@
             }
 
             updateExecutionMessage(data) {
-                const { execution_id, return_content, message, branch_name, file_path } = data;
+                const { execution_id, return_content, message, branch_name, file_path, duration_ms } = data;
                 const messageElement = document.querySelector(`[data-execution-id="${execution_id}"]`);
                 if (!messageElement) {
                     console.warn('Message element not found for execution_id:', execution_id);
@@ -1074,19 +1067,30 @@
 
                 // Заголовок
                 const headerElement = messageElement.querySelector('.message-header');
-                if (headerElement && !headerElement.querySelector('.completion-status')) {
-                    // Добавить зеленую галочку слева (без фона)
-                    const checkSpan = document.createElement('span');
-                    checkSpan.className = 'completion-status';
-                    checkSpan.textContent = '✅';
-                    checkSpan.style.color = '#2e8b57';
-                    checkSpan.style.marginRight = '6px';
-                    headerElement.insertBefore(checkSpan, headerElement.firstChild);
-
-                    // Обновить текст статуса, если он "Выполняется..."
-                    const titleSpan = headerElement.querySelector('span');
-                    if (titleSpan && /Выполняется\.\.\./.test(titleSpan.textContent)) {
-                        titleSpan.textContent = 'Готово';
+                if (headerElement) {
+                    // Ensure check mark exists
+                    if (!headerElement.querySelector('.completion-status')) {
+                        const checkSpan = document.createElement('span');
+                        checkSpan.className = 'completion-status';
+                        checkSpan.textContent = '✅';
+                        checkSpan.style.color = '#2e8b57';
+                        checkSpan.style.marginRight = '6px';
+                        headerElement.insertBefore(checkSpan, headerElement.firstChild);
+                    }
+                    // Find status span (prefer class, fallback to first span after check)
+                    let statusSpan = headerElement.querySelector('.exec-status-text');
+                    if (!statusSpan) {
+                        const spans = Array.from(headerElement.querySelectorAll('span')).filter(s => !s.classList.contains('completion-status'));
+                        statusSpan = spans.find(s => /Выполняется|Готово/.test(s.textContent)) || spans[0];
+                        if (statusSpan) statusSpan.classList.add('exec-status-text');
+                    }
+                    if (statusSpan) {
+                        if (typeof duration_ms === 'number') {
+                            const seconds = (duration_ms / 1000).toFixed(1);
+                            statusSpan.textContent = `Готово (${seconds}s)`;
+                        } else if (/Выполняется/.test(statusSpan.textContent)) {
+                            statusSpan.textContent = 'Готово';
+                        }
                     }
                 }
 
@@ -1142,6 +1146,7 @@
 
                 const titleSpan = document.createElement('span');
                 titleSpan.textContent = 'Выполняется...';
+                titleSpan.className = 'exec-status-text';
                 
                 const timeSpan = document.createElement('span');
                 timeSpan.className = 'message-time';
