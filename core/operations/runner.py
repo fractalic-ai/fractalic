@@ -57,6 +57,11 @@ def run(filename: str, param_node: Optional[Union[Node, AST]] = None, create_new
     if base_dir is None and create_new_branch:
         base_dir = file_dir
 
+    # Ephemeral session detection (no git side-effects)
+    ephemeral = os.environ.get('FRACTALIC_EPHEMERAL_SESSION') == '1' or filename.endswith('.chat_run.md')
+    if ephemeral:
+        create_new_branch = False  # force disable branch creation / commits
+
     goto_count = {}
     branch_name = None
     original_cwd = os.getcwd()
@@ -69,10 +74,9 @@ def run(filename: str, param_node: Optional[Union[Node, AST]] = None, create_new
         # Keep paths session_cwd in sync with the currently executing file directory
         set_session_cwd(file_dir)
 
-        if create_new_branch:
+        if create_new_branch and not ephemeral:
             ensure_git_repo(base_dir)
             branch_name = create_session_branch(base_dir, "Testing-git-operations")
-
             console.print(f"[light_green]✓[/light_green] git. new branch created: [cyan]{branch_name}[/cyan]")
 
         relative_file_path = os.path.relpath(abs_path, base_dir)
@@ -80,24 +84,25 @@ def run(filename: str, param_node: Optional[Union[Node, AST]] = None, create_new
         if not os.path.exists(local_file_name):
             raise FileNotFoundError(f"File not found: {local_file_name}")
 
-        if relative_file_path not in committed_files:
-            try:
-                md_commit_hash = commit_changes(
-                    base_dir,
-                    "Operation [@run] execution start",
-                    [local_file_name],
-                    p_parent_filename,
-                    p_parent_operation
-                )
-                committed_files.add(relative_file_path)
-                file_commit_hashes[relative_file_path] = md_commit_hash
-            except Exception as e:
-                print(f"[ERROR runner.py] Error committing file {relative_file_path}: {str(e)}")
-                raise
-
-        # RESTORING LOGIC    
+        if not ephemeral:
+            if relative_file_path not in committed_files:
+                try:
+                    md_commit_hash = commit_changes(
+                        base_dir,
+                        "Operation [@run] execution start",
+                        [local_file_name],
+                        p_parent_filename,
+                        p_parent_operation
+                    )
+                    committed_files.add(relative_file_path)
+                    file_commit_hashes[relative_file_path] = md_commit_hash
+                except Exception as e:
+                    print(f"[ERROR runner.py] Error committing file {relative_file_path}: {str(e)}")
+                    raise
+            else:
+                md_commit_hash = file_commit_hashes[relative_file_path]
         else:
-            md_commit_hash = file_commit_hashes[relative_file_path]
+            md_commit_hash = None  # No commit in ephemeral mode
 
         # RESTORING LOGIC  
         # Process the AST

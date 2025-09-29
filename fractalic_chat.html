@@ -116,6 +116,24 @@
             color: #333;
         }
 
+        .assistant-return-block {
+            margin-top: 10px;
+            padding: 12px;
+            background: #f5f9ff;
+            border: 1px solid #d0dcff;
+            border-radius: 10px;
+            font-family: 'Monaco', 'Consolas', monospace;
+            font-size: 13px;
+            line-height: 1.4;
+            white-space: pre-wrap;
+            overflow-x: auto;
+        }
+
+        .assistant-return-block.error {
+            background: #fff5f5;
+            border-color: #f8b4b4;
+        }
+
         .message.execution .message-content {
             background: #fff3cd;
             border: 1px solid #ffeaa7;
@@ -658,13 +676,15 @@
     <script>
         class FractalicChatClient {
             constructor() {
-                this.socket = null;
-                this.isConnected = false;
+                // HTTP streaming mode (no persistent WebSocket)
+                this.isConnected = true;
                 this.messagesContainer = document.getElementById('chatMessages');
                 this.chatInput = document.getElementById('chatInput');
                 this.sendButton = document.getElementById('sendButton');
                 this.connectionStatus = document.getElementById('connectionStatus');
                 this.typingIndicator = document.getElementById('typingIndicator');
+                this.messageKeys = new Set();
+                this.conversation = [];
                 
                 // File browser elements
                 this.selectFileButton = document.getElementById('selectFileButton');
@@ -695,7 +715,8 @@
                 this.activeStreams = new Map(); // execution_id -> AbortController
                 
                 this.initializeEventListeners();
-                this.connect();
+                this.connectionStatus.textContent = '🟢 Готово (HTTP Stream)';
+                this.connectionStatus.className = 'status-connected';
             }
 
             initializeEventListeners() {
@@ -753,16 +774,16 @@
 
             async loadDirectoryContents(path) {
                 try {
-                    const response = await fetch(`/api/chat/browse-directory?path=${encodeURIComponent(path)}`);
-                    const data = await response.json();
+                    const response = await fetch(`/list_directory/?path=${encodeURIComponent(path)}`);
+                    const items = await response.json();
                     
-                    if (data.success) {
-                        this.currentBrowserPath = data.currentPath;
-                        this.currentPathDisplay.textContent = data.currentPath === '.' ? '/' : '/' + data.currentPath;
-                        this.renderFileList(data.items);
+                    if (Array.isArray(items)) {
+                        this.currentBrowserPath = path || '.';
+                        this.currentPathDisplay.textContent = path === '' || path === '.' ? '/' : '/' + path;
+                        this.renderFileList(items);
                     } else {
-                        console.error('Failed to load directory:', data.error);
-                        alert('Ошибка загрузки папки: ' + data.error);
+                        console.error('Failed to load directory: Invalid response format');
+                        alert('Ошибка загрузки папки: неверный формат ответа');
                     }
                 } catch (error) {
                     console.error('Error loading directory:', error);
@@ -774,10 +795,16 @@
                 this.fileList.innerHTML = '';
                 
                 items.forEach(item => {
-                    const itemElement = document.createElement('div');
-                    itemElement.className = `file-item ${item.type}`;
+                    // Показывать только папки и .md файлы
+                    if (!item.is_dir && !item.name.toLowerCase().endsWith('.md')) {
+                        return;
+                    }
                     
-                    if (item.type === 'directory') {
+                    const itemElement = document.createElement('div');
+                    const itemType = item.is_dir ? 'directory' : 'file';
+                    itemElement.className = `file-item ${itemType}`;
+                    
+                    if (item.is_dir) {
                         itemElement.innerHTML = `
                             <span class="file-icon">📁</span>
                             <div class="file-info">
@@ -787,19 +814,11 @@
                         itemElement.addEventListener('click', () => {
                             this.loadDirectoryContents(item.path);
                         });
-                    } else if (item.type === 'file') {
-                        const fileSize = this.formatFileSize(item.size);
-                        const fileDate = new Date(item.modified).toLocaleDateString('ru-RU');
-                        
+                    } else {
                         itemElement.innerHTML = `
-                            <span class="file-icon">📄</span>
+                            <span class="file-icon">�</span>
                             <div class="file-info">
                                 <div class="file-name">${item.name}</div>
-                                <div class="file-description">${item.description}</div>
-                            </div>
-                            <div class="file-meta">
-                                ${fileSize}<br>
-                                ${fileDate}
                             </div>
                         `;
                         itemElement.addEventListener('click', () => {
@@ -932,43 +951,7 @@
                     this.chatInput.placeholder = this.selectedFile ? 'Введите запрос и нажмите Отправить' : 'Сначала выберите markdown файл выше';
             }
 
-            connect() {
-                const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-                const wsUrl = `${protocol}//${window.location.host}/ws/chat`;
-                
-                this.socket = new WebSocket(wsUrl);
-
-                this.socket.onopen = () => {
-                    this.isConnected = true;
-                    this.connectionStatus.textContent = '🟢 Подключено';
-                    this.connectionStatus.className = 'status-connected';
-                    this.sendButton.disabled = false;
-                };
-
-                this.socket.onclose = () => {
-                    this.isConnected = false;
-                    this.connectionStatus.textContent = '🔴 Отключено';
-                    this.connectionStatus.className = 'status-disconnected';
-                    this.sendButton.disabled = true;
-                    
-                    // Попытка переподключения через 3 секунды
-                    setTimeout(() => this.connect(), 3000);
-                };
-
-                this.socket.onerror = (error) => {
-                    console.error('WebSocket error:', error);
-                    this.addMessage('error', 'Ошибка подключения к серверу', 'Система');
-                };
-
-                this.socket.onmessage = (event) => {
-                    try {
-                        const data = JSON.parse(event.data);
-                        this.handleMessage(data);
-                    } catch (e) {
-                        console.error('Error parsing message:', e);
-                    }
-                };
-            }
+            // connect() removed – using request-scoped streaming fetch
 
             handleMessage(data) {
                 const { type, message, timestamp, script_content, status, selected_file, file_path, branch_name, ctx_file, return_content, execution_id } = data;
@@ -996,12 +979,12 @@
                             // Показать сообщение с кодом
                             this.addMessageWithCode('assistant', message, script_content, this.formatTime(timestamp));
                         } else {
-                            // Проверим, есть ли return_content для отображения
-                            let finalMessage = message;
-                            if (return_content && return_content.trim()) {
-                                finalMessage += '\n\n**Результат из @return блока:**\n' + return_content;
-                            }
-                            this.addMessage('assistant', finalMessage, this.formatTime(timestamp));
+                            const returnVariant = data.return_variant || (return_content ? 'success' : null);
+                            this.addMessage('assistant', message || '', this.formatTime(timestamp), {
+                                markdownish: true,
+                                returnContent: return_content,
+                                returnVariant
+                            });
                         }
                         break;
                         
@@ -1015,7 +998,7 @@
                             this.addExecutionRunningMessage(message, this.formatTime(timestamp), filePathForRun, execution_id);
                         } else if (status === 'completed' && execution_id) {
                             // Вместо нового сообщения – обновляем уже существующее (инлайново)
-                            this.updateExecutionMessage({ execution_id, return_content, message, branch_name, file_path: filePathForRun });
+                            this.updateExecutionMessage({ execution_id, return_content, message, branch_name, file_path: filePathForRun, status });
                         } else {
                             this.addMessage('execution', message, this.formatTime(timestamp));
                         }
@@ -1036,46 +1019,170 @@
                         this.addMessage('error', message, this.formatTime(timestamp));
                         this.showTyping(false);
                         break;
+                    case 'fractalic_event': {
+                        const ev = data.event || {};
+                        const evType = ev.type || 'unknown';
+                        const seq = ev.seq != null ? ev.seq : '?';
+                        const lvl = ev.level || ev.lvl || '';
+                        const payloadObj = ev.payload || {};
+                        let category = 'generic';
+                        if (evType.startsWith('execution.')) category = 'execution';
+                        else if (evType.startsWith('return.')) category = 'return';
+                        else if (evType.startsWith('llm.')) category = 'llm';
+                        const payload = Object.keys(payloadObj).length ? JSON.stringify(payloadObj) : '';
+                        const display = `[${seq}] ${evType}${lvl ? ' <'+lvl+'>' : ''}${payload? '\n'+payload : ''}`;
+                        // Use assistant styling but prefix emoji / color hint per category
+                        let decorated = display;
+                        if (category === 'execution') decorated = '⚙️ ' + display;
+                        else if (category === 'return') decorated = '📤 ' + display;
+                        else if (category === 'llm') decorated = '🧠 ' + display;
+                        this.addMessage('assistant', decorated, this.formatTime(ev.ts || timestamp || new Date().toISOString()), {
+                            markdownish: true,
+                            storeHistory: false
+                        });
+                        break;
+                    }
                 }
             }
 
-            // === Restored method (was accidentally removed) ===
-            sendMessage() {
-                const message = this.chatInput.value.trim();
-                if (!message || !this.isConnected) return;
-                const messageData = {
-                    type: 'user',
-                    message: message,
-                    selected_file: this.selectedFile || null
+            async sendMessage() {
+                const text = this.chatInput.value.trim();
+                if (!text) return;
+                if (!this.selectedFile) {
+                    alert('Сначала выберите markdown файл');
+                    return;
+                }
+                const timestamp = new Date().toISOString();
+                this.addMessage('user', text, this.formatTime(timestamp));
+                this.chatInput.value = '';
+                this.showTyping(true);
+                const payload = {
+                    message: text,
+                    history: this.conversation.slice(-50),
+                    file_path: this.selectedFile,
                 };
+                this.fetchAndStreamChat(payload);
+            }
+            handleStreamLine(line) {
                 try {
-                    this.socket.send(JSON.stringify(messageData));
-                    this.chatInput.value = '';
-                    this.showTyping(true);
+                    const data = JSON.parse(line);
+                    const now = this.formatTime(new Date().toISOString());
+                    if (data.type === 'chat_message') {
+                        this.addMessage(data.role === 'user' ? 'user' : 'assistant', data.content, now);
+                        if (data.return_content) {
+                            this.addMessage('assistant', 'Ответ Fractalic:', now, { returnContent: data.return_content, returnVariant: data.return_variant });
+                        }
+                    } else if (data.type === 'execution') {
+                        if (data.phase === 'ack') {
+                            // Create a running execution block immediately
+                            const filePath = data.target || data.file_path || (this.selectedFile || '');
+                            const execId = data.execution_id;
+                            const msg = filePath ? `Выполняется файл: ${filePath}` : 'Выполнение запущено';
+                            this.addExecutionRunningMessage(msg, now, filePath, execId);
+                        } else if (data.phase === 'start') {
+                            // Create running execution block for start phase too
+                            const filePath = data.target || data.file_path || (this.selectedFile || '');
+                            const execId = data.execution_id;
+                            const msg = filePath ? `Выполняется файл: ${filePath}` : 'Выполнение запущено';
+                            this.addExecutionRunningMessage(msg, now, filePath, execId);
+                        } else if (data.phase === 'complete') {
+                            this.updateExecutionMessage({
+                                execution_id: data.execution_id,
+                                status: 'completed',
+                                message: data.message || 'Готово',
+                                branch_name: data.branch_name,
+                                file_path: data.target || data.file_path,
+                                duration_ms: data.duration_ms
+                            });
+                        } else if (data.phase === 'error') {
+                            this.updateExecutionMessage({
+                                execution_id: data.execution_id,
+                                status: 'error',
+                                message: data.message || 'Ошибка выполнения',
+                                branch_name: data.branch_name,
+                                file_path: data.target || data.file_path,
+                                duration_ms: data.duration_ms,
+                                error_message: data.exit_code != null ? `exit_code=${data.exit_code}` : undefined
+                            });
+                        }
+                    } else if (data.type === 'error') {
+                        this.addMessage('error', data.message || 'Ошибка', now);
+                    } else if (data.type === 'termination' || data.type === 'stream_end') {
+                        // end of stream
+                        this.showTyping(false);
+                    } else if (data.type === 'keepalive') {
+                        // ignore keepalive messages
+                    } else {
+                        console.log('Unknown event type:', data.type, data);
+                    }
                 } catch (e) {
-                    console.error('Failed to send message:', e);
+                    console.warn('Bad line', line, e);
+                }
+            }
+
+            async fetchAndStreamChat(payload) {
+                try {
+                    const response = await fetch('/api/chat/stream', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(payload)
+                    });
+                    if (!response.ok) {
+                        this.showTyping(false);
+                        this.addMessage('error', 'Ошибка запуска потока', this.formatTime(new Date().toISOString()));
+                        return;
+                    }
+                    const reader = response.body.getReader();
+                    const decoder = new TextDecoder('utf-8');
+                    let buffer = '';
+                    while (true) {
+                        const { value, done } = await reader.read();
+                        if (done) break;
+                        buffer += decoder.decode(value, { stream: true });
+                        let idx;
+                        while ((idx = buffer.indexOf('\n')) >= 0) {
+                            const line = buffer.slice(0, idx).trim();
+                            buffer = buffer.slice(idx + 1);
+                            if (!line) continue;
+                            this.handleStreamLine(line);
+                        }
+                    }
+                } catch (e) {
+                    console.error('Stream error', e);
+                    this.addMessage('error', 'Ошибка потока: ' + e.message, this.formatTime(new Date().toISOString()));
+                } finally {
+                    this.showTyping(false);
                 }
             }
 
             updateExecutionMessage(data) {
-                const { execution_id, return_content, message, branch_name, file_path, duration_ms } = data;
+                const { execution_id, return_content, message, branch_name, file_path, duration_ms, status, error_message, recent_output, bytes_read } = data;
+                const resolvedStatus = status || 'completed';
                 const messageElement = document.querySelector(`[data-execution-id="${execution_id}"]`);
                 if (!messageElement) {
-                    console.warn('Message element not found for execution_id:', execution_id);
+                    console.warn('Message element not found for execution_id (creating fallback):', execution_id);
+                    // Fallback: create a completed execution block so user still sees result
+                    this.addExecutionCompletedFallback({ execution_id, return_content, message, branch_name, file_path, duration_ms, status: resolvedStatus, error_message, recent_output, bytes_read });
                     return;
                 }
 
                 // Заголовок
                 const headerElement = messageElement.querySelector('.message-header');
                 if (headerElement) {
-                    // Ensure check mark exists
-                    if (!headerElement.querySelector('.completion-status')) {
-                        const checkSpan = document.createElement('span');
-                        checkSpan.className = 'completion-status';
-                        checkSpan.textContent = '✅';
-                        checkSpan.style.color = '#2e8b57';
-                        checkSpan.style.marginRight = '6px';
-                        headerElement.insertBefore(checkSpan, headerElement.firstChild);
+                    // Ensure status icon exists (✅ or ❌)
+                    let statusIcon = headerElement.querySelector('.completion-status');
+                    if (!statusIcon) {
+                        statusIcon = document.createElement('span');
+                        statusIcon.className = 'completion-status';
+                        statusIcon.style.marginRight = '6px';
+                        headerElement.insertBefore(statusIcon, headerElement.firstChild);
+                    }
+                    if (resolvedStatus === 'error') {
+                        statusIcon.textContent = '❌';
+                        statusIcon.style.color = '#c62828';
+                    } else {
+                        statusIcon.textContent = '✅';
+                        statusIcon.style.color = '#2e8b57';
                     }
                     // Find status span (prefer class, fallback to first span after check)
                     let statusSpan = headerElement.querySelector('.exec-status-text');
@@ -1085,11 +1192,20 @@
                         if (statusSpan) statusSpan.classList.add('exec-status-text');
                     }
                     if (statusSpan) {
-                        if (typeof duration_ms === 'number') {
-                            const seconds = (duration_ms / 1000).toFixed(1);
-                            statusSpan.textContent = `Готово (${seconds}s)`;
-                        } else if (/Выполняется/.test(statusSpan.textContent)) {
-                            statusSpan.textContent = 'Готово';
+                        if (resolvedStatus === 'error') {
+                            if (typeof duration_ms === 'number') {
+                                const seconds = (duration_ms / 1000).toFixed(1);
+                                statusSpan.textContent = `Ошибка (${seconds}s)`;
+                            } else {
+                                statusSpan.textContent = 'Ошибка';
+                            }
+                        } else {
+                            if (typeof duration_ms === 'number') {
+                                const seconds = (duration_ms / 1000).toFixed(1);
+                                statusSpan.textContent = `Готово (${seconds}s)`;
+                            } else if (/Выполняется/.test(statusSpan.textContent)) {
+                                statusSpan.textContent = 'Готово';
+                            }
                         }
                     }
                 }
@@ -1097,15 +1213,16 @@
                 // Обновить тело: при желании можно обновить текст выполнения
                 const bodyContent = messageElement.querySelector('.message-body .message-content');
                 if (bodyContent) {
-                    // Integrate return_content inline instead of separate block
-                    if (return_content && return_content.trim()) {
-                        const esc = (str) => str
-                            .replace(/&/g, '&amp;')
-                            .replace(/</g, '&lt;')
-                            .replace(/>/g, '&gt;');
-                        const baseMsg = message || bodyContent.textContent || '';
-                        bodyContent.innerHTML = `${esc(baseMsg)}<br><br><pre style="margin:0; padding:8px; background:#f5f9f5; border:1px solid #4CAF50; border-radius:6px; white-space:pre-wrap; font-size:14px;">${esc(return_content)}</pre>`;
-                    } else if (message && bodyContent.textContent !== message) {
+                    const esc = (str) => (str || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+                    if (resolvedStatus === 'error') {
+                        const base = error_message || message || 'Ошибка выполнения';
+                        let snippetHtml = '';
+                        if (recent_output) {
+                            snippetHtml = `<pre style="margin:8px 0 0; padding:8px; background:#fff5f5; border:1px solid #f44336; border-radius:6px; white-space:pre-wrap; font-size:13px; max-height:300px; overflow:auto;">${esc(recent_output)}</pre>`;
+                        }
+                        const meta = (typeof bytes_read === 'number') ? `<div style="font-size:11px; color:#999; margin-top:4px;">bytes: ${bytes_read}</div>` : '';
+                        bodyContent.innerHTML = `${esc(base)}${snippetHtml}${meta}`;
+                    } else if (message) {
                         bodyContent.textContent = message;
                     }
                 }
@@ -1125,6 +1242,97 @@
                 // (Удалено добавление отдельного return-content блока — теперь inline)
 
                 console.log('Updated execution message:', execution_id);
+            }
+
+            // Fallback creator when completion arrives before running message was rendered
+            addExecutionCompletedFallback({ execution_id, return_content, message, branch_name, file_path, duration_ms, status, error_message, recent_output, bytes_read }) {
+                const resolvedStatus = status === 'error' ? 'error' : 'success';
+                const resolvedMessage = message || 'Выполнение завершено';
+                const wrapper = document.createElement('div');
+                wrapper.className = 'message execution';
+                wrapper.setAttribute('data-execution-id', execution_id);
+
+                // Header
+                const headerDiv = document.createElement('div');
+                headerDiv.className = 'message-header';
+                headerDiv.style.display = 'flex';
+                headerDiv.style.justifyContent = 'space-between';
+                headerDiv.style.alignItems = 'center';
+                headerDiv.style.marginBottom = '8px';
+                headerDiv.style.fontSize = '12px';
+                headerDiv.style.color = '#666';
+
+                const statusSpan = document.createElement('span');
+                statusSpan.className = 'exec-status-text';
+                if (resolvedStatus === 'error') {
+                    if (typeof duration_ms === 'number') {
+                        const seconds = (duration_ms / 1000).toFixed(1);
+                        statusSpan.textContent = `Ошибка (${seconds}s)`;
+                    } else {
+                        statusSpan.textContent = 'Ошибка';
+                    }
+                } else {
+                    if (typeof duration_ms === 'number') {
+                        const seconds = (duration_ms / 1000).toFixed(1);
+                        statusSpan.textContent = `Готово (${seconds}s)`;
+                    } else {
+                        statusSpan.textContent = 'Готово';
+                    }
+                }
+
+                const timeSpan = document.createElement('span');
+                timeSpan.className = 'message-time';
+                timeSpan.textContent = this.formatTime(new Date().toISOString());
+
+                // Add status icon
+                const checkSpan = document.createElement('span');
+                checkSpan.className = 'completion-status';
+                if (resolvedStatus === 'error') {
+                    checkSpan.textContent = '❌';
+                    checkSpan.style.color = '#c62828';
+                } else {
+                    checkSpan.textContent = '✅';
+                    checkSpan.style.color = '#2e8b57';
+                }
+                checkSpan.style.marginRight = '6px';
+                headerDiv.appendChild(checkSpan);
+                headerDiv.appendChild(statusSpan);
+                headerDiv.appendChild(timeSpan);
+
+                const bodyDiv = document.createElement('div');
+                bodyDiv.className = 'message-body';
+
+                const contentDiv = document.createElement('div');
+                contentDiv.className = 'message-content';
+                const esc = (str) => (str || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+                if (resolvedStatus === 'error') {
+                    const base = error_message || message || 'Ошибка выполнения';
+                    let snippetHtml = '';
+                    if (recent_output) {
+                        snippetHtml = `<pre style="margin:8px 0 0; padding:8px; background:#fff5f5; border:1px solid #f44336; border-radius:6px; white-space:pre-wrap; font-size:13px; max-height:300px; overflow:auto;">${esc(recent_output)}</pre>`;
+                    }
+                    const meta = (typeof bytes_read === 'number') ? `<div style="font-size:11px; color:#999; margin-top:4px;">bytes: ${bytes_read}</div>` : '';
+                    contentDiv.innerHTML = `${esc(base)}${snippetHtml}${meta}`;
+                } else {
+                    contentDiv.textContent = resolvedMessage;
+                }
+
+                const actionsDiv = document.createElement('div');
+                actionsDiv.className = 'message-actions';
+                if (branch_name && file_path) {
+                    const diffButton = document.createElement('button');
+                    diffButton.className = 'action-button primary diff-button';
+                    diffButton.innerHTML = '📋 Просмотр Diff';
+                    diffButton.onclick = () => this.showDiffViewer(file_path, branch_name);
+                    actionsDiv.appendChild(diffButton);
+                }
+
+                bodyDiv.appendChild(contentDiv);
+                bodyDiv.appendChild(actionsDiv);
+                wrapper.appendChild(headerDiv);
+                wrapper.appendChild(bodyDiv);
+                this.messagesContainer.appendChild(wrapper);
+                this.scrollToBottom();
             }
 
             addExecutionRunningMessage(message, time, filePath, executionId) {
@@ -1224,6 +1432,12 @@
 
                 this.messagesContainer.appendChild(messageDiv);
                 this.scrollToBottom();
+
+                const historyPieces = [];
+                if (message && message.trim()) historyPieces.push(message.trim());
+                if (code && code.trim()) historyPieces.push(code.trim());
+                const historyContent = historyPieces.join('\n\n');
+                this.appendConversationEntry(type, historyContent);
             }
 
             addMessageWithCode(type, message, code, time) {
@@ -1261,10 +1475,25 @@
                 this.scrollToBottom();
             }
 
-            // Track message keys to avoid duplicates after reconnect
-            addMessage(type, message, time) {
+            renderMarkdownish(text) {
+                if (!text) return '';
+                const esc = (str) => str
+                    .replace(/&/g, '&amp;')
+                    .replace(/</g, '&lt;')
+                    .replace(/>/g, '&gt;');
+                let html = esc(text);
+                html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+                html = html.replace(/`([^`]+)`/g, '<code>$1</code>');
+                html = html.replace(/\n/g, '<br>');
+                return html;
+            }
+
+            // Generic addMessage used by handleMessage for user/assistant/error
+            addMessage(type, message, time, options = {}) {
                 if (!this.messageKeys) this.messageKeys = new Set();
-                const key = `${type}|${time}|${message}`;
+                const keyParts = [type || '', time || '', message || ''];
+                if (options.returnContent) keyParts.push(options.returnContent);
+                const key = keyParts.join('|');
                 if (this.messageKeys.has(key)) return; // skip duplicate
                 this.messageKeys.add(key);
 
@@ -1274,7 +1503,24 @@
 
                 const contentDiv = document.createElement('div');
                 contentDiv.className = 'message-content';
-                contentDiv.textContent = message;
+
+                if (options.markdownish) {
+                    contentDiv.innerHTML = this.renderMarkdownish(message || '');
+                } else if (options.allowHtml) {
+                    contentDiv.innerHTML = options.allowHtml;
+                } else {
+                    contentDiv.textContent = message || '';
+                }
+
+                if (options.returnContent && options.returnContent.trim()) {
+                    const returnBlock = document.createElement('pre');
+                    returnBlock.className = 'assistant-return-block';
+                    if (options.returnVariant === 'error') {
+                        returnBlock.classList.add('error');
+                    }
+                    returnBlock.textContent = options.returnContent;
+                    contentDiv.appendChild(returnBlock);
+                }
 
                 const timeDiv = document.createElement('div');
                 timeDiv.className = 'message-time';
@@ -1282,28 +1528,32 @@
 
                 messageDiv.appendChild(contentDiv);
                 messageDiv.appendChild(timeDiv);
+
                 this.messagesContainer.appendChild(messageDiv);
                 this.scrollToBottom();
+
+                if (options.storeHistory !== false) {
+                    let historyContent = '';
+                    if (message && message.trim()) historyContent = message.trim();
+                    const returnText = options.returnContent && options.returnContent.trim();
+                    if (returnText) {
+                        historyContent = historyContent ? `${historyContent}\n\n${returnText}` : returnText;
+                    }
+                    this.appendConversationEntry(type, historyContent);
+                }
             }
 
-            // Generic addMessage (restored) used by handleMessage for user/assistant/error
-            addMessage(type, message, time) {
-                const messageDiv = document.createElement('div');
-                messageDiv.className = `message ${type}`;
-
-                const contentDiv = document.createElement('div');
-                contentDiv.className = 'message-content';
-                contentDiv.textContent = message;
-
-                const timeDiv = document.createElement('div');
-                timeDiv.className = 'message-time';
-                timeDiv.textContent = time;
-
-                messageDiv.appendChild(contentDiv);
-                messageDiv.appendChild(timeDiv);
-
-                this.messagesContainer.appendChild(messageDiv);
-                this.scrollToBottom();
+            appendConversationEntry(type, content) {
+                if (!['user', 'assistant'].includes(type)) return;
+                const normalized = (content || '').trim();
+                if (!normalized) return;
+                const role = type === 'user' ? 'user' : 'assistant';
+                const lastEntry = this.conversation[this.conversation.length - 1];
+                if (lastEntry && lastEntry.role === role && lastEntry.content === normalized) return;
+                this.conversation.push({ role, content: normalized });
+                if (this.conversation.length > 200) {
+                    this.conversation = this.conversation.slice(-200);
+                }
             }
 
             showTyping(show) {

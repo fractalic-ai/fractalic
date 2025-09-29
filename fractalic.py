@@ -15,7 +15,12 @@ import builtins
 import argparse
 import traceback
 import toml
+import json
+import requests
+import time
+from datetime import datetime
 from pathlib import Path
+from typing import Any, Dict
 
 from core.git import commit_changes, ensure_git_repo
 from core.ast_md.parser import print_parsed_structure
@@ -41,6 +46,71 @@ sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8')
 
 original_open = open
 
+# Attach stdout sink once (idempotent)
+try:
+    pass  # HTTP streaming instead of EventBus
+except Exception:
+    pass
+
+
+def _execution_id():
+    return os.getenv('FRACTALIC_EXECUTION_ID')
+
+def emit_chat_message(role, content):
+    """Send chat message via HTTP to server.py."""
+    execution_id = os.getenv('FRACTALIC_EXECUTION_ID')
+    if execution_id:
+        event = {
+            'type': 'chat_message',
+            'execution_id': execution_id,
+            'role': role,
+            'content': content,
+            'timestamp': time.time()
+        }
+        _stream_event_to_server(event)
+
+def emit_execution(phase: str, target: str | None = None):
+    """Send execution event via HTTP to server.py."""
+    execution_id = os.getenv('FRACTALIC_EXECUTION_ID')
+    if execution_id:
+        event = {
+            'type': 'execution',
+            'execution_id': execution_id,
+            'phase': phase,
+            'target': target,
+            'timestamp': time.time()
+        }
+        _stream_event_to_server(event)
+
+def emit_error(message: str, details: str | None = None):
+    """Send error event via HTTP to server.py."""
+    execution_id = os.getenv('FRACTALIC_EXECUTION_ID')
+    if execution_id:
+        event = {
+            'type': 'error',
+            'execution_id': execution_id,
+            'message': message,
+            'details': details,
+            'timestamp': time.time()
+        }
+        _stream_event_to_server(event)
+
+def _stream_event_to_server(event):
+    """Stream event to server.py via HTTP POST."""
+    try:
+        server_url = os.getenv('FRACTALIC_SERVER_URL', 'http://localhost:8000')
+        response = requests.post(
+            f"{server_url}/api/events/receive",
+            json=event,
+            timeout=1.0,
+            headers={'Content-Type': 'application/json'}
+        )
+        if response.status_code != 200:
+            print(f"[Event Stream Warning] Server returned {response.status_code}")
+    except Exception as e:
+        # Ignore streaming errors - fractalic should work even without server
+        pass
+
 
 def run_fractalic(input_file, task_file=None, param_input_user_request=None, param_node=None, capture_output=False, 
                  model=None, api_key=None, operation=None, show_operations=False, context_render_mode=None):
@@ -64,6 +134,9 @@ def run_fractalic(input_file, task_file=None, param_input_user_request=None, par
     """
     original_cwd = os.getcwd()
     
+    # Emit start event early - removed, will be done in main() with proper display_name
+    pass
+
     try:
         # Setup session context using centralized path management
         input_file_path = Path(input_file).resolve()
@@ -256,18 +329,25 @@ def run_fractalic(input_file, task_file=None, param_input_user_request=None, par
                 pass
                 
         except (BlockNotFoundError, UnknownOperationError, FileNotFoundError, ValueError) as e:
-            print(f"[ERROR] Known exception during execution: {str(e)}")
+            msg = f"Known exception: {str(e)}"
+            print(f"[ERROR] {msg}")
+            emit_error(message=msg)
             # These are handled exceptions that don't return useful data
             # Continue to save whatever state we have (which will be None values)
         except Exception as e:
-            print(f"[ERROR] Unexpected exception during execution: {str(e)}")
+            msg = f"Unexpected exception: {str(e)}"
+            print(f"[ERROR] {msg}")
             import traceback
             traceback.print_exc()
+            emit_error(message=msg, details=''.join(traceback.format_exc()[-1000:]))
             # For unexpected exceptions, the runner should have handled it and returned data
             # But if we get here, the runner couldn't handle it, so variables remain None
         
         # Save call tree regardless of success or failure - this captures the actual execution state
         def save_call_tree_state():
+            # Skip persistence for ephemeral chat sessions
+            if os.environ.get('FRACTALIC_EPHEMERAL_SESSION') == '1' or input_file.endswith('.chat_run.md'):
+                return
             call_tree_path = os.path.join('.', 'call_tree.json')
             files_to_commit = [call_tree_path]
             
@@ -318,9 +398,12 @@ def run_fractalic(input_file, task_file=None, param_input_user_request=None, par
                     files_to_commit.append(potential_trc)
                         
                 # Commit all relevant files
+                # Skip git commit if ephemeral
+                if os.environ.get('FRACTALIC_EPHEMERAL_SESSION') == '1' or input_file.endswith('.chat_run.md'):
+                    return
                 try:
                     md_commit_hash = commit_changes(
-                        '.',  # Current directory (which is the input file's directory)
+                        '.',
                         "Saving call_tree.json with execution state and any pending files",
                         files_to_commit,
                         None,
@@ -344,7 +427,18 @@ def run_fractalic(input_file, task_file=None, param_input_user_request=None, par
         if execution_successful:
             # Build success output
             output = f"Execution completed. Branch: {branch_name}, Context: {ctx_hash}"
-            
+            # Emit return content as assistant chat if explicit_return
+            if explicit_return and return_content:
+                try:
+                    emit_chat_message('assistant', return_content)
+                except Exception:
+                    pass
+            # Emit execution complete
+            try:
+                emit_execution('complete', target=str(input_file))
+            except Exception:
+                pass
+
             return {
                 'success': True,
                 'output': output,
@@ -364,6 +458,10 @@ def run_fractalic(input_file, task_file=None, param_input_user_request=None, par
         else:
             # Build failure output but still include partial state
             error_msg = "Execution failed but call tree state was preserved"
+            try:
+                emit_execution('error', target=str(input_file))
+            except Exception:
+                pass
             return {
                 'success': False,
                 'error': error_msg,
@@ -426,8 +524,17 @@ def main():
                        help='Context rendering mode: "direct" (replace JSON with markers, render markdown) or "json" (preserve JSON values, no direct rendering)')
 
     args = parser.parse_args()
+    # Prefer original file name if this is an ephemeral chat_run wrapper
+    env_orig = os.environ.get('FRACTALIC_ORIGINAL_FILE')
+    if env_orig:
+        display_name = Path(env_orig).name
+    else:
+        display_name = Path(args.input_file).name
 
     try:
+        # Execution start event
+        emit_execution('start', target=display_name)
+        emit_chat_message('assistant', f"⚙️ Фракталик запущен для файла: {display_name}")
         # Call the core execution function
         result = run_fractalic(
             input_file=args.input_file,
@@ -441,9 +548,28 @@ def main():
         )
         
         if not result['success']:
+            error_text = result.get('error') or result.get('output') or ''
+            emit_execution('error', target=display_name)
+            if error_text:
+                emit_chat_message('assistant', f"❌ Фракталик завершился с ошибкой при выполнении {display_name}\n{error_text}")
+            else:
+                emit_chat_message('assistant', f"❌ Фракталик завершился с ошибкой при выполнении {display_name}")
             print(f"[ERROR fractalic.py] {result['error']}")
             sys.exit(1)
         
+        completion_message = f"✅ Фракталик завершил выполнение файла: {display_name}"
+        if result.get('branch_name'):
+            completion_message += f" (ветка: {result['branch_name']})"
+        emit_chat_message('assistant', completion_message)
+        if result.get('return_content'):
+            # Emit the actual returned content as a chat message for the new architecture
+            emit_chat_message('assistant', result['return_content'])
+        # Emit explicit completion lifecycle event for streaming clients
+        try:
+            emit_execution('complete', target=display_name)
+        except Exception:
+            pass
+
         # Use same force settings as test function for consistency
         console = Console(
             force_terminal=True, 
@@ -485,9 +611,13 @@ def main():
 
 
     except (BlockNotFoundError, UnknownOperationError, FileNotFoundError, ValueError) as e:
+        emit_execution('error', target=display_name)
+        emit_chat_message('assistant', f"❌ Фракталик завершился с ошибкой при выполнении {display_name}: {str(e)}")
         print(f"[ERROR fractalic.py] {str(e)}")
         sys.exit(1)
     except Exception as e:
+        emit_execution('error', target=display_name)
+        emit_chat_message('assistant', f"❌ Непредвиденная ошибка при выполнении {display_name}: {str(e)}")
         # Check if this is a linting error and try to get context information
         if e.__class__.__name__ == 'FractalicLintError':
             print(f"[ERROR fractalic.py] Linting failed: {str(e)}")
@@ -497,7 +627,6 @@ def main():
             try:
                 from core.git import get_current_git_branch, get_latest_commit_hash
                 import glob
-                import os
                 
                 # Get current branch name (should be the test branch created for this run)
                 current_branch = get_current_git_branch()

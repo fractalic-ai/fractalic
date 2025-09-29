@@ -1,9 +1,42 @@
 #!/bin/bash
 
-# Fractalic Chat Agent Test Script
-# Запускает UI Server и открывает чат интерфейс
+# Fractalic Chat Agent Test Script (enhanced)
+# Запускает UI Server, устанавливает диагностические переменные окружения и открывает чат интерфейс
+# Options:
+#   --port <n>        Порт сервера (default 8000)
+#   --host <h>        Хост (default 0.0.0.0)
+#   --debug           Включить расширенный лог исполнения (FRACTALIC_DEBUG_EXEC=1)
+#   --background      Запуск сервера в фоне (не открывать браузер, просто tail логи)
+#   --no-browser      Не открывать браузер автоматически
+#   --help            Показать помощь
 
-echo "🚀 Запуск Fractalic Chat Agent..."
+set -euo pipefail
+
+PORT=8000
+HOST=0.0.0.0
+DEBUG=0
+BACKGROUND=0
+OPEN_BROWSER=1
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --port)
+            PORT="$2"; shift 2;;
+        --host)
+            HOST="$2"; shift 2;;
+        --debug)
+            DEBUG=1; shift;;
+        --background)
+            BACKGROUND=1; shift;;
+        --no-browser)
+            OPEN_BROWSER=0; shift;;
+        --help|-h)
+            grep '^#' "$0" | sed 's/^# //'; exit 0;;
+        *) echo "Неизвестный аргумент: $1"; exit 1;;
+    esac
+done
+
+echo "🚀 Запуск Fractalic Chat Agent... (host=$HOST port=$PORT debug=$DEBUG background=$BACKGROUND)"
 echo "=================================="
 
 # Проверяем, что мы в корневой директории fractalic
@@ -26,56 +59,97 @@ if [ -d ".venv" ]; then
     source .venv/bin/activate
 fi
 
-# Проверяем Python пакеты
-python3 -c "import fastapi, websockets" 2>/dev/null || {
-    echo "❌ Не установлены необходимые пакеты. Устанавливаем..."
-    pip install fastapi websockets uvicorn
-}
+# Проверяем Python пакеты (добавлен aiohttp для WS sink)
+python3 - <<'PY'
+import importlib, sys
+missing = []
+for pkg in ("fastapi", "websockets", "uvicorn", "aiohttp"):
+    try:
+        importlib.import_module(pkg)
+    except Exception:
+        missing.append(pkg)
+if missing:
+    print("MISSING:" + ",".join(missing))
+PY
+NEED=$(python3 - <<'PY'
+import importlib
+req=["fastapi","websockets","uvicorn","aiohttp"]
+miss=[m for m in req if not importlib.util.find_spec(m)]
+print(' '.join(miss))
+PY
+)
+if [ -n "$NEED" ]; then
+  echo "❌ Не установлены пакеты: $NEED — устанавливаем..."
+  pip install $NEED
+fi
 
 echo "🔧 Настройка..."
 
-# Убиваем процессы на порту 8000 если есть
-echo "🧹 Освобождаем порт 8000..."
-lsof -ti:8000 | xargs kill -9 2>/dev/null || true
+# Убиваем процессы на целевом порту если есть
+echo "🧹 Освобождаем порт $PORT..."
+lsof -ti:"$PORT" | xargs kill -9 2>/dev/null || true
+
+# Экспортируем переменные окружения для сервера
+export SERVER_HOST="${HOST}"
+export SERVER_PORT="${PORT}"
+export PORT="${PORT}"  # некоторые платформы читают PORT
+if [ "$DEBUG" = "1" ]; then
+    export FRACTALIC_DEBUG_EXEC=1
+    echo "🛠  Debug режим включен (FRACTALIC_DEBUG_EXEC=1)"
+fi
 
 # Запускаем UI Server
-echo "🚀 Запуск UI Server на порту 8000..."
-python3 -m uvicorn core.ui_server.server:app --host 0.0.0.0 --port 8000 &
-SERVER_PID=$!
+echo "🚀 Запуск UI Server на порту $PORT..."
+if [ "$BACKGROUND" = "1" ]; then
+    nohup python3 -m uvicorn core.ui_server.server:app --host "$HOST" --port "$PORT" > server.out 2>&1 &
+    SERVER_PID=$!
+    echo $SERVER_PID > .server_pid
+    echo "💤 Сервер запущен в фоне (PID=$SERVER_PID). Логи: tail -f server.out"
+else
+    python3 -m uvicorn core.ui_server.server:app --host "$HOST" --port "$PORT" &
+    SERVER_PID=$!
+fi
 
 # Ждем запуска сервера
 echo "⏳ Ждем запуска сервера..."
 sleep 5
 
 # Проверяем доступность сервера
-if curl -s http://localhost:8000/health > /dev/null; then
+if curl -s "http://localhost:${PORT}/health" > /dev/null; then
     echo "✅ Сервер запущен успешно!"
     echo ""
     echo "🌐 Чат интерфейс доступен по адресу:"
-    echo "   http://localhost:8000/chat"
+    echo "   http://localhost:${PORT}/chat"
     echo ""
     echo "📊 API информация:"
-    echo "   http://localhost:8000/info"
+    echo "   http://localhost:${PORT}/info"
     echo ""
     echo "🔍 Состояние здоровья:"
-    echo "   http://localhost:8000/health"
+    echo "   http://localhost:${PORT}/health"
     echo ""
     echo "💬 WebSocket endpoint:"
-    echo "   ws://localhost:8000/ws/chat"
+    echo "   ws://localhost:${PORT}/ws/chat"
     echo ""
     echo "=================================="
     echo "Для остановки нажмите Ctrl+C"
     echo "=================================="
     
     # Пытаемся открыть браузер (macOS)
-    if command -v open >/dev/null 2>&1; then
-        echo "🌐 Открываем браузер..."
-        open http://localhost:8000/chat
+    if [ "$OPEN_BROWSER" = "1" ] && [ "$BACKGROUND" = "0" ]; then
+      if command -v open >/dev/null 2>&1; then
+          echo "🌐 Открываем браузер..."
+          open "http://localhost:${PORT}/chat"
+      fi
     fi
     
     # Ждем прерывания
-    trap "echo '🛑 Останавливаем сервер...'; kill $SERVER_PID; exit 0" INT
-    wait $SERVER_PID
+        if [ "$BACKGROUND" = "1" ]; then
+            echo "📌 Для остановки: kill $(cat .server_pid) или ./test_chat.sh --stop"
+            exit 0
+        else
+            trap "echo '🛑 Останавливаем сервер...'; kill $SERVER_PID; exit 0" INT
+            wait $SERVER_PID
+        fi
     
 else
     echo "❌ Сервер не запустился. Проверьте логи."

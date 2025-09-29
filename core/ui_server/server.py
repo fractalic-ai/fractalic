@@ -6,7 +6,7 @@ import threading
 import uuid
 import aiohttp
 import shutil
-from fastapi import FastAPI, HTTPException, Query, Request, Response, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, Query, Request, Response
 from fastapi.responses import PlainTextResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
@@ -76,14 +76,6 @@ mcp_manager_url = f"http://localhost:{mcp_manager_port}"
 # Set BASE_DIR to the root directory to allow navigation to parent directories
 BASE_DIR = Path('/').resolve()
 
-# Chat Agent globals
-active_chat_connections = []
-chat_history = []
-
-# Active execution processes tracking
-active_executions = {}  # execution_id -> {'process': process, 'file_path': str, 'start_time': datetime}
-execution_counter = 0
-
 # Mount static files (HTML, CSS, JS)
 # app.mount("/static", StaticFiles(directory="static"), name="static")
 
@@ -95,6 +87,22 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Serve existing fractalic_chat.html (legacy client) at /chat if present in project root
+@app.get("/chat")
+async def serve_chat():
+    try:
+        root = get_fractalic_root()
+        candidate_names = ["fractalic_chat.html", "fractalic_chat_fixed.html"]
+        for name in candidate_names:
+            p = Path(root) / name
+            if p.exists():
+                return FileResponse(str(p), media_type="text/html")
+        raise HTTPException(status_code=404, detail="Chat client html not found")
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to load chat html: {e}")
 
 # Define the settings file path using centralized path management
 def get_current_settings_path():
@@ -951,6 +959,9 @@ async def run_fractalic(request: Request):
     if not file_path:
         raise HTTPException(status_code=400, detail="file_path is required")
 
+    # Generate execution ID for this run
+    execution_id = str(uuid.uuid4())
+
     # Build command using centralized path management
     fractalic_root = get_fractalic_root()
     fractalic_path = Path(fractalic_root) / "fractalic.py"
@@ -966,9 +977,9 @@ async def run_fractalic(request: Request):
             env = os.environ.copy()
             env.update({
                 'PYTHONIOENCODING': 'utf-8',
-                'PYTHONUNBUFFERED': '1',
                 'LC_ALL': 'en_US.UTF-8',
-                'LANG': 'en_US.UTF-8'
+                'LANG': 'en_US.UTF-8',
+                'FRACTALIC_EXECUTION_ID': execution_id
             })
             
             process = await asyncio.create_subprocess_shell(
@@ -999,7 +1010,21 @@ async def run_fractalic(request: Request):
                     buffer += chunk
                     try:
                         decoded_chunk = buffer.decode('utf-8', errors='strict')
-                        yield decoded_chunk
+                        
+                        # Skip event lines - they now go via HTTP, not terminal
+                        if decoded_chunk.startswith('[Event]'):
+                            buffer = b''
+                            continue
+                            
+                        # Filter out event lines from multi-line chunks  
+                        if '\n' in decoded_chunk:
+                            lines = decoded_chunk.split('\n')
+                            filtered_lines = [line for line in lines if not line.startswith('[Event]')]
+                            filtered_chunk = '\n'.join(filtered_lines)
+                            if filtered_chunk.strip():
+                                yield filtered_chunk
+                        else:
+                            yield decoded_chunk
                         buffer = b''  # Clear buffer after successful decode
                     except UnicodeDecodeError:
                         # If we still can't decode, yield with error replacement
@@ -1084,7 +1109,11 @@ async def run_fractalic(request: Request):
                 except:
                     pass
 
-    return StreamingResponse(stream_fractalic(), media_type="text/plain")
+    return StreamingResponse(
+        stream_fractalic(), 
+        media_type="text/plain",
+        headers={"X-Execution-Id": execution_id}
+    )
 
 # Cache for tools schema to avoid recreating ToolRegistry repeatedly
 _tools_schema_cache = {}
@@ -1233,17 +1262,6 @@ async def health_check():
         "mcp_manager": mcp_status
     }
 
-@app.get("/chat")
-async def chat_interface():
-    """Serve the Fractalic Chat Agent HTML interface"""
-    fractalic_root = get_fractalic_root()
-    chat_file_path = os.path.join(fractalic_root, "fractalic_chat.html")
-    
-    if os.path.exists(chat_file_path):
-        return FileResponse(chat_file_path, media_type="text/html")
-    else:
-        raise HTTPException(status_code=404, detail="Chat interface not found")
-
 @app.get("/info")
 async def get_info():
     """Get information about the application"""
@@ -1255,8 +1273,7 @@ async def get_info():
             "git_operations": True,
             "file_management": True,
             "mcp_manager_control": True,
-            "mcp_server_proxy": True,
-            "chat_agent": True
+            "mcp_server_proxy": True
         },
         "mcp_manager": mcp_status
     }
@@ -1523,519 +1540,170 @@ async def deploy_docker_registry_with_progress(request: Request):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to start deployment: {str(e)}")
 
-# ============================================================================
-# Chat Agent WebSocket Endpoint  
-# ============================================================================
+# Event streaming system (HTTP-based instead of EventBus)
+from collections import deque, defaultdict
+import threading
 
-from fastapi import WebSocket, WebSocketDisconnect
-from typing import List
-import json
-import asyncio
-from datetime import datetime
+# Store events per execution_id
+events_queues = defaultdict(lambda: deque(maxlen=1000))
+events_lock = threading.Lock()
 
-# ============================================================================
-# Chat Agent Implementation
-# ============================================================================
-
-# Store active chat connections
-active_chat_connections: List[WebSocket] = []
-
-# Store active terminal connections
-active_terminal_connections: List[WebSocket] = []
-
-@app.websocket("/ws/chat")
-async def websocket_chat_endpoint(websocket: WebSocket):
-    """WebSocket endpoint for chat with Fractalic agent"""
-    await websocket.accept()
-    active_chat_connections.append(websocket)
+@app.post("/api/events/receive")
+async def receive_event(event: dict):
+    """Receive event from fractalic process."""
+    execution_id = event.get('execution_id')
+    if not execution_id:
+        raise HTTPException(status_code=400, detail='Missing execution_id')
     
+    print(f"[DEBUG] Received event: {event.get('type')} for {execution_id}")
+    
+    with events_lock:
+        events_queues[execution_id].append(event)
+    
+    return {"status": "received"}
+
+async def start_fractalic_process(file_path: str, execution_id: str):
+    """Start fractalic process with execution_id."""
     try:
-        # Send minimal chat history to new client (last 3) to avoid duplicate clutter
-        for message in chat_history[-3:]:
-            try:
-                await websocket.send_text(json.dumps(message))
-            except Exception:
-                pass
-        
-        while True:
-            # Receive message from client
-            data = await websocket.receive_text()
-            message_data = json.loads(data)
-            
-            user_message = message_data.get("message", "")
-            message_type = message_data.get("type", "user")
-            selected_file = message_data.get("selected_file", None)
-            
-            if message_type == "user":
-                # Store user message
-                timestamp = datetime.now().isoformat()
-                user_msg = {
-                    "type": "user", 
-                    "message": user_message,
-                    "timestamp": timestamp,
-                    "selected_file": selected_file
-                }
-                chat_history.append(user_msg)
-                
-                # Broadcast to all connected clients
-                for connection in active_chat_connections:
-                    try:
-                        await connection.send_text(json.dumps(user_msg))
-                    except:
-                        continue
-                
-                # If user selected a file, execute it directly
-                if selected_file:
-                    await execute_selected_fractalic_file(selected_file, user_message, websocket)
-                else:
-                    # Silently ignore user input when no file selected
-                    continue
-                
-    except WebSocketDisconnect:
-        active_chat_connections.remove(websocket)
-    except Exception as e:
-        print(f"Chat WebSocket error: {e}")
-        if websocket in active_chat_connections:
-            active_chat_connections.remove(websocket)
-
-
-async def execute_selected_fractalic_file(file_path: str, chat_history_text: str, websocket: WebSocket):
-    """Execute a selected Fractalic file with chat history as parameter using a subprocess PTY."""
-    
-    global execution_counter, active_executions
-    execution_counter += 1
-    execution_id = f"exec_{execution_counter}"
-    
-    try:
-        # Validate file exists and is markdown
         fractalic_root = get_fractalic_root()
-        full_file_path = os.path.join(fractalic_root, file_path)
-        
-        if not os.path.exists(full_file_path):
-            error_msg = {
-                "type": "error",
-                "message": f"❌ Файл не найден: {file_path}",
-                "timestamp": datetime.now().isoformat()
-            }
-            await websocket.send_text(json.dumps(error_msg))
-            return
-        
-        if not file_path.lower().endswith('.md'):
-            error_msg = {
-                "type": "error", 
-                "message": f"❌ Файл должен быть .md: {file_path}",
-                "timestamp": datetime.now().isoformat()
-            }
-            await websocket.send_text(json.dumps(error_msg))
-            return
-        
-        # Send execution start message
-        exec_start_msg = {
-            "type": "execution",
-            "message": f"🚀 Выполняю выбранный файл: {file_path}",
-            "timestamp": datetime.now().isoformat(),
-            "status": "running",
-            "execution_id": execution_id,
-            "selected_file": file_path
-        }
-        await websocket.send_text(json.dumps(exec_start_msg))
-        
-        # Create chat history parameter file
-        import tempfile
-        temp_dir = tempfile.mkdtemp()
-        task_file = os.path.join(temp_dir, "chat_history.md")
-        
-        chat_content = "# Chat History {id=chat-history}\n\n"
-        if chat_history_text:
-            chat_content += chat_history_text + "\n\n"
-        
-        recent_messages = chat_history[-5:]
-        for msg in recent_messages:
-            if msg.get("type") == "user":
-                chat_content += f"**Пользователь** ({msg.get('timestamp', 'unknown')}):\n{msg.get('message', '')}\n\n"
-            elif msg.get("type") == "assistant":
-                message = msg.get('message', '')
-                if '```markdown' in message:
-                    parts = message.split('```markdown')
-                    message = parts[0].strip()
-                chat_content += f"**Ассистент** ({msg.get('timestamp', 'unknown')}):\n{message}\n\n"
-        with open(task_file, 'w', encoding='utf-8') as f:
-            f.write(chat_content)
-        
-        # Launch Fractalic in a PTY subprocess to enable real-time streaming
-        import pty, asyncio
-        python_exe = sys.executable
-        from pathlib import Path as _Path
-        fractalic_path = _Path(fractalic_root) / "fractalic.py"
-        
-        cmd = [python_exe, str(fractalic_path), file_path, "--task_file", task_file, "--param_input_user_request", "chat-history"]
-        
+        fractalic_path = Path(fractalic_root) / "fractalic.py"
+        python_exe = sys.executable 
+        command = f'"{python_exe}" "{fractalic_path}" "{file_path}"'
+
         env = os.environ.copy()
         env.update({
             'PYTHONIOENCODING': 'utf-8',
-            'PYTHONUNBUFFERED': '1',
             'LC_ALL': 'en_US.UTF-8',
             'LANG': 'en_US.UTF-8',
-            'TERM': 'xterm-256color',
-            'RICH_FORCE_TERMINAL': '1'
+            'FRACTALIC_EXECUTION_ID': execution_id
         })
         
-        master_fd, slave_fd = pty.openpty()
-        process = await asyncio.create_subprocess_exec(
-            *cmd,
-            stdin=slave_fd,
-            stdout=slave_fd,
-            stderr=slave_fd,
+        process = await asyncio.create_subprocess_shell(
+            command,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
             cwd=fractalic_root,
             env=env
         )
-        os.close(slave_fd)  # close slave in parent
         
-        # Per-execution stream queue for terminal subscribers
-        stream_queue: asyncio.Queue[str] = asyncio.Queue()
-        return_content = ""
-        
-        # Track active execution
-        active_executions[execution_id] = {
-            'process': process,
-            'pty_master_fd': master_fd,
-            'file_path': file_path,
-            'start_time': datetime.now(),
-            'status': 'running',
-            'stream_queue': stream_queue,
-            'branch_name': None,
-            'ctx_file': None,
-            'return_content': ""
-        }
-        
-        # Reader task: read from PTY, forward to websocket and queue, parse event markers
-        async def _reader_task():
-            buf = b''
-            capturing_return = False  # Are we currently capturing a @return block
-            try:
-                while True:
-                    try:
-                        chunk = await asyncio.to_thread(os.read, master_fd, 1024)
-                    except Exception:
-                        break
-                    if not chunk:
-                        break
-                    buf += chunk
-                    try:
-                        text = buf.decode('utf-8')
-                        buf = b''
-                    except UnicodeDecodeError:
-                        # keep accumulating until valid utf-8
-                        continue
-                    # Enqueue raw text for any terminal subscribers
-                    try:
-                        await stream_queue.put(text)
-                    except Exception:
-                        pass
-                    # Parse structured event lines
-                    try:
-                        for line in text.splitlines():
-                            # Branch/context events
-                            if line.startswith('[EventMessage: Root-Context-Saved]'):
-                                try:
-                                    parts = line.split('ID:')[-1].strip()
-                                    branch = parts.split(',')[0].strip()
-                                    active_executions[execution_id]['branch_name'] = branch
-                                except Exception:
-                                    pass
-                            if 'Details saved to' in line:
-                                try:
-                                    ctx = line.split('Details saved to', 1)[1].strip()
-                                    active_executions[execution_id]['ctx_file'] = ctx
-                                except Exception:
-                                    pass
-                            # Return content capture based on EventMessage markers printed by fractalic.py
-                            # Start: [EventMessage: Return-Content-Start]
-                            # End:   [EventMessage: Return-Content-End]
-                            # Start return capture (allow wrapped/partial markers)
-                            if 'Return-Content-Start' in line:
-                                capturing_return = True
-                                active_executions[execution_id]['return_content'] = ""
-                                continue
-                            # End return capture (accept substring to survive wrapping)
-                            if capturing_return and 'Return-Content-End' in line:
-                                capturing_return = False
-                                active_executions[execution_id]['return_content'] = active_executions[execution_id]['return_content'].strip()
-                                continue
-                            if capturing_return:
-                                active_executions[execution_id]['return_content'] += line + "\n"
-                    except Exception:
-                        pass
-            finally:
-                # Finalize return_content if we were still capturing when stream ended
-                try:
-                    if capturing_return and active_executions.get(execution_id, {}).get('return_content'):
-                        active_executions[execution_id]['return_content'] = active_executions[execution_id]['return_content'].strip()
-                except Exception:
-                    pass
-                try:
-                    os.close(master_fd)
-                except Exception:
-                    pass
-        
-        reader_task = asyncio.create_task(_reader_task())
-        active_executions[execution_id]['reader_task'] = reader_task
-        
-        # Wait for process to complete
-        exit_code = await process.wait()
-        
-        # Ensure reader task finishes
+        # Don't wait for completion - let events drive the response
+        return process
+    except Exception as e:
+        print(f"[ERROR] Failed to start process: {str(e)}")
+        return None
+
+@app.post('/api/chat/stream')
+async def stream_chat_events(request: Request):
+    """Streamable HTTP endpoint for structured chat events (from fractalic HTTP events)."""
+    
+    data = await request.json()
+    file_path = data.get("file_path")
+    if not file_path:
+        raise HTTPException(status_code=400, detail="file_path is required")
+    
+    # Generate execution ID for correlation
+    execution_id = str(uuid.uuid4())
+    
+    import asyncio, json
+
+    async def event_stream():
         try:
-            await asyncio.wait_for(reader_task, timeout=1)
-        except Exception:
-            reader_task.cancel()
-        
-        # Cleanup temp files
-        try:
-            os.unlink(task_file)
-            os.rmdir(temp_dir)
-        except Exception:
-            pass
-        
-        # Prepare completion data
-        exec_info = active_executions.get(execution_id, {})
-        branch_name = exec_info.get('branch_name')
-        ctx_file = exec_info.get('ctx_file')
-        return_content = exec_info.get('return_content', "")
-        start_time_dt = exec_info.get('start_time')
-        duration_ms = None
-        if start_time_dt:
-            duration_ms = int((datetime.now() - start_time_dt).total_seconds() * 1000)
-        
-        # Clear active execution
-        if execution_id in active_executions:
-            # Close queue to signal end to subscribers by sending a sentinel
-            try:
-                await stream_queue.put("\n[Process finished]\n")
-            except Exception:
-                pass
-            active_executions.pop(execution_id, None)
-        
-        if exit_code == 0:
-            # Send update to mark execution as completed (inline update on client)
-            completion_msg = {
-                "type": "execution_update",
-                "execution_id": execution_id,
-                "status": "completed",
-                "message": f"✅ Выполнение завершено (код: {exit_code})",
-                "branch_name": branch_name,
-                "ctx_file": ctx_file,
-                "return_content": return_content if return_content else None,
-                "duration_ms": duration_ms,
-                "timestamp": datetime.now().isoformat()
-            }
-            try:
-                await websocket.send_text(json.dumps(completion_msg))
-            except Exception:
-                pass
-        else:
-            error_msg = {
-                "type": "execution_update", 
-                "execution_id": execution_id,
-                "status": "error",
-                "error_message": f"exit code {exit_code}",
-                "timestamp": datetime.now().isoformat()
-            }
-            await websocket.send_text(json.dumps(error_msg))
+            # Start fractalic process in background
+            process = await start_fractalic_process(file_path, execution_id)
+            if not process:
+                yield f"{json.dumps({'type': 'error', 'message': 'Failed to start process'}, ensure_ascii=False)}\n"
+                return
             
-    except Exception as e:
-        # Clear active execution on exception
-        try:
-            if execution_id in active_executions:
-                active_executions.pop(execution_id, None)
-        except Exception:
-            pass
-        error_msg = {
-            "type": "error",
-            "message": f"❌ Исключение при выполнении файла: {str(e)}",
-            "timestamp": datetime.now().isoformat()
-        }
-        await websocket.send_text(json.dumps(error_msg))
-
-# ============================================================================
-# End Chat Agent Implementation
-# ============================================================================
-
-@app.get("/api/chat/browse-directory")
-async def browse_directory(path: str = "."):
-    """Browse directory structure for file navigation"""
-    try:
-        fractalic_root = get_fractalic_root()
-        current_path = os.path.join(fractalic_root, path) if path != "." else fractalic_root
-        
-        # Security check - ensure we stay within workspace
-        if not os.path.abspath(current_path).startswith(os.path.abspath(fractalic_root)):
-            return {"success": False, "error": "Access denied: path outside workspace"}
-        
-        if not os.path.exists(current_path) or not os.path.isdir(current_path):
-            return {"success": False, "error": "Directory not found"}
-        
-        items = []
-        
-        # Add parent directory if not at root
-        if os.path.abspath(current_path) != os.path.abspath(fractalic_root):
-            parent_path = os.path.dirname(path)
-            if parent_path == "":
-                parent_path = "."
-            items.append({
-                "name": "..",
-                "type": "directory",
-                "path": parent_path
-            })
-        
-        # Get directories and files
-        try:
-            for item in sorted(os.listdir(current_path)):
-                # Skip hidden items and __pycache__
-                if item.startswith('.') or item == '__pycache__':
-                    continue
-                
-                item_path = os.path.join(current_path, item)
-                relative_path = os.path.join(path, item) if path != "." else item
-                
-                if os.path.isdir(item_path):
-                    items.append({
-                        "name": item,
-                        "type": "directory",
-                        "path": relative_path
-                    })
-                elif item.lower().endswith('.md'):
-                    # Get file info
-                    stat_info = os.stat(item_path)
-                    
-                    # Try to read description
-                    description = "No description"
-                    try:
-                        with open(item_path, 'r', encoding='utf-8') as f:
-                            content = f.read(200)
-                            lines = content.split('\n')
-                            description_lines = []
-                            for line in lines[:2]:
-                                clean_line = line.strip().replace('#', '').replace('---', '').strip()
-                                if clean_line and not clean_line.startswith(('title:', 'description:')):
-                                    description_lines.append(clean_line)
-                            description = ' '.join(description_lines)[:80]
-                            if len(description) == 80:
-                                description += "..."
-                            if not description:
-                                description = "No description"
-                    except:
-                        description = "No description"
-                    
-                    file_info = {
-                        "name": item,
-                        "type": "file",
-                        "path": relative_path,
-                        "size": stat_info.st_size,
-                        "modified": datetime.fromtimestamp(stat_info.st_mtime).isoformat(),
-                        "description": description
-                    }
-                    items.append(file_info)
-        
-        except PermissionError:
-            return {"success": False, "error": "Permission denied"}
-        
-        return {
-            "success": True,
-            "currentPath": path,
-            "items": items
-        }
-        
-    except Exception as e:
-        return {"success": False, "error": str(e)}
-
-@app.get("/api/chat/file-diff")
-async def get_file_diff(filePath: str):
-    """Get diff between original MD file and its CTX file"""
-    try:
-        fractalic_root = get_fractalic_root()
-        
-        # Original file path
-        original_file = os.path.join(fractalic_root, filePath)
-        if not os.path.exists(original_file):
-            return {"success": False, "error": f"Исходный файл не найден: {filePath}"}
-        
-        # CTX file path (same directory, same name but .ctx extension)
-        file_dir = os.path.dirname(original_file)
-        file_name = os.path.basename(original_file)
-        ctx_file_name = os.path.splitext(file_name)[0] + '.ctx'
-        ctx_file = os.path.join(file_dir, ctx_file_name)
-        
-        if not os.path.exists(ctx_file):
-            return {"success": False, "error": f"CTX файл не найден: {ctx_file_name}"}
-        
-        # Read both files
-        with open(original_file, 'r', encoding='utf-8') as f:
-            original_content = f.read()
-        
-        with open(ctx_file, 'r', encoding='utf-8') as f:
-            ctx_content = f.read()
-        
-        # Create simple diff
-        import difflib
-        
-        original_lines = original_content.splitlines(keepends=True)
-        ctx_lines = ctx_content.splitlines(keepends=True)
-        
-        diff = difflib.unified_diff(
-            original_lines, 
-            ctx_lines,
-            fromfile=f"original/{file_name}",
-            tofile=f"context/{ctx_file_name}",
-            lineterm=''
-        )
-        
-        diff_text = ''.join(diff)
-        
-        if not diff_text:
-            diff_text = "Файлы идентичны - изменений нет."
-        
-        return {
-            "success": True, 
-            "diff": diff_text,
-            "original_file": filePath,
-            "ctx_file": ctx_file_name
-        }
-        
-    except Exception as e:
-        logging.error(f"Error generating diff for {filePath}: {e}")
-        return {"success": False, "error": str(e)}
-
-@app.get("/api/chat/terminal-stream/{execution_id}")
-async def terminal_stream_live(execution_id: str):
-    """Attach to the live output of a running execution by execution_id.
-    We consume from a per-execution asyncio.Queue filled by the PTY reader task.
-    """
-    async def _gen():
-        try:
-            info = active_executions.get(execution_id)
-            if not info:
-                yield "[No active execution with this ID]\n"
-                return
-            q: asyncio.Queue = info.get('stream_queue')
-            if not q:
-                yield "[Stream not available]\n"
-                return
-            # Stream items as they arrive
-            while True:
+            # Stream events from queue as they arrive
+            completed = False
+            timeout_count = 0
+            max_timeouts = 120  # 60 seconds total (0.5s * 120)
+            
+            while not completed and timeout_count < max_timeouts:
                 try:
-                    chunk = await asyncio.wait_for(q.get(), timeout=1.0)
-                    if "[Process finished]" in chunk:
-                        yield chunk
-                        break
-                    yield chunk
-                except asyncio.TimeoutError:
-                    # Keep connection alive, check if execution still exists
-                    if execution_id not in active_executions:
-                        yield "[Execution completed]\n"
-                        break
-                    continue
+                    # Check for events in the queue
+                    events_found = False
+                    with events_lock:
+                        while events_queues[execution_id]:
+                            event = events_queues[execution_id].popleft()
+                            print(f"[DEBUG] Streaming event: {event.get('type')} phase={event.get('phase')} for {execution_id}")
+                            yield f"{json.dumps(event, ensure_ascii=False)}\n"
+                            events_found = True
+                            
+                            # Check if this is completion event
+                            if event.get('type') == 'execution' and event.get('phase') == 'complete':
+                                print(f"[DEBUG] Completion event detected for {execution_id}")
+                                completed = True
+                                break
+                            elif event.get('type') == 'execution' and event.get('phase') == 'error':
+                                print(f"[DEBUG] Error event detected for {execution_id}")
+                                completed = True
+                                break
+                    
+                    if events_found:
+                        timeout_count = 0  # Reset timeout when we get events
+                    else:
+                        # No events available, wait a bit and increment timeout
+                        await asyncio.sleep(0.5)
+                        timeout_count += 1
+                        
+                        # Check if process is still running
+                        if process and hasattr(process, 'returncode') and process.returncode is not None:
+                            # Process finished, wait a bit more for final events
+                            await asyncio.sleep(1)
+                            with events_lock:
+                                while events_queues[execution_id]:
+                                    event = events_queues[execution_id].popleft()
+                                    yield f"{json.dumps(event, ensure_ascii=False)}\n"
+                            completed = True
+                            break
+                        
+                except Exception as e:
+                    yield f"{json.dumps({'type': 'error', 'message': f'Stream error: {str(e)}'}, ensure_ascii=False)}\n"
+                    break
+            
+            # Final completion message
+            if not completed:
+                yield f"{json.dumps({'type': 'error', 'message': 'Process timeout - no completion event received'}, ensure_ascii=False)}\n"
+                
         except Exception as e:
-            yield f"\n[Terminal attach error: {str(e)}]\n"
-    headers = {"X-Accel-Buffering": "no", "Cache-Control": "no-cache"}
-    return StreamingResponse(_gen(), media_type="text/plain", headers=headers)
+            yield f"{json.dumps({'type': 'error', 'message': f'Fatal error: {str(e)}'}, ensure_ascii=False)}\n"
+
+    return StreamingResponse(
+        event_stream(), 
+        media_type='text/plain',
+        headers={
+            'Cache-Control': 'no-cache', 
+            'X-Execution-Id': execution_id
+        }
+    )
+
+@app.get('/api/chat/terminal-stream/{execution_id}')
+async def stream_terminal_output(execution_id: str):
+    """Streamable HTTP endpoint for terminal output by execution_id."""
+    
+    async def terminal_stream():
+        try:
+            # Найти процесс по execution_id из /ws/run_fractalic
+            # Пока что просто возвращаем сообщение что нужно использовать /ws/run_fractalic
+            yield f"[INFO] Terminal stream для execution: {execution_id}\n"
+            yield f"[INFO] Для просмотра полного вывода используйте /ws/run_fractalic endpoint\n"
+            yield f"[INFO] События fractalic передаются через /api/chat/stream\n"
+            
+            # TODO: Реализовать привязку к реальному процессу
+            import asyncio
+            await asyncio.sleep(2)
+            yield f"[INFO] Terminal stream завершён для {execution_id}\n"
+        except Exception as e:
+            yield f"[ERROR] {str(e)}\n"
+
+    return StreamingResponse(
+        terminal_stream(),
+        media_type='text/plain',
+        headers={'Cache-Control': 'no-cache'}
+    )
+
+# Helper to emit execution lifecycle - now just logs
+async def emit_execution_start(file_path: str, execution_id: str):
+    print(f"[INFO] Execution started: {execution_id} for {file_path}")
+    # Events will come via HTTP from fractalic.py, not here
