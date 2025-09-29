@@ -1011,20 +1011,9 @@ async def run_fractalic(request: Request):
                     try:
                         decoded_chunk = buffer.decode('utf-8', errors='strict')
                         
-                        # Skip event lines - they now go via HTTP, not terminal
-                        if decoded_chunk.startswith('[Event]'):
-                            buffer = b''
-                            continue
-                            
-                        # Filter out event lines from multi-line chunks  
-                        if '\n' in decoded_chunk:
-                            lines = decoded_chunk.split('\n')
-                            filtered_lines = [line for line in lines if not line.startswith('[Event]')]
-                            filtered_chunk = '\n'.join(filtered_lines)
-                            if filtered_chunk.strip():
-                                yield filtered_chunk
-                        else:
-                            yield decoded_chunk
+                        # НЕ фильтруем [Event] строки - они нужны фронтенду
+                        # События теперь дублируются: идут и через HTTP для chat, и через terminal для совместимости
+                        yield decoded_chunk
                         buffer = b''  # Clear buffer after successful decode
                     except UnicodeDecodeError:
                         # If we still can't decode, yield with error replacement
@@ -1548,6 +1537,10 @@ import threading
 events_queues = defaultdict(lambda: deque(maxlen=1000))
 events_lock = threading.Lock()
 
+# Store running processes per execution_id  
+running_processes = {}
+processes_lock = threading.Lock()
+
 @app.post("/api/events/receive")
 async def receive_event(event: dict):
     """Receive event from fractalic process."""
@@ -1555,7 +1548,7 @@ async def receive_event(event: dict):
     if not execution_id:
         raise HTTPException(status_code=400, detail='Missing execution_id')
     
-    print(f"[DEBUG] Received event: {event.get('type')} for {execution_id}")
+    # Debug: print(f"[DEBUG] Received event: {event.get('type')} for {execution_id}")
     
     with events_lock:
         events_queues[execution_id].append(event)
@@ -1585,6 +1578,10 @@ async def start_fractalic_process(file_path: str, execution_id: str):
             cwd=fractalic_root,
             env=env
         )
+        
+        # Store process for terminal streaming
+        with processes_lock:
+            running_processes[execution_id] = process
         
         # Don't wait for completion - let events drive the response
         return process
@@ -1626,17 +1623,17 @@ async def stream_chat_events(request: Request):
                     with events_lock:
                         while events_queues[execution_id]:
                             event = events_queues[execution_id].popleft()
-                            print(f"[DEBUG] Streaming event: {event.get('type')} phase={event.get('phase')} for {execution_id}")
+                            # Debug: print(f"[DEBUG] Streaming event: {event.get('type')} phase={event.get('phase')} for {execution_id}")
                             yield f"{json.dumps(event, ensure_ascii=False)}\n"
                             events_found = True
                             
                             # Check if this is completion event
                             if event.get('type') == 'execution' and event.get('phase') == 'complete':
-                                print(f"[DEBUG] Completion event detected for {execution_id}")
+                                # Debug: print(f"[DEBUG] Completion event detected for {execution_id}")
                                 completed = True
                                 break
                             elif event.get('type') == 'execution' and event.get('phase') == 'error':
-                                print(f"[DEBUG] Error event detected for {execution_id}")
+                                # Debug: print(f"[DEBUG] Error event detected for {execution_id}")
                                 completed = True
                                 break
                     
@@ -1684,16 +1681,71 @@ async def stream_terminal_output(execution_id: str):
     
     async def terminal_stream():
         try:
-            # Найти процесс по execution_id из /ws/run_fractalic
-            # Пока что просто возвращаем сообщение что нужно использовать /ws/run_fractalic
-            yield f"[INFO] Terminal stream для execution: {execution_id}\n"
-            yield f"[INFO] Для просмотра полного вывода используйте /ws/run_fractalic endpoint\n"
-            yield f"[INFO] События fractalic передаются через /api/chat/stream\n"
+            # Найти процесс по execution_id
+            process = None
+            with processes_lock:
+                process = running_processes.get(execution_id)
             
-            # TODO: Реализовать привязку к реальному процессу
-            import asyncio
-            await asyncio.sleep(2)
+            if not process:
+                yield f"[INFO] Ожидание запуска процесса для execution: {execution_id}\n"
+                # Ждем появления процесса
+                for _ in range(50):  # 25 секунд ожидания
+                    await asyncio.sleep(0.5)
+                    with processes_lock:
+                        process = running_processes.get(execution_id)
+                    if process:
+                        break
+                
+                if not process:
+                    yield f"[ERROR] Процесс не найден для execution_id: {execution_id}\n"
+                    return
+            
+            yield f"[INFO] Подключение к terminal stream для: {execution_id}\n"
+            
+            # Читаем вывод процесса
+            buffer = b''
+            while True:
+                try:
+                    # Проверяем завершение процесса
+                    if process.returncode is not None:
+                        # Процесс завершился, читаем оставшийся вывод
+                        remaining_stdout = await process.stdout.read()
+                        remaining_stderr = await process.stderr.read()
+                        
+                        if remaining_stdout:
+                            yield remaining_stdout.decode('utf-8', errors='replace')
+                        if remaining_stderr:
+                            yield f"[STDERR] {remaining_stderr.decode('utf-8', errors='replace')}"
+                        
+                        break
+                    
+                    # Читаем stdout с таймаутом
+                    try:
+                        chunk = await asyncio.wait_for(process.stdout.read(1024), timeout=1.0)
+                        if chunk:
+                            # НЕ фильтруем [Event] строки - они нужны для фронтенда
+                            decoded = chunk.decode('utf-8', errors='replace')
+                            yield decoded
+                    except asyncio.TimeoutError:
+                        # Проверяем stderr
+                        try:
+                            err_chunk = await asyncio.wait_for(process.stderr.read(1024), timeout=0.1)
+                            if err_chunk:
+                                yield f"[STDERR] {err_chunk.decode('utf-8', errors='replace')}"
+                        except asyncio.TimeoutError:
+                            pass
+                        
+                except Exception as e:
+                    yield f"[ERROR] Terminal stream error: {str(e)}\n"
+                    break
+            
+            # Очистить процесс из хранилища
+            with processes_lock:
+                if execution_id in running_processes:
+                    del running_processes[execution_id]
+            
             yield f"[INFO] Terminal stream завершён для {execution_id}\n"
+            
         except Exception as e:
             yield f"[ERROR] {str(e)}\n"
 
