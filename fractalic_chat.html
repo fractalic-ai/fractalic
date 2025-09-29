@@ -546,10 +546,11 @@
 
         .terminal-viewer {
             height: 100%;
-            overflow: auto;
+            overflow: hidden;
             background: #1e1e1e;
             color: #ffffff;
             border: 1px solid #333;
+            position: relative;
         }
 
         .terminal-content {
@@ -562,7 +563,42 @@
             background: #1e1e1e;
             color: #ffffff;
             border: none;
+            word-wrap: break-word;
+            overflow-wrap: break-word;
+            max-height: calc(80vh - 120px);
+            overflow-y: auto;
+            overflow-x: auto;
         }
+
+        /* ANSI Color Classes */
+        .ansi-black { color: #000000; }
+        .ansi-red { color: #cd0000; }
+        .ansi-green { color: #00cd00; }
+        .ansi-yellow { color: #cdcd00; }
+        .ansi-blue { color: #0000ee; }
+        .ansi-magenta { color: #cd00cd; }
+        .ansi-cyan { color: #00cdcd; }
+        .ansi-white { color: #e5e5e5; }
+        .ansi-bright-black { color: #7f7f7f; }
+        .ansi-bright-red { color: #ff0000; }
+        .ansi-bright-green { color: #00ff00; }
+        .ansi-bright-yellow { color: #ffff00; }
+        .ansi-bright-blue { color: #5c5cff; }
+        .ansi-bright-magenta { color: #ff00ff; }
+        .ansi-bright-cyan { color: #00ffff; }
+        .ansi-bright-white { color: #ffffff; }
+        .ansi-bg-black { background-color: #000000; }
+        .ansi-bg-red { background-color: #cd0000; }
+        .ansi-bg-green { background-color: #00cd00; }
+        .ansi-bg-yellow { background-color: #cdcd00; }
+        .ansi-bg-blue { background-color: #0000ee; }
+        .ansi-bg-magenta { background-color: #cd00cd; }
+        .ansi-bg-cyan { background-color: #00cdcd; }
+        .ansi-bg-white { background-color: #e5e5e5; }
+        .ansi-bold { font-weight: bold; }
+        .ansi-dim { opacity: 0.7; }
+        .ansi-italic { font-style: italic; }
+        .ansi-underline { text-decoration: underline; }
 
         .terminal-status {
             padding: 10px 16px;
@@ -674,6 +710,76 @@
     </div>
 
     <script>
+        // ANSI Code Parser для правильного отображения цветного текста от Python Rich
+        function parseAnsiToHtml(text) {
+            const ansiRegex = /\x1b\[([0-9;]*)m/g;
+            let result = '';
+            let lastIndex = 0;
+            let currentClasses = [];
+            
+            const colorMap = {
+                '30': 'ansi-black', '31': 'ansi-red', '32': 'ansi-green', '33': 'ansi-yellow',
+                '34': 'ansi-blue', '35': 'ansi-magenta', '36': 'ansi-cyan', '37': 'ansi-white',
+                '90': 'ansi-bright-black', '91': 'ansi-bright-red', '92': 'ansi-bright-green', 
+                '93': 'ansi-bright-yellow', '94': 'ansi-bright-blue', '95': 'ansi-bright-magenta', 
+                '96': 'ansi-bright-cyan', '97': 'ansi-bright-white',
+                '40': 'ansi-bg-black', '41': 'ansi-bg-red', '42': 'ansi-bg-green', '43': 'ansi-bg-yellow',
+                '44': 'ansi-bg-blue', '45': 'ansi-bg-magenta', '46': 'ansi-bg-cyan', '47': 'ansi-bg-white',
+                '1': 'ansi-bold', '2': 'ansi-dim', '3': 'ansi-italic', '4': 'ansi-underline'
+            };
+            
+            let match;
+            while ((match = ansiRegex.exec(text)) !== null) {
+                // Добавляем текст до ANSI кода
+                if (match.index > lastIndex) {
+                    const textSegment = text.substring(lastIndex, match.index);
+                    if (currentClasses.length > 0) {
+                        result += `<span class="${currentClasses.join(' ')}">${escapeHtml(textSegment)}</span>`;
+                    } else {
+                        result += escapeHtml(textSegment);
+                    }
+                }
+                
+                // Обрабатываем ANSI код
+                const codes = match[1].split(';');
+                for (const code of codes) {
+                    if (code === '0' || code === '') {
+                        // Reset
+                        currentClasses = [];
+                    } else if (colorMap[code]) {
+                        // Удаляем конфликтующие классы
+                        if (code.startsWith('3') || code.startsWith('9')) {
+                            currentClasses = currentClasses.filter(c => !c.startsWith('ansi-') || c.startsWith('ansi-bg-') || c.startsWith('ansi-bold') || c.startsWith('ansi-dim') || c.startsWith('ansi-italic') || c.startsWith('ansi-underline'));
+                        }
+                        if (code.startsWith('4') && code.length === 2) {
+                            currentClasses = currentClasses.filter(c => !c.startsWith('ansi-bg-'));
+                        }
+                        currentClasses.push(colorMap[code]);
+                    }
+                }
+                
+                lastIndex = ansiRegex.lastIndex;
+            }
+            
+            // Добавляем оставшийся текст
+            if (lastIndex < text.length) {
+                const textSegment = text.substring(lastIndex);
+                if (currentClasses.length > 0) {
+                    result += `<span class="${currentClasses.join(' ')}">${escapeHtml(textSegment)}</span>`;
+                } else {
+                    result += escapeHtml(textSegment);
+                }
+            }
+            
+            return result;
+        }
+        
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
         class FractalicChatClient {
             constructor() {
                 // HTTP streaming mode (no persistent WebSocket)
@@ -894,7 +1000,7 @@
             async showTerminalViewer(filePath, executionId) {
                 try {
                     this.terminalFileName.textContent = filePath;
-                    this.terminalContent.textContent = '';
+                    this.terminalContent.innerHTML = '';
                     this.terminalStatus.textContent = 'Подключение к терминалу...';
                     this.terminalStatus.className = 'terminal-status running';
                     this.terminalViewerModal.style.display = 'block';
@@ -926,7 +1032,10 @@
                         }
                         
                         const chunk = decoder.decode(value, { stream: true });
-                        this.terminalContent.textContent += chunk;
+                        
+                        // Парсим ANSI коды для цветного вывода
+                        const htmlChunk = parseAnsiToHtml(chunk);
+                        this.terminalContent.innerHTML += htmlChunk;
                         
                         // Автоскролл к концу
                         this.terminalContent.scrollTop = this.terminalContent.scrollHeight;
@@ -937,7 +1046,7 @@
                         console.log('Terminal stream aborted');
                     } else {
                         console.error('Error fetching terminal stream:', error);
-                        this.terminalContent.textContent += `\n[Ошибка соединения: ${error.message}]`;
+                        this.terminalContent.innerHTML += `\n<span class="ansi-red">[Ошибка соединения: ${escapeHtml(error.message)}]</span>`;
                         this.terminalStatus.textContent = 'Ошибка соединения';
                         this.terminalStatus.className = 'terminal-status completed';
                     }
