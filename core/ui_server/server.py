@@ -1555,13 +1555,25 @@ async def receive_event(event: dict):
     
     return {"status": "received"}
 
-async def start_fractalic_process(file_path: str, execution_id: str):
-    """Start fractalic process with execution_id."""
+async def start_fractalic_process(file_path: str, execution_id: str, user_request: str = ""):
+    """Start fractalic process with execution_id and user request."""
     try:
         fractalic_root = get_fractalic_root()
         fractalic_path = Path(fractalic_root) / "fractalic.py"
         python_exe = sys.executable 
+        
+        # Формируем команду с пользовательским запросом
         command = f'"{python_exe}" "{fractalic_path}" "{file_path}"'
+        if user_request.strip():
+            # Используем новый параметр для прямой передачи значения (без временных файлов)
+            # Экранируем кавычки в пользовательском запросе
+            escaped_user_request = user_request.replace('"', '\\"')
+            command += f' --param_input_user_request "UserRequest" --param_input_user_request_value "{escaped_user_request}"'
+            print(f"[DEBUG] Starting fractalic with user_request: '{user_request}'")
+            print(f"[DEBUG] Command: {command}")
+        else:
+            print(f"[DEBUG] Starting fractalic without user_request")
+            print(f"[DEBUG] Command: {command}")
 
         env = os.environ.copy()
         env.update({
@@ -1595,6 +1607,8 @@ async def stream_chat_events(request: Request):
     
     data = await request.json()
     file_path = data.get("file_path")
+    user_message = data.get("message", "")
+    # Debug: print(f"[DEBUG] Received request - file_path: '{file_path}', message: '{user_message}'")
     if not file_path:
         raise HTTPException(status_code=400, detail="file_path is required")
     
@@ -1606,7 +1620,7 @@ async def stream_chat_events(request: Request):
     async def event_stream():
         try:
             # Start fractalic process in background
-            process = await start_fractalic_process(file_path, execution_id)
+            process = await start_fractalic_process(file_path, execution_id, user_message)
             if not process:
                 yield f"{json.dumps({'type': 'error', 'message': 'Failed to start process'}, ensure_ascii=False)}\n"
                 return

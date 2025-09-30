@@ -112,8 +112,8 @@ def _stream_event_to_server(event):
         pass
 
 
-def run_fractalic(input_file, task_file=None, param_input_user_request=None, param_node=None, capture_output=False, 
-                 model=None, api_key=None, operation=None, show_operations=False, context_render_mode=None):
+def run_fractalic(input_file, task_file=None, param_input_user_request=None, param_input_user_request_value=None, 
+                 param_node=None, capture_output=False, model=None, api_key=None, operation=None, show_operations=False, context_render_mode=None):
     """
     Run a Fractalic script programmatically - the core execution function.
     
@@ -271,6 +271,17 @@ def run_fractalic(input_file, task_file=None, param_input_user_request=None, par
                 }
             temp_ast = parse_file(task_file)
             final_param_node = temp_ast.get_part_by_path(param_input_user_request, True)
+        
+        # Handle direct parameter value injection (no file needed)
+        if not final_param_node and param_input_user_request_value and param_input_user_request:
+            from core.ast_md.node import Node, NodeType
+            final_param_node = Node(
+                type=NodeType.OPERATION,
+                name=param_input_user_request,
+                level=1,
+                params={'name': param_input_user_request},
+                content=param_input_user_request_value
+            )
         
         # Initialize variables for exception handling
         result_nodes = None
@@ -518,6 +529,8 @@ def main():
                        default='append')
     parser.add_argument('--param_input_user_request', type=str,
                        help='Part path for ParamInput-UserRequest', default=None)
+    parser.add_argument('--param_input_user_request_value', type=str,
+                       help='Direct value for UserRequest parameter (creates param dynamically)', default=None)
     parser.add_argument('-v', '--show-operations', action='store_true',
                        help='Make operations visible to LLM (overrides TOML setting)')
     parser.add_argument('--context-render-mode', choices=['direct', 'json'], default=None,
@@ -540,6 +553,7 @@ def main():
             input_file=args.input_file,
             task_file=args.task_file,
             param_input_user_request=args.param_input_user_request,
+            param_input_user_request_value=args.param_input_user_request_value,
             model=args.model,
             api_key=args.api_key,
             operation=args.operation,
