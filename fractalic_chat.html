@@ -942,6 +942,7 @@
                 // AST sidebar elements
                 this.astBlocksContainer = document.getElementById('astBlocksContainer');
                 this.astBlocks = new Map(); // block_id -> block element
+                this.isFirstASTSnapshot = true; // Track if this is the first snapshot
 
                 this.selectedFile = null;
                 this.currentBrowserPath = '.';
@@ -1379,11 +1380,14 @@
                 // Track which blocks already exist to mark as new or existing
                 const existingBlockIds = new Set(this.astBlocks.keys());
 
+                // Don't highlight anything on first snapshot (initial parse)
+                const shouldHighlightNew = !this.isFirstASTSnapshot;
+
                 // Rebuild blocks in correct order from the snapshot
                 const newBlocksMap = new Map();
                 blocks.forEach(block => {
                     const blockId = block.id;
-                    const isNew = !existingBlockIds.has(blockId);
+                    const isNew = !existingBlockIds.has(blockId) && shouldHighlightNew;
 
                     // Create or reuse block element
                     let blockEl = this.astBlocks.get(blockId);
@@ -1403,6 +1407,9 @@
 
                 // Replace old map with new one
                 this.astBlocks = newBlocksMap;
+
+                // Mark that we've received the first snapshot
+                this.isFirstASTSnapshot = false;
             }
 
             updateASTBlockContent(blockEl, block, isNew) {
@@ -1428,8 +1435,13 @@
 
                 blockEl.innerHTML = html;
 
+                // Remove 'new' class first to avoid duplicate animations
+                blockEl.classList.remove('new');
+
                 // Add 'new' class with animation for new blocks
                 if (isNew) {
+                    // Force reflow to restart animation
+                    void blockEl.offsetWidth;
                     blockEl.classList.add('new');
                     setTimeout(() => {
                         blockEl.classList.remove('new');
