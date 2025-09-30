@@ -18,18 +18,113 @@
             display: flex;
             justify-content: center;
             align-items: center;
+            margin: 0;
+            padding: 10px;
+        }
+
+        .main-container {
+            width: 95%;
+            max-width: 1600px;
+            height: 95vh;
+            display: grid;
+            grid-template-columns: 1fr 350px;
+            gap: 15px;
         }
 
         .chat-container {
-            width: 90%;
-            max-width: 1200px;
-            height: 90vh;
             background: white;
             border-radius: 20px;
             box-shadow: 0 25px 50px rgba(0,0,0,0.1);
             display: flex;
             flex-direction: column;
             overflow: hidden;
+        }
+
+        .ast-sidebar {
+            background: white;
+            border-radius: 20px;
+            box-shadow: 0 25px 50px rgba(0,0,0,0.1);
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        .ast-sidebar-header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 15px 20px;
+            font-weight: 600;
+            font-size: 16px;
+            border-radius: 20px 20px 0 0;
+        }
+
+        .ast-blocks-container {
+            flex: 1;
+            overflow-y: auto;
+            padding: 15px;
+            background: #f8f9fa;
+        }
+
+        .ast-block {
+            background: white;
+            border: 2px solid #e9ecef;
+            border-radius: 8px;
+            padding: 10px;
+            margin-bottom: 10px;
+            transition: all 0.3s;
+            cursor: pointer;
+        }
+
+        .ast-block:hover {
+            border-color: #667eea;
+            box-shadow: 0 2px 8px rgba(102, 126, 234, 0.15);
+        }
+
+        .ast-block.new {
+            border-color: #28a745;
+            background: #d4edda;
+            animation: highlight-fade 3s ease-out;
+        }
+
+        @keyframes highlight-fade {
+            0% { background: #c3e6cb; }
+            100% { background: white; }
+        }
+
+        .ast-block-type {
+            font-size: 11px;
+            font-weight: 600;
+            text-transform: uppercase;
+            color: #6c757d;
+            margin-bottom: 5px;
+            display: flex;
+            align-items: center;
+            gap: 5px;
+        }
+
+        .ast-block-header {
+            font-weight: 600;
+            color: #495057;
+            margin-bottom: 5px;
+            font-size: 13px;
+        }
+
+        .ast-block-preview {
+            font-size: 12px;
+            color: #6c757d;
+            line-height: 1.4;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            display: -webkit-box;
+            -webkit-line-clamp: 2;
+            -webkit-box-orient: vertical;
+        }
+
+        .ast-block-id {
+            font-size: 10px;
+            color: #adb5bd;
+            margin-top: 5px;
+            font-family: monospace;
         }
 
         .chat-header {
@@ -159,10 +254,25 @@
             font-size: 12px;
             color: #6c757d;
             margin: 5px 15px 0;
+            display: flex;
+            align-items: center;
+            gap: 8px;
         }
 
         .message.user .message-time {
-            text-align: right;
+            justify-content: flex-end;
+        }
+
+        .session-badge {
+            display: inline-block;
+            padding: 2px 8px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border-radius: 12px;
+            font-size: 10px;
+            font-weight: 600;
+            cursor: help;
+            white-space: nowrap;
         }
 
         .code-block {
@@ -621,30 +731,43 @@
     </style>
 </head>
 <body>
-    <div class="chat-container">
-        <div class="connection-status" style="display:flex;align-items:center;gap:16px;flex-wrap:wrap;">
-            <span id="connectionStatus" class="status-disconnected">🔴 Подключение...</span>
-            <div class="file-selector-container" style="margin:0;">
-                <button class="file-select-button" id="selectFileButton">
-                    📁 Выбрать MD файл
-                </button>
-                <span class="selected-file-display" id="selectedFileDisplay">Файл не выбран</span>
-                <button class="clear-selection-button" id="clearSelectionButton" style="display: none;" title="Очистить выбор">✕</button>
+    <div class="main-container">
+        <div class="chat-container">
+            <div class="connection-status" style="display:flex;align-items:center;gap:16px;flex-wrap:wrap;">
+                <span id="connectionStatus" class="status-disconnected">🔴 Подключение...</span>
+                <div class="file-selector-container" style="margin:0;">
+                    <button class="file-select-button" id="selectFileButton">
+                        📁 Выбрать MD файл
+                    </button>
+                    <span class="selected-file-display" id="selectedFileDisplay">Файл не выбран</span>
+                    <button class="clear-selection-button" id="clearSelectionButton" style="display: none;" title="Очистить выбор">✕</button>
+                </div>
+            </div>
+
+            <div class="chat-messages" id="chatMessages"></div>
+
+            <div class="typing-indicator" id="typingIndicator">
+                Агент обрабатывает ваш запрос...
+            </div>
+
+            <div class="chat-input-container">
+                <div class="input-row">
+            <input type="text" class="chat-input" id="chatInput"
+                   placeholder="Сначала выберите markdown файл выше"
+                maxlength="1000" disabled>
+            <button class="send-button" id="sendButton" disabled>Отправить</button>
+                </div>
             </div>
         </div>
 
-        <div class="chat-messages" id="chatMessages"></div>
-
-        <div class="typing-indicator" id="typingIndicator">
-            Агент обрабатывает ваш запрос...
-        </div>
-
-        <div class="chat-input-container">
-            <div class="input-row">
-        <input type="text" class="chat-input" id="chatInput" 
-               placeholder="Сначала выберите markdown файл выше" 
-            maxlength="1000" disabled>
-        <button class="send-button" id="sendButton" disabled>Отправить</button>
+        <div class="ast-sidebar">
+            <div class="ast-sidebar-header">
+                📊 AST Блоки
+            </div>
+            <div class="ast-blocks-container" id="astBlocksContainer">
+                <div style="text-align: center; color: #6c757d; padding: 20px;">
+                    Ожидание AST данных...
+                </div>
             </div>
         </div>
     </div>
@@ -791,7 +914,7 @@
                 this.typingIndicator = document.getElementById('typingIndicator');
                 this.messageKeys = new Set();
                 this.conversation = [];
-                
+
                 // File browser elements
                 this.selectFileButton = document.getElementById('selectFileButton');
                 this.selectedFileDisplay = document.getElementById('selectedFileDisplay');
@@ -801,13 +924,13 @@
                 this.cancelButton = document.getElementById('cancelButton');
                 this.currentPathDisplay = document.getElementById('currentPath');
                 this.fileList = document.getElementById('fileList');
-                
+
                 // Diff viewer elements
                 this.diffViewerModal = document.getElementById('diffViewerModal');
                 this.diffModalCloseButton = document.getElementById('diffModalCloseButton');
                 this.closeDiffButton = document.getElementById('closeDiffButton');
                 this.diffContent = document.getElementById('diffContent');
-                
+
                 // Terminal viewer elements
                 this.terminalViewerModal = document.getElementById('terminalViewerModal');
                 this.terminalModalCloseButton = document.getElementById('terminalModalCloseButton');
@@ -815,11 +938,15 @@
                 this.terminalContent = document.getElementById('terminalContent');
                 this.terminalStatus = document.getElementById('terminalStatus');
                 this.terminalFileName = document.getElementById('terminalFileName');
-                
+
+                // AST sidebar elements
+                this.astBlocksContainer = document.getElementById('astBlocksContainer');
+                this.astBlocks = new Map(); // block_id -> block element
+
                 this.selectedFile = null;
                 this.currentBrowserPath = '.';
                 this.activeStreams = new Map(); // execution_id -> AbortController
-                
+
                 this.initializeEventListeners();
                 this.connectionStatus.textContent = '🟢 Готово (HTTP Stream)';
                 this.connectionStatus.className = 'status-connected';
@@ -1176,10 +1303,16 @@
                 try {
                     const data = JSON.parse(line);
                     const now = this.formatTime(new Date().toISOString());
+                    const sessionId = data.session_id || data.execution_id; // Fallback to execution_id if session_id not present
+
                     if (data.type === 'chat_message') {
-                        this.addMessage(data.role === 'user' ? 'user' : 'assistant', data.content, now);
+                        this.addMessage(data.role === 'user' ? 'user' : 'assistant', data.content, now, { session_id: sessionId });
                         if (data.return_content) {
-                            this.addMessage('assistant', 'Ответ Fractalic:', now, { returnContent: data.return_content, returnVariant: data.return_variant });
+                            this.addMessage('assistant', 'Ответ Fractalic:', now, {
+                                returnContent: data.return_content,
+                                returnVariant: data.return_variant,
+                                session_id: sessionId
+                            });
                         }
                     } else if (data.type === 'execution') {
                         if (data.phase === 'ack') {
@@ -1215,10 +1348,13 @@
                             });
                         }
                     } else if (data.type === 'error') {
-                        this.addMessage('error', data.message || 'Ошибка', now);
+                        this.addMessage('error', data.message || 'Ошибка', now, { session_id: sessionId });
                     } else if (data.type === 'termination' || data.type === 'stream_end') {
                         // end of stream
                         this.showTyping(false);
+                    } else if (data.type === 'ast_update') {
+                        // Handle AST structure update
+                        this.renderASTBlocks(data.blocks || [], data.operation);
                     } else if (data.type === 'keepalive') {
                         // ignore keepalive messages
                     } else {
@@ -1227,6 +1363,86 @@
                 } catch (e) {
                     console.warn('Bad line', line, e);
                 }
+            }
+
+            renderASTBlocks(blocks, operationType) {
+                // Clear container if no blocks
+                if (!blocks || blocks.length === 0) {
+                    this.astBlocksContainer.innerHTML = '<div style="text-align: center; color: #6c757d; padding: 20px;">Нет AST блоков</div>';
+                    this.astBlocks.clear();
+                    return;
+                }
+
+                // Clear container to rebuild in correct order
+                this.astBlocksContainer.innerHTML = '';
+
+                // Track which blocks already exist to mark as new or existing
+                const existingBlockIds = new Set(this.astBlocks.keys());
+
+                // Rebuild blocks in correct order from the snapshot
+                const newBlocksMap = new Map();
+                blocks.forEach(block => {
+                    const blockId = block.id;
+                    const isNew = !existingBlockIds.has(blockId);
+
+                    // Create or reuse block element
+                    let blockEl = this.astBlocks.get(blockId);
+                    if (!blockEl) {
+                        blockEl = document.createElement('div');
+                        blockEl.className = 'ast-block';
+                        blockEl.dataset.blockId = blockId;
+                    }
+
+                    // Update block content
+                    this.updateASTBlockContent(blockEl, block, isNew);
+
+                    // Append in order
+                    this.astBlocksContainer.appendChild(blockEl);
+                    newBlocksMap.set(blockId, blockEl);
+                });
+
+                // Replace old map with new one
+                this.astBlocks = newBlocksMap;
+            }
+
+            updateASTBlockContent(blockEl, block, isNew) {
+                const blockId = block.id;
+
+                // Get icon for block type
+                const typeIcon = this.getBlockTypeIcon(block.type);
+
+                // Build block HTML
+                let html = `
+                    <div class="ast-block-type">${typeIcon} ${block.type}</div>
+                `;
+
+                if (block.header) {
+                    html += `<div class="ast-block-header">${escapeHtml(block.header)}</div>`;
+                }
+
+                if (block.content_preview) {
+                    html += `<div class="ast-block-preview">${escapeHtml(block.content_preview)}</div>`;
+                }
+
+                html += `<div class="ast-block-id">ID: ${escapeHtml(blockId.substring(0, 16))}</div>`;
+
+                blockEl.innerHTML = html;
+
+                // Add 'new' class with animation for new blocks
+                if (isNew) {
+                    blockEl.classList.add('new');
+                    setTimeout(() => {
+                        blockEl.classList.remove('new');
+                    }, 3000);
+                }
+            }
+
+            getBlockTypeIcon(type) {
+                const icons = {
+                    'heading': '📋',
+                    'operation': '⚙️'
+                };
+                return icons[type] || '📝';
             }
 
             async fetchAndStreamChat(payload) {
@@ -1610,6 +1826,11 @@
                 messageDiv.className = `message ${type}`;
                 messageDiv.dataset.msgKey = key;
 
+                // Store session_id in dataset for filtering/grouping
+                if (options.session_id) {
+                    messageDiv.dataset.sessionId = options.session_id;
+                }
+
                 const contentDiv = document.createElement('div');
                 contentDiv.className = 'message-content';
 
@@ -1634,6 +1855,15 @@
                 const timeDiv = document.createElement('div');
                 timeDiv.className = 'message-time';
                 timeDiv.textContent = time;
+
+                // Add session_id badge if present
+                if (options.session_id) {
+                    const sessionBadge = document.createElement('span');
+                    sessionBadge.className = 'session-badge';
+                    sessionBadge.textContent = `Session: ${options.session_id.substring(0, 8)}`;
+                    sessionBadge.title = `Full session ID: ${options.session_id}`;
+                    timeDiv.appendChild(sessionBadge);
+                }
 
                 messageDiv.appendChild(contentDiv);
                 messageDiv.appendChild(timeDiv);

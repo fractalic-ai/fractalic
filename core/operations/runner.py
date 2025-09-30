@@ -23,6 +23,9 @@ from rich import print
 from rich.console import Console
 from core.paths import set_session_cwd
 
+# Import emit_ast_snapshot for AST visualization
+from core.event_emitters import emit_ast_snapshot
+
 def get_relative_path(base_dir: str, file_path: str) -> str:
     """Convert absolute path to relative path based on base directory."""
     try:
@@ -122,7 +125,10 @@ def run(filename: str, param_node: Optional[Union[Node, AST]] = None, create_new
             The value should be the absolute path of the file being processed.
             """
             for node in ast.parser.nodes.values():
-                node.created_by_file = local_file_name    
+                node.created_by_file = local_file_name
+
+            # Emit initial AST snapshot after parsing (before param injection)
+            emit_ast_snapshot(ast, operation_type="parse")
         except Exception as e:
             print(f"[ERROR runner.py] Error parsing file {local_file_name}: {str(e)}")
             print(f"[ERROR runner.py] Current directory: {os.getcwd()}")
@@ -178,6 +184,10 @@ def run(filename: str, param_node: Optional[Union[Node, AST]] = None, create_new
                 param_ast.parser.tail = decorated_param_node
                 ast.prepend_node_with_ast(ast.first().key, param_ast)
 
+        # Emit AST snapshot after param injection (shows input parameters added)
+        if param_node:
+            emit_ast_snapshot(ast, operation_type="param_inject")
+
         # RESTORING LOGIC
         current_node = ast.first()
 
@@ -194,6 +204,8 @@ def run(filename: str, param_node: Optional[Union[Node, AST]] = None, create_new
                 operation_name = f"@{current_node.name}"
                 if operation_name == "@import":
                     current_node = process_import(ast, current_node)
+                    # Emit AST snapshot after import operation
+                    emit_ast_snapshot(ast, operation_type="import")
                 elif operation_name == "@run":
                     current_node, child_node, run_ctx_file, run_ctx_hash, run_trc_file, run_trc_hash, _, child_explicit_return = process_run(
                         ast,
@@ -207,19 +219,26 @@ def run(filename: str, param_node: Optional[Union[Node, AST]] = None, create_new
                     )
                 elif operation_name == "@llm":
                     current_node = process_llm(
-                        ast, 
+                        ast,
                         current_node,
                         call_tree_node=new_node,
                         committed_files=committed_files,
                         file_commit_hashes=file_commit_hashes,
                         base_dir=base_dir
                     )
+                    # Emit AST snapshot after LLM operation
+                    emit_ast_snapshot(ast, operation_type="llm")
                 elif operation_name == "@goto":
                     current_node = process_goto(ast, current_node, goto_count)
+                    # No AST snapshot for goto (doesn't modify structure)
                 elif operation_name == "@shell":
                     current_node = process_shell(ast, current_node)
+                    # Emit AST snapshot after shell operation
+                    emit_ast_snapshot(ast, operation_type="shell")
                 elif operation_name == "@return":
                     return_result = process_return(ast, current_node)
+                    # Emit AST snapshot after return operation
+                    emit_ast_snapshot(ast, operation_type="return")
                     if return_result:
                         ctx_filename = Path(local_file_name).with_suffix('.ctx')
                         output_file = os.path.join(file_dir, ctx_filename)
@@ -229,7 +248,7 @@ def run(filename: str, param_node: Optional[Union[Node, AST]] = None, create_new
 
                         relative_ctx_path = get_relative_path(base_dir, output_file)
                         relative_trc_path = get_relative_path(base_dir, trc_output_file)
-                        
+
                         render_ast_to_markdown(ast, output_file)
                         render_ast_to_trace(ast, trc_output_file)
 
@@ -240,7 +259,7 @@ def run(filename: str, param_node: Optional[Union[Node, AST]] = None, create_new
                             p_parent_filename,
                             p_parent_operation
                         )
-                        
+
                         console.print(f"[light_green]✓[/light_green] git. context commited: [light_green]{ctx_filename}[/light_green]")
                         console.print(f"[light_green]✓[/light_green] git. trace file commited: [light_green]{trc_filename}[/light_green]")
 
