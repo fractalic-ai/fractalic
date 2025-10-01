@@ -123,6 +123,16 @@
             display: -webkit-box;
             -webkit-line-clamp: 2;
             -webkit-box-orient: vertical;
+            white-space: pre-wrap;
+        }
+
+        /* When expanded, switch to block display and show full content */
+        .ast-block.expanded .ast-block-preview {
+            display: block;
+            -webkit-line-clamp: unset;
+            -webkit-box-orient: unset;
+            max-height: 300px;
+            overflow-y: auto;
         }
 
         .ast-block-id {
@@ -130,28 +140,6 @@
             color: #adb5bd;
             margin-top: 5px;
             font-family: monospace;
-        }
-
-        .ast-block-full-content {
-            display: none;
-            margin-top: 10px;
-            padding: 10px;
-            background: #f8f9fa;
-            border-radius: 4px;
-            font-size: 12px;
-            color: #495057;
-            white-space: pre-wrap;
-            max-height: 300px;
-            overflow-y: auto;
-            border: 1px solid #dee2e6;
-        }
-
-        .ast-block.expanded .ast-block-full-content {
-            display: block;
-        }
-
-        .ast-block.expanded .ast-block-preview {
-            display: none;
         }
 
         .chat-header {
@@ -1459,37 +1447,45 @@
                     html += `<div class="ast-block-header">${escapeHtml(block.header)}</div>`;
                 }
 
-                if (block.content_preview) {
-                    html += `<div class="ast-block-preview">${escapeHtml(block.content_preview)}</div>`;
-                }
-
-                // Add full content (hidden by default, shown when expanded)
-                // For heading blocks: only show content_preview (header is already displayed separately)
-                // For operation blocks: show the full content_preview
-                let fullContent = '';
-                if (block.type === 'heading') {
-                    // For heading blocks, only show body text without repeating the header
-                    fullContent = block.content_preview || '';
-                } else {
-                    // For operation blocks, show the content as-is
-                    fullContent = block.content_preview || '';
-                }
-
-                if (fullContent) {
-                    html += `<div class="ast-block-full-content">${escapeHtml(fullContent)}</div>`;
+                // Create preview from full content (truncate to 100 chars)
+                if (block.content) {
+                    let preview = block.content;
+                    if (preview.length > 100) {
+                        preview = preview.substring(0, 100) + '...';
+                    }
+                    html += `<div class="ast-block-preview">${escapeHtml(preview)}</div>`;
                 }
 
                 html += `<div class="ast-block-id">ID: ${escapeHtml(blockId.substring(0, 16))}</div>`;
 
                 blockEl.innerHTML = html;
 
-                // Store full content in dataset for later use
-                blockEl.dataset.fullContent = fullContent;
+                // Store full content in data attribute for expansion
+                if (block.content) {
+                    blockEl.dataset.fullContent = block.content;
+                }
 
                 // Add click handler to toggle expanded state
                 blockEl.onclick = (e) => {
                     e.stopPropagation();
+                    const isExpanding = !blockEl.classList.contains('expanded');
                     blockEl.classList.toggle('expanded');
+
+                    // Switch between preview and full content
+                    const previewEl = blockEl.querySelector('.ast-block-preview');
+                    if (previewEl && blockEl.dataset.fullContent) {
+                        if (isExpanding) {
+                            // Show full content
+                            previewEl.textContent = blockEl.dataset.fullContent;
+                        } else {
+                            // Show truncated preview
+                            let preview = blockEl.dataset.fullContent;
+                            if (preview.length > 100) {
+                                preview = preview.substring(0, 100) + '...';
+                            }
+                            previewEl.textContent = preview;
+                        }
+                    }
                 };
 
                 // Remove 'new' class first to avoid duplicate animations
