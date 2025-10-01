@@ -86,6 +86,11 @@
             animation: highlight-fade 3s ease-out;
         }
 
+        .ast-block.expanded {
+            border-color: #667eea;
+            background: #f8f9fa;
+        }
+
         @keyframes highlight-fade {
             0% { background: #c3e6cb; }
             100% { background: white; }
@@ -125,6 +130,28 @@
             color: #adb5bd;
             margin-top: 5px;
             font-family: monospace;
+        }
+
+        .ast-block-full-content {
+            display: none;
+            margin-top: 10px;
+            padding: 10px;
+            background: #f8f9fa;
+            border-radius: 4px;
+            font-size: 12px;
+            color: #495057;
+            white-space: pre-wrap;
+            max-height: 300px;
+            overflow-y: auto;
+            border: 1px solid #dee2e6;
+        }
+
+        .ast-block.expanded .ast-block-full-content {
+            display: block;
+        }
+
+        .ast-block.expanded .ast-block-preview {
+            display: none;
         }
 
         .chat-header {
@@ -1389,6 +1416,11 @@
                     const blockId = block.id;
                     const isNew = !existingBlockIds.has(blockId) && shouldHighlightNew;
 
+                    // Debug logging
+                    if (isNew) {
+                        console.log(`[AST] New block detected: ${blockId.substring(0, 8)} (${block.type}) - ${block.header || block.content_preview?.substring(0, 30)}`);
+                    }
+
                     // Create or reuse block element
                     let blockEl = this.astBlocks.get(blockId);
                     if (!blockEl) {
@@ -1431,9 +1463,34 @@
                     html += `<div class="ast-block-preview">${escapeHtml(block.content_preview)}</div>`;
                 }
 
+                // Add full content (hidden by default, shown when expanded)
+                // For heading blocks: only show content_preview (header is already displayed separately)
+                // For operation blocks: show the full content_preview
+                let fullContent = '';
+                if (block.type === 'heading') {
+                    // For heading blocks, only show body text without repeating the header
+                    fullContent = block.content_preview || '';
+                } else {
+                    // For operation blocks, show the content as-is
+                    fullContent = block.content_preview || '';
+                }
+
+                if (fullContent) {
+                    html += `<div class="ast-block-full-content">${escapeHtml(fullContent)}</div>`;
+                }
+
                 html += `<div class="ast-block-id">ID: ${escapeHtml(blockId.substring(0, 16))}</div>`;
 
                 blockEl.innerHTML = html;
+
+                // Store full content in dataset for later use
+                blockEl.dataset.fullContent = fullContent;
+
+                // Add click handler to toggle expanded state
+                blockEl.onclick = (e) => {
+                    e.stopPropagation();
+                    blockEl.classList.toggle('expanded');
+                };
 
                 // Remove 'new' class first to avoid duplicate animations
                 blockEl.classList.remove('new');

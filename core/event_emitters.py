@@ -57,14 +57,28 @@ def emit_ast_snapshot(ast, operation_type: str = "unknown", changed_blocks: list
 
             # Add header for HEADING nodes
             if type_str == 'heading':
-                block_info['header'] = current_node.content[:100] if current_node.content else None
+                # Extract just the header line (first line) without the markdown #
+                content_lines = current_node.content.split('\n')
+                if content_lines:
+                    header_line = content_lines[0].strip()
+                    # Remove markdown # symbols
+                    header_line = header_line.lstrip('#').strip()
+                    block_info['header'] = header_line[:100] if header_line else None
 
-            # Add content preview (first 100 chars)
+            # Add content preview (skip header for heading nodes)
             if current_node.content:
-                preview = current_node.content.strip()[:100]
-                if len(current_node.content.strip()) > 100:
+                if type_str == 'heading':
+                    # For heading nodes, skip the first line (header) and show the rest
+                    content_lines = current_node.content.split('\n', 1)
+                    preview_text = content_lines[1] if len(content_lines) > 1 else ''
+                else:
+                    # For other nodes, show full content
+                    preview_text = current_node.content
+
+                preview = preview_text.strip()[:100]
+                if len(preview_text.strip()) > 100:
                     preview += '...'
-                block_info['content_preview'] = preview
+                block_info['content_preview'] = preview if preview else None
 
             # Mark as new/modified if in changed_blocks list
             if changed_blocks and block_info['id'] in changed_blocks:
