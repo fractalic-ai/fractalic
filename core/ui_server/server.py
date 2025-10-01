@@ -1556,20 +1556,22 @@ async def receive_event(event: dict):
     return {"status": "received"}
 
 async def start_fractalic_process(file_path: str, execution_id: str, user_request: str = ""):
-    """Start fractalic process with execution_id and user request."""
+    """Start fractalic process with execution_id and user request (already formatted by frontend with history)."""
     try:
         fractalic_root = get_fractalic_root()
         fractalic_path = Path(fractalic_root) / "fractalic.py"
-        python_exe = sys.executable 
-        
-        # Формируем команду с пользовательским запросом
+        python_exe = sys.executable
+
+        # Формируем команду
         command = f'"{python_exe}" "{fractalic_path}" "{file_path}"'
+
+        # Frontend sends fully formatted markdown with history - just pass it through
         if user_request.strip():
-            # Используем новый параметр для прямой передачи значения (без временных файлов)
-            # Экранируем кавычки в пользовательском запросе
-            escaped_user_request = user_request.replace('"', '\\"')
-            command += f' --param_input_user_request "UserRequest" --param_input_user_request_value "{escaped_user_request}"'
-            print(f"[DEBUG] Starting fractalic with user_request: '{user_request}'")
+            # Экранируем кавычки
+            escaped_request = user_request.replace('"', '\\"')
+            command += f' --param_input_user_request "UserRequest" --param_input_user_request_value "{escaped_request}"'
+            print(f"[DEBUG] Starting fractalic with user_request (length: {len(user_request)} chars)")
+            print(f"[DEBUG] User request preview: {user_request[:300]}...")
             print(f"[DEBUG] Command: {command}")
         else:
             print(f"[DEBUG] Starting fractalic without user_request")
@@ -1608,18 +1610,18 @@ async def stream_chat_events(request: Request):
     data = await request.json()
     file_path = data.get("file_path")
     user_message = data.get("message", "")
-    # Debug: print(f"[DEBUG] Received request - file_path: '{file_path}', message: '{user_message}'")
+    # Frontend sends fully formatted markdown with history embedded
     if not file_path:
         raise HTTPException(status_code=400, detail="file_path is required")
-    
+
     # Generate execution ID for correlation
     execution_id = str(uuid.uuid4())
-    
+
     import asyncio, json
 
     async def event_stream():
         try:
-            # Start fractalic process in background
+            # Start fractalic process in background (history already in user_message)
             process = await start_fractalic_process(file_path, execution_id, user_message)
             if not process:
                 yield f"{json.dumps({'type': 'error', 'message': 'Failed to start process'}, ensure_ascii=False)}\n"

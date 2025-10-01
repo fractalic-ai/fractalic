@@ -411,6 +411,35 @@
             gap: 10px;
         }
 
+        .history-toggle {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 10px;
+            padding: 8px 12px;
+            background: #f8f9fa;
+            border-radius: 8px;
+            cursor: pointer;
+            user-select: none;
+            transition: background 0.2s;
+        }
+
+        .history-toggle:hover {
+            background: #e9ecef;
+        }
+
+        .history-toggle input[type="checkbox"] {
+            width: 18px;
+            height: 18px;
+            cursor: pointer;
+        }
+
+        .history-toggle label {
+            font-size: 14px;
+            color: #495057;
+            cursor: pointer;
+        }
+
         .chat-input {
             flex: 1;
             padding: 15px 20px;
@@ -766,6 +795,10 @@
             </div>
 
             <div class="chat-input-container">
+                <div class="history-toggle">
+                    <input type="checkbox" id="historyToggle" checked>
+                    <label for="historyToggle">📜 Использовать историю сообщений</label>
+                </div>
                 <div class="input-row">
             <input type="text" class="chat-input" id="chatInput"
                    placeholder="Сначала выберите markdown файл выше"
@@ -1308,9 +1341,47 @@
                 this.addMessage('user', text, this.formatTime(timestamp));
                 this.chatInput.value = '';
                 this.showTyping(true);
+
+                // Check if history mode is enabled
+                const historyToggle = document.getElementById('historyToggle');
+                const useHistory = historyToggle ? historyToggle.checked : true;
+
+                const history = useHistory ? this.conversation.slice(-50) : [];
+                console.log('[DEBUG] Sending message with history:', {
+                    useHistory,
+                    historyLength: history.length,
+                    currentMessage: text
+                });
+                console.log('[DEBUG] Full history:', JSON.stringify(history, null, 2));
+
+                // Format history as markdown with heading blocks
+                let historyMarkdown = '';
+                if (history.length > 0) {
+                    const markdownParts = [];
+                    for (let i = 0; i < history.length; i++) {
+                        const msg = history[i];
+                        if (msg.role === 'user') {
+                            markdownParts.push(`# User Message ${i + 1}\n${msg.content}`);
+                        } else if (msg.role === 'assistant') {
+                            // Remove "# LLM response block" header if present
+                            const cleanContent = msg.content
+                                .replace(/^# LLM response block\n?/m, '')
+                                .trim();
+                            markdownParts.push(`# Assistant Response ${i + 1}\n${cleanContent}`);
+                        }
+                    }
+                    historyMarkdown = markdownParts.join('\n\n');
+                }
+
+                // Combine history with current user request
+                const fullPrompt = historyMarkdown
+                    ? `${historyMarkdown}\n\n# User Message ${history.length + 1}\n${text}`
+                    : text;
+
+                console.log('[DEBUG] Full prompt being sent:', fullPrompt.substring(0, 500) + '...');
+
                 const payload = {
-                    message: text,
-                    history: this.conversation.slice(-50),
+                    message: fullPrompt,  // Send formatted markdown instead of separate history
                     file_path: this.selectedFile,
                 };
                 this.fetchAndStreamChat(payload);
@@ -1322,12 +1393,27 @@
                     const sessionId = data.session_id || data.execution_id; // Fallback to execution_id if session_id not present
 
                     if (data.type === 'chat_message') {
-                        this.addMessage(data.role === 'user' ? 'user' : 'assistant', data.content, now, { session_id: sessionId });
+                        // Determine if this should be stored in history
+                        // Only store real LLM responses (with "# LLM response block"), not system messages
+                        const isLLMResponse = data.content && data.content.includes('# LLM response block');
+                        const isSystemMessage = data.content && (
+                            data.content.includes('Фракталик запущен') ||
+                            data.content.includes('Фракталик завершил') ||
+                            data.content.startsWith('⚙️') ||
+                            data.content.startsWith('✅')
+                        );
+
+                        this.addMessage(data.role === 'user' ? 'user' : 'assistant', data.content, now, {
+                            session_id: sessionId,
+                            storeHistory: isLLMResponse && !isSystemMessage  // Only store LLM responses
+                        });
+
                         if (data.return_content) {
                             this.addMessage('assistant', 'Ответ Fractalic:', now, {
                                 returnContent: data.return_content,
                                 returnVariant: data.return_variant,
-                                session_id: sessionId
+                                session_id: sessionId,
+                                storeHistory: false  // Don't store "Ответ Fractalic:" wrapper in history
                             });
                         }
                     } else if (data.type === 'execution') {
@@ -1948,13 +2034,24 @@
             }
 
             appendConversationEntry(type, content) {
-                if (!['user', 'assistant'].includes(type)) return;
+                console.log('[DEBUG] appendConversationEntry called:', { type, contentLength: content?.length });
+                if (!['user', 'assistant'].includes(type)) {
+                    console.log('[DEBUG] Skipping - type not user/assistant:', type);
+                    return;
+                }
                 const normalized = (content || '').trim();
-                if (!normalized) return;
+                if (!normalized) {
+                    console.log('[DEBUG] Skipping - empty content');
+                    return;
+                }
                 const role = type === 'user' ? 'user' : 'assistant';
                 const lastEntry = this.conversation[this.conversation.length - 1];
-                if (lastEntry && lastEntry.role === role && lastEntry.content === normalized) return;
+                if (lastEntry && lastEntry.role === role && lastEntry.content === normalized) {
+                    console.log('[DEBUG] Skipping - duplicate entry');
+                    return;
+                }
                 this.conversation.push({ role, content: normalized });
+                console.log('[DEBUG] Added to conversation. Total entries:', this.conversation.length);
                 if (this.conversation.length > 200) {
                     this.conversation = this.conversation.slice(-200);
                 }
