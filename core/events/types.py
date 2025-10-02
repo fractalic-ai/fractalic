@@ -11,6 +11,10 @@ class EventType(str, Enum):
     CHAT_MESSAGE = "chat_message"
     EXECUTION = "execution"
     ERROR = "error"
+    AST_UPDATE = "ast_update"
+    TOOL_CALL = "tool_call"
+    TOOL_RESULT = "tool_result"
+    LLM_CHUNK = "llm_chunk"
 
 
 def _now() -> float:

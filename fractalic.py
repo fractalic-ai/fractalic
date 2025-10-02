@@ -36,6 +36,10 @@ from core.render.render_ast import render_ast_to_markdown
 # Import centralized path management
 from core.paths import set_session_root, validate_session_safety, get_session_root
 
+# Import event emission
+from core.event_emitters import emit_event
+from core.events.types import EventType
+
 from rich.console import Console
 from rich.panel import Panel
 
@@ -45,142 +49,6 @@ sys.stdin = io.TextIOWrapper(sys.stdin.buffer, encoding='utf-8')
 sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8')
 
 original_open = open
-
-# Attach stdout sink once (idempotent)
-try:
-    pass  # HTTP streaming instead of EventBus
-except Exception:
-    pass
-
-
-def _execution_id():
-    return os.getenv('FRACTALIC_EXECUTION_ID')
-
-def _session_id():
-    """Get or generate session_id for grouping related executions."""
-    # Use execution_id as session_id for now (one session = one execution)
-    # In future, could use FRACTALIC_SESSION_ID for multi-execution sessions
-    return os.getenv('FRACTALIC_EXECUTION_ID')
-
-def emit_chat_message(role, content):
-    """Send chat message via HTTP to server.py."""
-    execution_id = os.getenv('FRACTALIC_EXECUTION_ID')
-    if execution_id:
-        event = {
-            'type': 'chat_message',
-            'execution_id': execution_id,
-            'session_id': _session_id(),
-            'role': role,
-            'content': content,
-            'timestamp': time.time()
-        }
-        _stream_event_to_server(event)
-
-def emit_execution(phase: str, target: str | None = None):
-    """Send execution event via HTTP to server.py."""
-    execution_id = os.getenv('FRACTALIC_EXECUTION_ID')
-    if execution_id:
-        event = {
-            'type': 'execution',
-            'execution_id': execution_id,
-            'session_id': _session_id(),
-            'phase': phase,
-            'target': target,
-            'timestamp': time.time()
-        }
-        _stream_event_to_server(event)
-
-def emit_error(message: str, details: str | None = None):
-    """Send error event via HTTP to server.py."""
-    execution_id = os.getenv('FRACTALIC_EXECUTION_ID')
-    if execution_id:
-        event = {
-            'type': 'error',
-            'execution_id': execution_id,
-            'session_id': _session_id(),
-            'message': message,
-            'details': details,
-            'timestamp': time.time()
-        }
-        _stream_event_to_server(event)
-
-def emit_ast_snapshot(ast, operation_type: str = "unknown", changed_blocks: list = None):
-    """Send AST structure snapshot to UI for visualization.
-
-    Args:
-        ast: AST object to extract blocks from
-        operation_type: Type of operation that modified AST (llm, shell, import, return)
-        changed_blocks: List of block IDs that were added/modified
-    """
-    execution_id = os.getenv('FRACTALIC_EXECUTION_ID')
-    if not execution_id:
-        print(f"[DEBUG emit_ast_snapshot] No execution_id, skipping AST snapshot")
-        return
-
-    from core.ast_md.node import NodeType
-
-    blocks = []
-    current_node = ast.first()
-    print(f"[DEBUG emit_ast_snapshot] Starting AST snapshot for operation: {operation_type}")
-
-    while current_node:
-        # Extract block information
-        block_info = {
-            'id': current_node.key or current_node.hash,
-            'type': current_node.type.value if hasattr(current_node.type, 'value') else str(current_node.type),
-            'header': None,
-            'content_preview': None,
-            'created_by': getattr(current_node, 'created_by', None),
-            'parent_id': None,  # Could be extracted from parent relationships if needed
-            'is_new': False,
-            'is_modified': False
-        }
-
-        # Add header for HEADER nodes
-        if current_node.type == NodeType.HEADER:
-            block_info['header'] = current_node.content[:100] if current_node.content else None
-
-        # Add content preview (first 100 chars)
-        if current_node.content:
-            preview = current_node.content.strip()[:100]
-            if len(current_node.content.strip()) > 100:
-                preview += '...'
-            block_info['content_preview'] = preview
-
-        # Mark as new/modified if in changed_blocks list
-        if changed_blocks and block_info['id'] in changed_blocks:
-            block_info['is_new'] = True
-
-        blocks.append(block_info)
-        current_node = current_node.next
-
-    event = {
-        'type': 'ast_update',
-        'execution_id': execution_id,
-        'session_id': _session_id(),
-        'timestamp': time.time(),
-        'operation': operation_type,
-        'blocks': blocks
-    }
-
-    print(f"[DEBUG emit_ast_snapshot] Emitting {len(blocks)} AST blocks for operation '{operation_type}'")
-    _stream_event_to_server(event)
-
-def _stream_event_to_server(event):
-    """Stream event to server.py via HTTP POST."""
-    try:
-        server_url = os.getenv('FRACTALIC_SERVER_URL', 'http://localhost:8000')
-        response = requests.post(
-            f"{server_url}/api/events/receive",
-            json=event,
-            timeout=1.0,
-            headers={'Content-Type': 'application/json'}
-        )
-        if response.status_code != 200:
-            print(f"[Event Stream Warning] Server returned {response.status_code}")
-    except Exception as e:
-        # Ignore streaming errors - fractalic should work even without server
-        pass
 
 
 def run_fractalic(input_file, task_file=None, param_input_user_request=None, param_input_user_request_value=None, 
@@ -417,7 +285,7 @@ def run_fractalic(input_file, task_file=None, param_input_user_request=None, par
         except (BlockNotFoundError, UnknownOperationError, FileNotFoundError, ValueError) as e:
             msg = f"Known exception: {str(e)}"
             print(f"[ERROR] {msg}")
-            emit_error(message=msg)
+            emit_event(EventType.ERROR, message=msg)
             # These are handled exceptions that don't return useful data
             # Continue to save whatever state we have (which will be None values)
         except Exception as e:
@@ -425,7 +293,7 @@ def run_fractalic(input_file, task_file=None, param_input_user_request=None, par
             print(f"[ERROR] {msg}")
             import traceback
             traceback.print_exc()
-            emit_error(message=msg, details=''.join(traceback.format_exc()[-1000:]))
+            emit_event(EventType.ERROR, message=msg, details=''.join(traceback.format_exc()[-1000:]))
             # For unexpected exceptions, the runner should have handled it and returned data
             # But if we get here, the runner couldn't handle it, so variables remain None
         
@@ -516,12 +384,12 @@ def run_fractalic(input_file, task_file=None, param_input_user_request=None, par
             # Emit return content as assistant chat if explicit_return
             if explicit_return and return_content:
                 try:
-                    emit_chat_message('assistant', return_content)
+                    emit_event(EventType.CHAT_MESSAGE, role='assistant', content=return_content)
                 except Exception:
                     pass
             # Emit execution complete
             try:
-                emit_execution('complete', target=str(input_file))
+                emit_event(EventType.EXECUTION, phase='complete', target=str(input_file))
             except Exception:
                 pass
 
@@ -545,7 +413,7 @@ def run_fractalic(input_file, task_file=None, param_input_user_request=None, par
             # Build failure output but still include partial state
             error_msg = "Execution failed but call tree state was preserved"
             try:
-                emit_execution('error', target=str(input_file))
+                emit_event(EventType.EXECUTION, phase='error', target=str(input_file))
             except Exception:
                 pass
             return {
@@ -621,8 +489,8 @@ def main():
 
     try:
         # Execution start event
-        emit_execution('start', target=display_name)
-        emit_chat_message('assistant', f"⚙️ Фракталик запущен для файла: {display_name}")
+        emit_event(EventType.EXECUTION, phase='start', target=display_name)
+        emit_event(EventType.CHAT_MESSAGE, role='assistant', content=f"⚙️ Фракталик запущен для файла: {display_name}")
         # Call the core execution function
         result = run_fractalic(
             input_file=args.input_file,
@@ -638,24 +506,24 @@ def main():
         
         if not result['success']:
             error_text = result.get('error') or result.get('output') or ''
-            emit_execution('error', target=display_name)
+            emit_event(EventType.EXECUTION, phase='error', target=display_name)
             if error_text:
-                emit_chat_message('assistant', f"❌ Фракталик завершился с ошибкой при выполнении {display_name}\n{error_text}")
+                emit_event(EventType.CHAT_MESSAGE, role='assistant', content=f"❌ Фракталик завершился с ошибкой при выполнении {display_name}\n{error_text}")
             else:
-                emit_chat_message('assistant', f"❌ Фракталик завершился с ошибкой при выполнении {display_name}")
+                emit_event(EventType.CHAT_MESSAGE, role='assistant', content=f"❌ Фракталик завершился с ошибкой при выполнении {display_name}")
             print(f"[ERROR fractalic.py] {result['error']}")
             sys.exit(1)
         
         completion_message = f"✅ Фракталик завершил выполнение файла: {display_name}"
         if result.get('branch_name'):
             completion_message += f" (ветка: {result['branch_name']})"
-        emit_chat_message('assistant', completion_message)
+        emit_event(EventType.CHAT_MESSAGE, role='assistant', content=completion_message)
         if result.get('return_content'):
             # Emit the actual returned content as a chat message for the new architecture
-            emit_chat_message('assistant', result['return_content'])
+            emit_event(EventType.CHAT_MESSAGE, role='assistant', content=result['return_content'])
         # Emit explicit completion lifecycle event for streaming clients
         try:
-            emit_execution('complete', target=display_name)
+            emit_event(EventType.EXECUTION, phase='complete', target=display_name)
         except Exception:
             pass
 
@@ -700,13 +568,13 @@ def main():
 
 
     except (BlockNotFoundError, UnknownOperationError, FileNotFoundError, ValueError) as e:
-        emit_execution('error', target=display_name)
-        emit_chat_message('assistant', f"❌ Фракталик завершился с ошибкой при выполнении {display_name}: {str(e)}")
+        emit_event(EventType.EXECUTION, phase='error', target=display_name)
+        emit_event(EventType.CHAT_MESSAGE, role='assistant', content=f"❌ Фракталик завершился с ошибкой при выполнении {display_name}: {str(e)}")
         print(f"[ERROR fractalic.py] {str(e)}")
         sys.exit(1)
     except Exception as e:
-        emit_execution('error', target=display_name)
-        emit_chat_message('assistant', f"❌ Непредвиденная ошибка при выполнении {display_name}: {str(e)}")
+        emit_event(EventType.EXECUTION, phase='error', target=display_name)
+        emit_event(EventType.CHAT_MESSAGE, role='assistant', content=f"❌ Непредвиденная ошибка при выполнении {display_name}: {str(e)}")
         # Check if this is a linting error and try to get context information
         if e.__class__.__name__ == 'FractalicLintError':
             print(f"[ERROR fractalic.py] Linting failed: {str(e)}")

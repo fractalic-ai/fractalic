@@ -1,24 +1,12 @@
-"""Minimal passive events layer.
+"""Event types for Fractalic event system.
 
 Provides:
-- EventType (enum)
-- Base event dataclasses
-- EventBus (in-process, synchronous)
-- StdoutEventSink (optional line emission)
-- parse_event_line / format_event_line helpers
+- EventType (enum) - all event type constants
+- Base event dataclasses (for backward compatibility if needed)
 
-Design goals:
-- Zero external dependencies
-- No server coupling or storage side-effects
-- Type clarity & extendability
-
-The server may read stdout lines and convert back to Python events;
-HTTP streaming can reuse the same serialization.
+All events are sent via HTTP to server.py using emit_event() from core.event_emitters.
 """
 from .types import EventType, BaseEvent, ChatMessageEvent, ExecutionEvent, ErrorEvent
-from .bus import EventBus, GlobalEventBus
-from .sinks import StdoutEventSink
-from .codec import format_event_line, parse_event_line
 
 __all__ = [
     "EventType",
@@ -26,9 +14,4 @@ __all__ = [
     "ChatMessageEvent",
     "ExecutionEvent",
     "ErrorEvent",
-    "EventBus",
-    "GlobalEventBus",
-    "StdoutEventSink",
-    "format_event_line",
-    "parse_event_line",
 ]

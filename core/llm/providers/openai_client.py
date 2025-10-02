@@ -25,6 +25,8 @@ from core.plugins.tool_registry import ToolRegistry    # NEW import
 from .rich_formatter import RichFormatter              # Rich functionality moved here
 from core.simple_token_tracker import token_tracker   # Simple token tracking
 import litellm  # ensure available for token_counter
+from core.event_emitters import emit_event             # Event emission
+from core.events.types import EventType                # Event types
 
 # Cache for tool schema token counts: {(model, tool_hash): token_count}
 _TOOL_SCHEMA_TOKEN_CACHE = {}
@@ -896,12 +898,18 @@ class liteclient:
                                           f"tool: {tc['function']['name']}\n"
                                           f"args:\n{colored_args}")
                         self.ui.show("", call_log_display)
-                        
+
                         # Context with clean text
                         call_log_context = (f"> TOOL CALL, id: {tc['id']}\n"
                                           f"tool: {tc['function']['name']}\n"
                                           f"args:\n{clean_args}")
                         convo.append(call_log_context)
+
+                        # Emit tool call event for chat UI
+                        emit_event(EventType.TOOL_CALL,
+                                 tool_call_id=tc['id'],
+                                 tool_name=tc['function']['name'],
+                                 arguments=clean_args)
 
                         # Token tracking is now handled by LiteLLM callback
 
@@ -921,7 +929,13 @@ class liteclient:
                         resp_log_display = (f"> TOOL RESPONSE, id: {tc['id']}\n"
                                           f"response:\n{colored_response}")
                         self.ui.show("", resp_log_display)
-                        
+
+                        # Emit tool result event for chat UI
+                        emit_event(EventType.TOOL_RESULT,
+                                 tool_call_id=tc['id'],
+                                 tool_name=tc['function']['name'],
+                                 result=clean_response[:1000] if clean_response else "")  # Truncate long results
+
                         # Context with clean text - special handling for fractalic_run
                         if tc["function"]["name"] == "fractalic_run" and res and res.strip().startswith('{'):
                             # Check if this is a fractalic_run response with return_content

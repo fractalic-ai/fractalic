@@ -2,6 +2,7 @@
 
 import os
 import time
+from core.events.types import EventType
 
 try:
     import requests
@@ -14,6 +15,29 @@ def _session_id():
     # Use execution_id as session_id for now (one session = one execution)
     # In future, could use FRACTALIC_SESSION_ID for multi-execution sessions
     return os.getenv('FRACTALIC_EXECUTION_ID')
+
+
+def emit_event(event_type: EventType, **data):
+    """Universal event emission function.
+
+    Args:
+        event_type: Type of event (EventType enum value)
+        **data: Event-specific data fields
+    """
+    execution_id = os.getenv('FRACTALIC_EXECUTION_ID')
+    if not execution_id:
+        # Events without execution_id are local-only (not sent to server)
+        return
+
+    event = {
+        'type': event_type.value if isinstance(event_type, EventType) else event_type,
+        'execution_id': execution_id,
+        'session_id': _session_id(),
+        'timestamp': time.time(),
+        **data
+    }
+
+    _stream_event_to_server(event)
 
 
 def emit_ast_snapshot(ast, operation_type: str = "unknown", changed_blocks: list = None):
@@ -90,17 +114,8 @@ def emit_ast_snapshot(ast, operation_type: str = "unknown", changed_blocks: list
         traceback.print_exc()
         return  # Don't send partial data
 
-    event = {
-        'type': 'ast_update',
-        'execution_id': execution_id,
-        'session_id': _session_id(),
-        'timestamp': time.time(),
-        'operation': operation_type,
-        'blocks': blocks
-    }
-
     print(f"[DEBUG emit_ast_snapshot] Emitting {len(blocks)} AST blocks for operation '{operation_type}'")
-    _stream_event_to_server(event)
+    emit_event(EventType.AST_UPDATE, operation=operation_type, blocks=blocks)
 
 
 def _stream_event_to_server(event):
