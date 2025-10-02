@@ -13,7 +13,7 @@
 
         body {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            background: #0d1117;
             height: 100vh;
             display: flex;
             justify-content: center;
@@ -32,25 +32,27 @@
         }
 
         .chat-container {
-            background: white;
+            background: #161b22;
             border-radius: 20px;
-            box-shadow: 0 25px 50px rgba(0,0,0,0.1);
+            box-shadow: 0 25px 50px rgba(0,0,0,0.5);
+            border: 1px solid #30363d;
             display: flex;
             flex-direction: column;
             overflow: hidden;
         }
 
         .ast-sidebar {
-            background: white;
+            background: #161b22;
             border-radius: 20px;
-            box-shadow: 0 25px 50px rgba(0,0,0,0.1);
+            box-shadow: 0 25px 50px rgba(0,0,0,0.5);
+            border: 1px solid #30363d;
             display: flex;
             flex-direction: column;
             overflow: hidden;
         }
 
         .ast-sidebar-header {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            background: linear-gradient(135deg, #1f6feb 0%, #388bfd 100%);
             color: white;
             padding: 15px 20px;
             font-weight: 600;
@@ -62,12 +64,12 @@
             flex: 1;
             overflow-y: auto;
             padding: 15px;
-            background: #f8f9fa;
+            background: #0d1117;
         }
 
         .ast-block {
-            background: white;
-            border: 2px solid #e9ecef;
+            background: #161b22;
+            border: 2px solid #30363d;
             border-radius: 8px;
             padding: 10px;
             margin-bottom: 10px;
@@ -76,31 +78,31 @@
         }
 
         .ast-block:hover {
-            border-color: #667eea;
-            box-shadow: 0 2px 8px rgba(102, 126, 234, 0.15);
+            border-color: #1f6feb;
+            box-shadow: 0 2px 8px rgba(31, 111, 235, 0.25);
         }
 
         .ast-block.new {
-            border-color: #28a745;
-            background: #d4edda;
+            border-color: #3fb950;
+            background: #1a472a;
             animation: highlight-fade 3s ease-out;
         }
 
         .ast-block.expanded {
-            border-color: #667eea;
-            background: #f8f9fa;
+            border-color: #1f6feb;
+            background: #1c2128;
         }
 
         @keyframes highlight-fade {
-            0% { background: #c3e6cb; }
-            100% { background: white; }
+            0% { background: #1a472a; }
+            100% { background: #161b22; }
         }
 
         .ast-block-type {
             font-size: 11px;
             font-weight: 600;
             text-transform: uppercase;
-            color: #6c757d;
+            color: #8b949e;
             margin-bottom: 5px;
             display: flex;
             align-items: center;
@@ -109,14 +111,14 @@
 
         .ast-block-header {
             font-weight: 600;
-            color: #495057;
+            color: #c9d1d9;
             margin-bottom: 5px;
             font-size: 13px;
         }
 
         .ast-block-preview {
             font-size: 12px;
-            color: #6c757d;
+            color: #8b949e;
             line-height: 1.4;
             overflow: hidden;
             text-overflow: ellipsis;
@@ -137,13 +139,13 @@
 
         .ast-block-id {
             font-size: 10px;
-            color: #adb5bd;
+            color: #6e7681;
             margin-top: 5px;
             font-family: monospace;
         }
 
         .chat-header {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            background: linear-gradient(135deg, #1f6feb 0%, #388bfd 100%);
             color: white;
             padding: 20px;
             text-align: center;
@@ -161,24 +163,25 @@
 
         .connection-status {
             padding: 10px 20px;
-            background: #f8f9fa;
-            border-bottom: 1px solid #e9ecef;
+            background: #0d1117;
+            border-bottom: 1px solid #30363d;
             font-size: 14px;
+            color: #8b949e;
         }
 
         .status-connected {
-            color: #28a745;
+            color: #3fb950;
         }
 
         .status-disconnected {
-            color: #dc3545;
+            color: #f85149;
         }
 
         .chat-messages {
             flex: 1;
             padding: 20px;
             overflow-y: auto;
-            background: #f8f9fa;
+            background: #0d1117;
         }
 
         .chat-messages::-webkit-scrollbar {
@@ -186,16 +189,16 @@
         }
 
         .chat-messages::-webkit-scrollbar-track {
-            background: #f1f1f1;
+            background: #161b22;
         }
 
         .chat-messages::-webkit-scrollbar-thumb {
-            background: #c1c1c1;
+            background: #30363d;
             border-radius: 3px;
         }
 
         .chat-messages::-webkit-scrollbar-thumb:hover {
-            background: #a8a8a8;
+            background: #484f58;
         }
 
         .message {
@@ -216,58 +219,60 @@
         }
 
         .message.user .message-content {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            background: linear-gradient(135deg, #1f6feb 0%, #388bfd 100%);
             color: white;
         }
 
         .message.assistant .message-content {
-            background: white;
-            border: 1px solid #e9ecef;
-            color: #333;
+            background: #161b22;
+            border: 1px solid #30363d;
+            color: #c9d1d9;
         }
 
         .assistant-return-block {
             margin-top: 10px;
             padding: 12px;
-            background: #f5f9ff;
-            border: 1px solid #d0dcff;
+            background: #1c2128;
+            border: 1px solid #30363d;
             border-radius: 10px;
             font-family: 'Monaco', 'Consolas', monospace;
             font-size: 13px;
             line-height: 1.4;
             white-space: pre-wrap;
             overflow-x: auto;
+            color: #8b949e;
         }
 
         .assistant-return-block.error {
-            background: #fff5f5;
-            border-color: #f8b4b4;
+            background: #2d1519;
+            border-color: #6e2229;
+            color: #f85149;
         }
 
         .message.execution .message-content {
-            background: #fff3cd;
-            border: 1px solid #ffeaa7;
-            color: #856404;
+            background: #2d2a1c;
+            border: 1px solid #4a4520;
+            color: #e3b341;
         }
 
         .message.execution_output .message-content {
-            background: #f8f9fa;
-            border: 1px solid #dee2e6;
-            color: #495057;
+            background: #161b22;
+            border: 1px solid #30363d;
+            color: #8b949e;
             font-family: 'Monaco', 'Consolas', monospace;
             font-size: 13px;
             white-space: pre-wrap;
         }
 
         .message.error .message-content {
-            background: #f8d7da;
-            border: 1px solid #f5c6cb;
-            color: #721c24;
+            background: #2d1519;
+            border: 1px solid #6e2229;
+            color: #f85149;
         }
 
         .message-time {
             font-size: 12px;
-            color: #6c757d;
+            color: #6e7681;
             margin: 5px 15px 0;
             display: flex;
             align-items: center;
@@ -281,7 +286,7 @@
         .session-badge {
             display: inline-block;
             padding: 2px 8px;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            background: linear-gradient(135deg, #1f6feb 0%, #388bfd 100%);
             color: white;
             border-radius: 12px;
             font-size: 10px;
@@ -291,15 +296,32 @@
         }
 
         .code-block {
-            background: #2d3748;
-            color: #e2e8f0;
+            background: #161b22;
+            color: #c9d1d9;
             padding: 15px;
             border-radius: 8px;
+            border: 1px solid #30363d;
             font-family: 'Monaco', 'Consolas', monospace;
             font-size: 13px;
             white-space: pre-wrap;
             margin: 10px 0;
             overflow-x: auto;
+        }
+
+        .message-header {
+            color: #8b949e;
+        }
+
+        .message-body {
+            color: #c9d1d9;
+        }
+
+        .exec-status-text {
+            color: #c9d1d9;
+        }
+
+        .completion-status {
+            color: #3fb950;
         }
 
         /* Action Buttons in Messages */
@@ -312,12 +334,12 @@
 
         .action-button {
             padding: 6px 12px;
-            background: #f8f9fa;
-            border: 1px solid #e9ecef;
+            background: #1c2128;
+            border: 1px solid #30363d;
             border-radius: 12px;
             cursor: pointer;
             font-size: 12px;
-            color: #495057;
+            color: #8b949e;
             text-decoration: none;
             display: inline-flex;
             align-items: center;
@@ -326,24 +348,24 @@
         }
 
         .action-button:hover {
-            background: #e9ecef;
-            border-color: #adb5bd;
+            background: #30363d;
+            border-color: #484f58;
         }
 
         .action-button.primary {
-            background: #e8f4fd;
-            border-color: #667eea;
-            color: #495057;
+            background: #1c2d41;
+            border-color: #1f6feb;
+            color: #79c0ff;
         }
 
         .action-button.primary:hover {
-            background: #d1ecf1;
+            background: #2d3f5f;
         }
 
         .chat-input-container {
             padding: 20px;
-            background: white;
-            border-top: 1px solid #e9ecef;
+            background: #161b22;
+            border-top: 1px solid #30363d;
         }
 
         .file-selector-container {
@@ -355,54 +377,55 @@
 
         .file-select-button {
             padding: 12px 20px;
-            background: #f8f9fa;
-            border: 2px solid #e9ecef;
+            background: #1c2128;
+            border: 2px solid #30363d;
             border-radius: 20px;
             cursor: pointer;
             font-size: 14px;
             transition: all 0.2s;
             white-space: nowrap;
+            color: #c9d1d9;
         }
 
         .file-select-button:hover {
-            background: #e9ecef;
-            border-color: #667eea;
+            background: #30363d;
+            border-color: #1f6feb;
         }
 
         .selected-file-display {
             flex: 1;
             padding: 12px 16px;
-            background: #f8f9fa;
-            border: 2px solid #e9ecef;
+            background: #1c2128;
+            border: 2px solid #30363d;
             border-radius: 20px;
             font-size: 14px;
-            color: #6c757d;
+            color: #8b949e;
             overflow: hidden;
             text-overflow: ellipsis;
             white-space: nowrap;
         }
 
         .selected-file-display.has-file {
-            background: #e8f4fd;
-            border-color: #667eea;
-            color: #495057;
+            background: #1c2d41;
+            border-color: #1f6feb;
+            color: #c9d1d9;
         }
 
         .clear-selection-button {
             padding: 12px;
-            background: #ffeaea;
-            border: 2px solid #f5c6cb;
+            background: #2d1519;
+            border: 2px solid #6e2229;
             border-radius: 50%;
             cursor: pointer;
             font-size: 16px;
             transition: all 0.2s;
             min-width: 45px;
             height: 45px;
-            color: #721c24;
+            color: #f85149;
         }
 
         .clear-selection-button:hover {
-            background: #f5c6cb;
+            background: #3d2026;
             transform: scale(1.1);
         }
 
@@ -417,7 +440,7 @@
             gap: 8px;
             margin-bottom: 10px;
             padding: 8px 12px;
-            background: #f8f9fa;
+            background: #1c2128;
             border-radius: 8px;
             cursor: pointer;
             user-select: none;
@@ -425,7 +448,7 @@
         }
 
         .history-toggle:hover {
-            background: #e9ecef;
+            background: #30363d;
         }
 
         .history-toggle input[type="checkbox"] {
@@ -436,27 +459,29 @@
 
         .history-toggle label {
             font-size: 14px;
-            color: #495057;
+            color: #c9d1d9;
             cursor: pointer;
         }
 
         .chat-input {
             flex: 1;
             padding: 15px 20px;
-            border: 2px solid #e9ecef;
+            border: 2px solid #30363d;
             border-radius: 25px;
             font-size: 16px;
             outline: none;
             transition: border-color 0.3s;
+            background: #0d1117;
+            color: #c9d1d9;
         }
 
         .chat-input:focus {
-            border-color: #667eea;
+            border-color: #1f6feb;
         }
 
         .send-button {
             padding: 15px 30px;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            background: linear-gradient(135deg, #1f6feb 0%, #388bfd 100%);
             color: white;
             border: none;
             border-radius: 25px;
@@ -479,7 +504,7 @@
         .typing-indicator {
             display: none;
             padding: 15px 20px;
-            color: #6c757d;
+            color: #8b949e;
             font-style: italic;
         }
 
@@ -496,20 +521,21 @@
             top: 0;
             width: 100%;
             height: 100%;
-            background-color: rgba(0,0,0,0.5);
+            background-color: rgba(0,0,0,0.8);
             backdrop-filter: blur(5px);
         }
 
         .modal-content {
-            background-color: white;
+            background-color: #161b22;
             margin: 5% auto;
             border-radius: 15px;
+            border: 1px solid #30363d;
             width: 80%;
             max-width: 800px;
             max-height: 80vh;
             display: flex;
             flex-direction: column;
-            box-shadow: 0 10px 25px rgba(0,0,0,0.1);
+            box-shadow: 0 10px 25px rgba(0,0,0,0.5);
         }
 
         .modal-header {
@@ -517,12 +543,12 @@
             justify-content: space-between;
             align-items: center;
             padding: 20px;
-            border-bottom: 1px solid #e9ecef;
+            border-bottom: 1px solid #30363d;
         }
 
         .modal-header h3 {
             margin: 0;
-            color: #495057;
+            color: #c9d1d9;
         }
 
         .modal-close {
@@ -530,21 +556,21 @@
             border: none;
             font-size: 24px;
             cursor: pointer;
-            color: #6c757d;
+            color: #8b949e;
             transition: color 0.2s;
         }
 
         .modal-close:hover {
-            color: #dc3545;
+            color: #f85149;
         }
 
         .breadcrumb {
             padding: 10px 20px;
-            background: #f8f9fa;
-            border-bottom: 1px solid #e9ecef;
+            background: #0d1117;
+            border-bottom: 1px solid #30363d;
             font-family: 'Courier New', monospace;
             font-size: 14px;
-            color: #495057;
+            color: #8b949e;
         }
 
         .file-browser {
@@ -561,21 +587,21 @@
             display: flex;
             align-items: center;
             padding: 12px 20px;
-            border-bottom: 1px solid #f1f3f4;
+            border-bottom: 1px solid #21262d;
             cursor: pointer;
             transition: background-color 0.2s;
         }
 
         .file-item:hover {
-            background: #f8f9fa;
+            background: #1c2128;
         }
 
         .file-item.directory {
-            background: #f8f9fa;
+            background: #1c2128;
         }
 
         .file-item.directory:hover {
-            background: #e9ecef;
+            background: #30363d;
         }
 
         .file-icon {
@@ -589,40 +615,41 @@
 
         .file-name {
             font-weight: 500;
-            color: #495057;
+            color: #c9d1d9;
             margin-bottom: 2px;
         }
 
         .file-description {
             font-size: 12px;
-            color: #6c757d;
+            color: #8b949e;
             line-height: 1.3;
         }
 
         .file-meta {
             font-size: 11px;
-            color: #adb5bd;
+            color: #6e7681;
             text-align: right;
         }
 
         .modal-footer {
             padding: 20px;
-            border-top: 1px solid #e9ecef;
+            border-top: 1px solid #30363d;
             text-align: right;
         }
 
         .modal-footer button {
             padding: 10px 20px;
-            background: #f8f9fa;
-            border: 2px solid #e9ecef;
+            background: #1c2128;
+            border: 2px solid #30363d;
             border-radius: 8px;
             cursor: pointer;
             font-size: 14px;
             transition: all 0.2s;
+            color: #c9d1d9;
         }
 
         .modal-footer button:hover {
-            background: #e9ecef;
+            background: #30363d;
         }
 
         /* Diff Viewer Styles */
@@ -641,8 +668,8 @@
         .diff-viewer {
             height: 100%;
             overflow: auto;
-            background: #f8f9fa;
-            border: 1px solid #e9ecef;
+            background: #0d1117;
+            border: 1px solid #30363d;
         }
 
         .diff-content {
@@ -652,8 +679,9 @@
             font-size: 13px;
             line-height: 1.4;
             white-space: pre-wrap;
-            background: #f8f9fa;
+            background: #0d1117;
             border: none;
+            color: #c9d1d9;
         }
 
         .diff-line {
@@ -663,26 +691,26 @@
         }
 
         .diff-line.added {
-            background-color: #d4ffe7;
-            color: #006400;
+            background-color: #1a472a;
+            color: #3fb950;
         }
 
         .diff-line.removed {
-            background-color: #ffe7e7;
-            color: #8b0000;
+            background-color: #2d1519;
+            color: #f85149;
         }
 
         .diff-line.context {
-            background-color: #ffffff;
-            color: #333333;
+            background-color: #0d1117;
+            color: #8b949e;
         }
 
         .diff-header {
-            background-color: #e9ecef;
-            color: #495057;
+            background-color: #1c2128;
+            color: #c9d1d9;
             font-weight: bold;
             padding: 4px 8px;
-            border-bottom: 1px solid #dee2e6;
+            border-bottom: 1px solid #30363d;
         }
 
         /* Terminal Viewer Styles */
@@ -701,9 +729,9 @@
         .terminal-viewer {
             height: 100%;
             overflow: hidden;
-            background: #1e1e1e;
-            color: #ffffff;
-            border: 1px solid #333;
+            background: #0d1117;
+            color: #c9d1d9;
+            border: 1px solid #30363d;
             position: relative;
         }
 
@@ -714,8 +742,8 @@
             font-size: 13px;
             line-height: 1.4;
             white-space: pre-wrap;
-            background: #1e1e1e;
-            color: #ffffff;
+            background: #0d1117;
+            color: #c9d1d9;
             border: none;
             word-wrap: break-word;
             overflow-wrap: break-word;
@@ -1338,7 +1366,8 @@
                     return;
                 }
                 const timestamp = new Date().toISOString();
-                this.addMessage('user', text, this.formatTime(timestamp));
+                // Don't store current message in history yet - it will be added after fractalic confirms
+                this.addMessage('user', text, this.formatTime(timestamp), { storeHistory: false });
                 this.chatInput.value = '';
                 this.showTyping(true);
 
@@ -1358,24 +1387,35 @@
                 let historyMarkdown = '';
                 if (history.length > 0) {
                     const markdownParts = [];
+                    let userMsgCount = 0;
+                    let assistantMsgCount = 0;
+
                     for (let i = 0; i < history.length; i++) {
                         const msg = history[i];
                         if (msg.role === 'user') {
-                            markdownParts.push(`# User Message ${i + 1}\n${msg.content}`);
+                            userMsgCount++;
+                            markdownParts.push(`# User Message ${userMsgCount}\n${msg.content}`);
                         } else if (msg.role === 'assistant') {
-                            // Remove "# LLM response block" header if present
-                            const cleanContent = msg.content
-                                .replace(/^# LLM response block\n?/m, '')
-                                .trim();
-                            markdownParts.push(`# Assistant Response ${i + 1}\n${cleanContent}`);
+                            assistantMsgCount++;
+                            // Check if assistant response already has a heading
+                            const hasHeading = msg.content && msg.content.trim().startsWith('#');
+                            if (hasHeading) {
+                                // Use existing heading, don't add duplicate
+                                markdownParts.push(msg.content);
+                            } else {
+                                // No heading, add one
+                                markdownParts.push(`# Assistant Response ${assistantMsgCount}\n${msg.content}`);
+                            }
                         }
                     }
                     historyMarkdown = markdownParts.join('\n\n');
                 }
 
                 // Combine history with current user request
+                // Count user messages to number the current one correctly
+                const userMessageCount = history.filter(m => m.role === 'user').length + 1;
                 const fullPrompt = historyMarkdown
-                    ? `${historyMarkdown}\n\n# User Message ${history.length + 1}\n${text}`
+                    ? `${historyMarkdown}\n\n# User Message ${userMessageCount}\n${text}`
                     : text;
 
                 console.log('[DEBUG] Full prompt being sent:', fullPrompt.substring(0, 500) + '...');
@@ -1385,6 +1425,11 @@
                     file_path: this.selectedFile,
                 };
                 this.fetchAndStreamChat(payload);
+
+                // Now add current user message to history for next time
+                if (useHistory) {
+                    this.appendConversationEntry('user', text);
+                }
             }
             handleStreamLine(line) {
                 try {
@@ -1394,8 +1439,10 @@
 
                     if (data.type === 'chat_message') {
                         // Determine if this should be stored in history
-                        // Only store real LLM responses (with "# LLM response block"), not system messages
-                        const isLLMResponse = data.content && data.content.includes('# LLM response block');
+                        const isUserMessage = data.role === 'user';
+                        const isAssistantMessage = data.role === 'assistant';
+
+                        // Check if it's a system message (not real dialogue)
                         const isSystemMessage = data.content && (
                             data.content.includes('Фракталик запущен') ||
                             data.content.includes('Фракталик завершил') ||
@@ -1403,9 +1450,12 @@
                             data.content.startsWith('✅')
                         );
 
+                        // Store ALL user messages and ALL assistant responses, except system messages
+                        const shouldStoreInHistory = (isUserMessage || isAssistantMessage) && !isSystemMessage;
+
                         this.addMessage(data.role === 'user' ? 'user' : 'assistant', data.content, now, {
                             session_id: sessionId,
-                            storeHistory: isLLMResponse && !isSystemMessage  // Only store LLM responses
+                            storeHistory: shouldStoreInHistory
                         });
 
                         if (data.return_content) {
