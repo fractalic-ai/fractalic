@@ -10,6 +10,9 @@ from core.ast_md.ast import AST, get_ast_part_by_path, get_ast_parts_by_uri_arra
 from core.errors import BlockNotFoundError
 from core.config import Config
 from core.llm.llm_client import LLMClient  # Import the LLMClient class
+from core.event_emitters import emit_event
+from core.events.types import EventType
+from core.simple_token_tracker import token_tracker
 from rich.console import Console
 from rich.spinner import Spinner
 from rich import print
@@ -618,13 +621,28 @@ def process_llm(ast: AST, current_node: Node, call_tree_node=None, committed_fil
         
         # Get the usage text from the token tracker if available
         usage_text = ""
-        # Token stats usage text removed        
+        # Token stats usage text removed
         console.print(
             f"[light_green]✓[/light_green][green] @llm [turquoise2]({llm_provider}/{actual_model}"
             f"{('/' + llm_client.base_url) if hasattr(llm_client, 'base_url') and llm_client.base_url else ''})[/turquoise2]"
             f" completed ({duration_str})[/green]{usage_text}"
         )
-        
+
+        # Emit file-level cumulative token usage statistics
+        source_file = getattr(ast, 'source_file', None) or getattr(ast, 'filename', None) or 'unknown'
+        file_stats = token_tracker.get_file_stats(source_file)
+        global_stats = token_tracker.get_global_stats()
+
+        if file_stats and (file_stats['file_input_tokens'] > 0 or file_stats['file_output_tokens'] > 0):
+            emit_event(EventType.TOKEN_USAGE,
+                     model=actual_model,
+                     input_tokens=file_stats['file_input_tokens'],
+                     output_tokens=file_stats['file_output_tokens'],
+                     total_input=global_stats['global_input_tokens'],
+                     total_output=global_stats['global_output_tokens'],
+                     source_file=source_file,
+                     is_summary=True)
+
     except Exception as e:
         # Restore original API key on error
         Config.API_KEY = original_api_key

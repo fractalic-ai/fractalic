@@ -187,6 +187,43 @@ class SimpleTokenTracker:
         # Each call prints immediately now
         pass
 
+    def get_last_call_stats(self, filename: str = None) -> dict | None:
+        """Get statistics for the last LLM call.
+
+        Returns dict with: model, input_tokens, output_tokens, total_input, total_output
+        or None if no calls recorded.
+        """
+        if filename:
+            file_key = self._current_file_key(filename)
+            if file_key in self.filestats and self.filestats[file_key]["calls"]:
+                last_call = self.filestats[file_key]["calls"][-1]
+                return {
+                    "model": last_call.model,
+                    "input_tokens": last_call.input_tokens,
+                    "output_tokens": last_call.output_tokens,
+                    "total_input": last_call.total_input_seen,
+                    "total_output": last_call.total_output_seen,
+                    "timestamp": last_call.timestamp
+                }
+
+        # If no filename, try to get the most recent call from any file
+        all_calls = []
+        for stats in self.filestats.values():
+            all_calls.extend(stats["calls"])
+
+        if all_calls:
+            last_call = all_calls[-1]
+            return {
+                "model": last_call.model,
+                "input_tokens": last_call.input_tokens,
+                "output_tokens": last_call.output_tokens,
+                "total_input": last_call.total_input_seen,
+                "total_output": last_call.total_output_seen,
+                "timestamp": last_call.timestamp
+            }
+
+        return None
+
     def print_pre_call_info(self, *args, **kwargs):  # noqa: D401, ANN001
         return None
 

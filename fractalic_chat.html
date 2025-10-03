@@ -290,6 +290,130 @@
             white-space: pre-wrap;
         }
 
+        .message.token-usage {
+            justify-content: center;
+            margin: 8px 0;
+        }
+
+        .message.token-usage .message-content {
+            background: #2d2d30;
+            border: 1px solid #3b3b3f;
+            border-radius: 8px;
+            padding: 10px 15px;
+            max-width: 350px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+        }
+
+        .token-usage-header {
+            font-weight: 600;
+            color: #79c0ff;
+            margin-bottom: 8px;
+            font-size: 13px;
+            text-align: center;
+        }
+
+        .token-usage-details {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+
+        .token-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 3px 0;
+        }
+
+        .token-row.total {
+            border-top: 1px solid #3b3b3f;
+            margin-top: 4px;
+            padding-top: 6px;
+            font-weight: 600;
+        }
+
+        .token-label {
+            color: #8b949e;
+            font-size: 12px;
+        }
+
+        .token-value {
+            color: #e6edf3;
+            font-size: 13px;
+            font-family: 'Consolas', 'Monaco', monospace;
+        }
+
+        .token-row.total .token-value {
+            color: #79c0ff;
+            font-weight: 600;
+        }
+
+        .message.token-usage.summary .message-content {
+            border: 2px solid #7ee787;
+            background: #1e2d2d;
+            box-shadow: 0 4px 8px rgba(126, 231, 135, 0.2);
+        }
+
+        .message.token-usage.summary .token-usage-header {
+            color: #7ee787;
+            font-size: 14px;
+        }
+
+        .token-row.session-totals {
+            border-top: 2px solid #7ee787;
+            margin-top: 8px;
+            padding-top: 8px;
+            font-weight: 600;
+        }
+
+        .token-row.session-totals .token-value {
+            color: #7ee787;
+        }
+
+        .token-value.file-name {
+            font-size: 11px;
+            color: #8b949e;
+            font-family: 'Consolas', 'Monaco', monospace;
+            word-break: break-all;
+        }
+
+        .token-stats-summary {
+            background: #1e1e1e;
+            border-bottom: 1px solid #3c3c3c;
+            padding: 8px 16px;
+            display: none;
+        }
+
+        .stats-content {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            font-size: 12px;
+            color: #8b949e;
+            justify-content: center;
+        }
+
+        .stats-title {
+            font-weight: 600;
+            color: #e6edf3;
+        }
+
+        .stats-value {
+            font-family: 'Consolas', 'Monaco', monospace;
+            color: #79c0ff;
+            font-weight: 500;
+        }
+
+        .stats-value.total {
+            color: #7ee787;
+            font-weight: 600;
+        }
+
+        .stats-calls {
+            color: #6e7681;
+            font-style: italic;
+        }
+
         .message-time {
             font-size: 12px;
             color: #6e7681;
@@ -1573,6 +1697,9 @@
                             : data.result || '(empty)';
                         const toolResultMsg = `✅ Tool Result: ${data.tool_name}\nID: ${data.tool_call_id}\nResult: ${resultPreview}`;
                         this.addMessage('tool_result', toolResultMsg, now, { session_id: sessionId });
+                    } else if (data.type === 'token_usage') {
+                        // Handle token usage event
+                        this.addTokenUsageMessage(data, now);
                     } else if (data.type === 'keepalive') {
                         // ignore keepalive messages
                     } else {
@@ -2146,6 +2273,112 @@
                         historyContent = historyContent ? `${historyContent}\n\n${returnText}` : returnText;
                     }
                     this.appendConversationEntry(type, historyContent);
+                }
+            }
+
+            addTokenUsageMessage(data, time) {
+                const tokenDiv = document.createElement('div');
+                const isSummary = data.is_summary === true;
+                tokenDiv.className = `message token-usage${isSummary ? ' summary' : ''}`;
+
+                const contentDiv = document.createElement('div');
+                contentDiv.className = 'message-content';
+
+                const modelName = data.model || 'unknown';
+                const inputTokens = (data.input_tokens || 0).toLocaleString();
+                const outputTokens = (data.output_tokens || 0).toLocaleString();
+                const totalTokens = (data.input_tokens + data.output_tokens || 0).toLocaleString();
+
+                let headerIcon = '📊';
+                let headerText = 'Token Usage';
+                if (isSummary) {
+                    headerIcon = '📈';
+                    headerText = 'File Summary';
+                }
+
+                // For summary, show file totals AND global session totals
+                let summaryHtml = '';
+                if (isSummary && data.total_input !== undefined) {
+                    const sessionInput = (data.total_input || 0).toLocaleString();
+                    const sessionOutput = (data.total_output || 0).toLocaleString();
+                    const sessionTotal = ((data.total_input || 0) + (data.total_output || 0)).toLocaleString();
+                    summaryHtml = `
+                        <div class="token-row session-totals">
+                            <span class="token-label">Session Total:</span>
+                            <span class="token-value">${sessionTotal} (${sessionInput}/${sessionOutput})</span>
+                        </div>
+                    `;
+                }
+
+                contentDiv.innerHTML = `
+                    <div class="token-usage-header">${headerIcon} ${headerText}</div>
+                    <div class="token-usage-details">
+                        ${data.source_file && isSummary ? `<div class="token-row"><span class="token-label">File:</span><span class="token-value file-name">${data.source_file}</span></div>` : ''}
+                        ${!isSummary ? `<div class="token-row"><span class="token-label">Model:</span><span class="token-value">${modelName}</span></div>` : ''}
+                        <div class="token-row">
+                            <span class="token-label">${isSummary ? 'File ' : ''}Input:</span>
+                            <span class="token-value">${inputTokens}</span>
+                        </div>
+                        <div class="token-row">
+                            <span class="token-label">${isSummary ? 'File ' : ''}Output:</span>
+                            <span class="token-value">${outputTokens}</span>
+                        </div>
+                        <div class="token-row total">
+                            <span class="token-label">${isSummary ? 'File ' : ''}Total:</span>
+                            <span class="token-value">${totalTokens}</span>
+                        </div>
+                        ${summaryHtml}
+                    </div>
+                `;
+
+                const timeDiv = document.createElement('div');
+                timeDiv.className = 'message-time';
+                timeDiv.textContent = time;
+
+                tokenDiv.appendChild(contentDiv);
+                tokenDiv.appendChild(timeDiv);
+
+                this.messagesContainer.appendChild(tokenDiv);
+                this.scrollToBottom();
+
+                // Accumulate session statistics (only for non-summary events to avoid double counting)
+                if (!isSummary) {
+                    if (!this.tokenStats) {
+                        this.tokenStats = { total_input: 0, total_output: 0, calls: 0 };
+                    }
+                    this.tokenStats.total_input += (data.input_tokens || 0);
+                    this.tokenStats.total_output += (data.output_tokens || 0);
+                    this.tokenStats.calls += 1;
+                    this.updateTokenStatsDisplay();
+                }
+            }
+
+            updateTokenStatsDisplay() {
+                let statsDiv = document.querySelector('.token-stats-summary');
+                if (!statsDiv) {
+                    // Create stats display at the top of chat
+                    statsDiv = document.createElement('div');
+                    statsDiv.className = 'token-stats-summary';
+                    const chatHeader = document.querySelector('.chat-header');
+                    if (chatHeader) {
+                        chatHeader.after(statsDiv);
+                    }
+                }
+
+                if (this.tokenStats && this.tokenStats.calls > 0) {
+                    const totalInput = this.tokenStats.total_input.toLocaleString();
+                    const totalOutput = this.tokenStats.total_output.toLocaleString();
+                    const totalAll = (this.tokenStats.total_input + this.tokenStats.total_output).toLocaleString();
+                    statsDiv.innerHTML = `
+                        <div class="stats-content">
+                            <span class="stats-title">Session Total:</span>
+                            <span class="stats-value">↑${totalInput}</span>
+                            <span class="stats-value">↓${totalOutput}</span>
+                            <span class="stats-value total">∑${totalAll}</span>
+                            <span class="stats-calls">(${this.tokenStats.calls} calls)</span>
+                        </div>
+                    `;
+                    statsDiv.style.display = 'block';
                 }
             }
 

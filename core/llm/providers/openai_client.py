@@ -871,9 +871,33 @@ class liteclient:
                              "content": content,
                              "tool_calls": tool_calls or None})
 
+                # Accumulate usage from this turn
+                if usage_info:
+                    if hasattr(usage_info, 'prompt_tokens'):
+                        cumulative_usage["prompt_tokens"] += usage_info.prompt_tokens or 0
+                        cumulative_usage["completion_tokens"] += usage_info.completion_tokens or 0
+                        cumulative_usage["total_tokens"] += usage_info.total_tokens or 0
+                    elif isinstance(usage_info, dict):
+                        cumulative_usage["prompt_tokens"] += usage_info.get('prompt_tokens', 0)
+                        cumulative_usage["completion_tokens"] += usage_info.get('completion_tokens', 0)
+                        cumulative_usage["total_tokens"] += usage_info.get('total_tokens', 0)
+                cumulative_usage["turns_count"] += 1
+                if tool_calls:
+                    cumulative_usage["tool_calls_count"] += len(tool_calls)
+
                 if not tool_calls:
                     # LLM finished conversation naturally - display tokens now
                     token_tracker.print_last_call_status()
+
+                    # Emit token usage event
+                    token_stats = token_tracker.get_last_call_stats()
+                    if token_stats:
+                        emit_event(EventType.TOKEN_USAGE,
+                                 model=token_stats["model"],
+                                 input_tokens=token_stats["input_tokens"],
+                                 output_tokens=token_stats["output_tokens"],
+                                 total_input=token_stats["total_input"],
+                                 total_output=token_stats["total_output"])
                     break
 
                 # ---- execute tool calls ----
@@ -914,10 +938,20 @@ class liteclient:
                         # Token tracking is now handled by LiteLLM callback
 
                         res = self.exec.execute(tc["function"]["name"], args)
-                        
+
                         # Display token usage after tool execution completes but before showing response
                         token_tracker.print_last_call_status()
-                        
+
+                        # Emit token usage event
+                        token_stats = token_tracker.get_last_call_stats()
+                        if token_stats:
+                            emit_event(EventType.TOKEN_USAGE,
+                                     model=token_stats["model"],
+                                     input_tokens=token_stats["input_tokens"],
+                                     output_tokens=token_stats["output_tokens"],
+                                     total_input=token_stats["total_input"],
+                                     total_output=token_stats["total_output"])
+
                         # Format response for display and context
                         if res and (res.strip().startswith(('{', '['))):
                             colored_response = self.ui.format_json_colored(res)
