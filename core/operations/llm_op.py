@@ -523,9 +523,10 @@ def process_llm(ast: AST, current_node: Node, call_tree_node=None, committed_fil
         'start_time': start_time
     }
     
-    # Add source file to params so LLM client can use it for token tracking
+    # Add source file and block_id to params so LLM client can use it for token tracking
     params['_source_file'] = operation_context['source_file']
-    
+    params['_block_id'] = current_node.key or current_node.hash
+
     try:
         response = llm_client.llm_call(prompt_text, messages, params)
         
@@ -635,6 +636,7 @@ def process_llm(ast: AST, current_node: Node, call_tree_node=None, committed_fil
 
         if file_stats and (file_stats['file_input_tokens'] > 0 or file_stats['file_output_tokens'] > 0):
             emit_event(EventType.TOKEN_USAGE,
+                     block_id=current_node.key or current_node.hash,  # Link to @llm block
                      model=actual_model,
                      input_tokens=file_stats['file_input_tokens'],
                      output_tokens=file_stats['file_output_tokens'],

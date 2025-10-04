@@ -893,6 +893,7 @@ class liteclient:
                     token_stats = token_tracker.get_last_call_stats()
                     if token_stats:
                         emit_event(EventType.TOKEN_USAGE,
+                                 block_id=op.get("_block_id"),
                                  model=token_stats["model"],
                                  input_tokens=token_stats["input_tokens"],
                                  output_tokens=token_stats["output_tokens"],
@@ -946,6 +947,7 @@ class liteclient:
                         token_stats = token_tracker.get_last_call_stats()
                         if token_stats:
                             emit_event(EventType.TOKEN_USAGE,
+                                     block_id=op.get("_block_id"),
                                      model=token_stats["model"],
                                      input_tokens=token_stats["input_tokens"],
                                      output_tokens=token_stats["output_tokens"],

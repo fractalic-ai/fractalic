@@ -381,12 +381,8 @@ def run_fractalic(input_file, task_file=None, param_input_user_request=None, par
         if execution_successful:
             # Build success output
             output = f"Execution completed. Branch: {branch_name}, Context: {ctx_hash}"
-            # Emit return content as assistant chat if explicit_return
-            if explicit_return and return_content:
-                try:
-                    emit_event(EventType.CHAT_MESSAGE, role='assistant', content=return_content)
-                except Exception:
-                    pass
+            # NOTE: return_content emission moved to main() to avoid duplication
+            # It will be emitted there along with other lifecycle events
             # Emit execution complete
             try:
                 emit_event(EventType.EXECUTION, phase='complete', target=str(input_file))
