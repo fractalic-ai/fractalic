@@ -4,6 +4,9 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Fractalic Chat Agent</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&display=swap" rel="stylesheet">
     <style>
         * {
             margin: 0;
@@ -12,8 +15,8 @@
         }
 
         body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            background: #1e1e1e;
+            font-family: 'Poppins', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #25292e;
             height: 100vh;
             display: flex;
             justify-content: center;
@@ -28,82 +31,121 @@
             height: 95vh;
             display: grid;
             grid-template-columns: 1fr 350px;
-            gap: 15px;
+            gap: 20px;
         }
 
         .chat-container {
-            background: #252526;
-            border-radius: 8px;
-            box-shadow: 0 2px 8px rgba(0,0,0,0.4);
-            border: 1px solid #454545;
+            background: #3c424a;
+            border-radius: 20px;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+            border: 1px solid #525b67;
             display: flex;
             flex-direction: column;
             overflow: hidden;
         }
 
         .ast-sidebar {
-            background: #252526;
-            border-radius: 8px;
-            box-shadow: 0 2px 8px rgba(0,0,0,0.4);
-            border: 1px solid #454545;
+            background: #3c424a;
+            border-radius: 20px;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+            border: 1px solid #525b67;
             display: flex;
             flex-direction: column;
             overflow: hidden;
         }
 
         .ast-sidebar-header {
-            background: #2d2d30;
-            color: #cccccc;
-            padding: 12px 16px;
-            font-weight: 500;
-            font-size: 13px;
-            border-bottom: 1px solid #454545;
+            background: #4a54f5;
+            color: #ffffff;
+            padding: 16px 20px;
+            font-weight: 600;
+            font-size: 14px;
+            border-bottom: 1px solid #525b67;
         }
 
         .ast-blocks-container {
             flex: 1;
             overflow-y: auto;
-            padding: 15px;
-            background: #1e1e1e;
+            padding: 16px;
+            background: #25292e;
         }
 
         .ast-block {
-            background: #252526;
-            border: 1px solid #3c3c3c;
-            border-radius: 4px;
-            padding: 10px;
-            margin-bottom: 8px;
+            background: #3c424a;
+            border: 1px solid #525b67;
+            border-radius: 12px;
+            padding: 12px 16px;
+            margin-bottom: 10px;
             transition: all 0.2s;
             cursor: pointer;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
         }
 
         .ast-block:hover {
-            border-color: #007acc;
-            background: #2d2d30;
+            border-color: #4a54f5;
+            background: #525b67;
+            box-shadow: 0 4px 8px rgba(74, 84, 245, 0.3);
         }
 
         .ast-block.new {
-            border-color: #4ec9b0;
-            background: #2d3f2f;
+            border-color: #83d69d;
+            background: #0c6542;
             animation: highlight-fade 3s ease-out;
         }
 
         .ast-block.expanded {
-            border-color: #007acc;
-            background: #2d2d30;
+            border-color: #4a54f5;
+            background: #525b67;
+            box-shadow: 0 4px 8px rgba(74, 84, 245, 0.3);
+        }
+
+        .ast-block.active {
+            border-color: #4a54f5;
+            background: #4a54f5;
+            box-shadow: 0 0 20px rgba(74, 84, 245, 0.6);
+            animation: pulse-active 1.5s ease-in-out infinite;
+        }
+
+        @keyframes pulse-active {
+            0%, 100% {
+                box-shadow: 0 0 20px rgba(74, 84, 245, 0.6);
+            }
+            50% {
+                box-shadow: 0 0 30px rgba(74, 84, 245, 0.9);
+            }
         }
 
         @keyframes highlight-fade {
-            0% { background: #2d3f2f; }
-            100% { background: #252526; }
+            0% { background: #0c6542; }
+            100% { background: #3c424a; }
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .spinner {
+            display: inline-block;
+            animation: spin 2s linear infinite;
+        }
+
+        @keyframes spinDash {
+            0% { stroke-dashoffset: 0; }
+            100% { stroke-dashoffset: -100; }
+        }
+
+        .spinner-circle {
+            animation: spin 2s linear infinite, spinDash 1.5s ease-in-out infinite;
+            transform-origin: center;
         }
 
         .ast-block-type {
-            font-size: 11px;
-            font-weight: 500;
+            font-size: 10px;
+            font-weight: 600;
             text-transform: uppercase;
-            color: #858585;
-            margin-bottom: 5px;
+            color: #4a54f5;
+            margin-bottom: 6px;
             display: flex;
             align-items: center;
             gap: 5px;
@@ -111,15 +153,15 @@
 
         .ast-block-header {
             font-weight: 500;
-            color: #cccccc;
-            margin-bottom: 5px;
+            color: #ffffff;
+            margin-bottom: 6px;
             font-size: 13px;
         }
 
         .ast-block-preview {
             font-size: 12px;
-            color: #858585;
-            line-height: 1.4;
+            color: #bcc2c9;
+            line-height: 1.5;
             overflow: hidden;
             text-overflow: ellipsis;
             display: -webkit-box;
@@ -139,67 +181,71 @@
 
         .ast-block-id {
             font-size: 10px;
-            color: #6e7681;
-            margin-top: 5px;
-            font-family: monospace;
+            color: #a0a8b2;
+            margin-top: 6px;
+            font-family: 'Monaco', 'Menlo', monospace;
         }
 
         .chat-header {
-            background: #2d2d30;
-            color: #cccccc;
-            padding: 12px 16px;
-            border-bottom: 1px solid #454545;
+            background: #4a54f5;
+            color: #ffffff;
+            padding: 24px 32px;
+            border-bottom: 1px solid #525b67;
         }
 
         .chat-header h1 {
-            font-size: 13px;
-            font-weight: 500;
+            font-size: 18px;
+            font-weight: 600;
+            color: #ffffff;
+            letter-spacing: -0.02em;
         }
 
         .chat-header p {
             opacity: 0.8;
-            margin-top: 4px;
-            font-size: 12px;
+            margin-top: 6px;
+            font-size: 14px;
+            color: rgba(255, 255, 255, 0.8);
+            font-weight: 400;
         }
 
         .connection-status {
             padding: 8px 16px;
-            background: #1e1e1e;
-            border-bottom: 1px solid #454545;
+            background: #25292e;
+            border-bottom: 1px solid #525b67;
             font-size: 12px;
-            color: #858585;
+            color: #a0a8b2;
         }
 
         .status-connected {
-            color: #3fb950;
+            color: #83d69d;
         }
 
         .status-disconnected {
-            color: #f85149;
+            color: #d33f3f;
         }
 
         .chat-messages {
             flex: 1;
-            padding: 16px;
+            padding: 32px;
             overflow-y: auto;
-            background: #1e1e1e;
+            background: #25292e;
         }
 
         .chat-messages::-webkit-scrollbar {
-            width: 10px;
+            width: 8px;
         }
 
         .chat-messages::-webkit-scrollbar-track {
-            background: #1e1e1e;
+            background: #25292e;
         }
 
         .chat-messages::-webkit-scrollbar-thumb {
-            background: #424242;
-            border-radius: 5px;
+            background: #525b67;
+            border-radius: 4px;
         }
 
         .chat-messages::-webkit-scrollbar-thumb:hover {
-            background: #4e4e4e;
+            background: #697583;
         }
 
         .message {
@@ -213,78 +259,82 @@
         }
 
         .message-content {
-            max-width: 70%;
-            padding: 15px 20px;
-            border-radius: 18px;
+            max-width: 75%;
+            padding: 20px 28px;
+            border-radius: 20px;
             word-wrap: break-word;
+            line-height: 1.5em;
         }
 
         .message.user .message-content {
-            background: #2d2d30;
-            color: #cccccc;
-            border: 1px solid #454545;
+            background: #4a54f5;
+            color: #ffffff;
+            border: none;
+            box-shadow: 0 4px 16px rgba(74, 84, 245, 0.3);
         }
 
         .message.assistant .message-content {
-            background: #252526;
-            border: 1px solid #3c3c3c;
-            color: #cccccc;
+            background: #3c424a;
+            border: 1px solid #525b67;
+            color: #ffffff;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
         }
 
         .assistant-return-block {
             margin-top: 10px;
             padding: 12px;
-            background: #1e1e1e;
-            border: 1px solid #3c3c3c;
-            border-radius: 4px;
+            background: #25292e;
+            border: 1px solid #525b67;
+            border-radius: 12px;
             font-family: 'Monaco', 'Consolas', 'Courier New', monospace;
             font-size: 13px;
             line-height: 1.4;
             white-space: pre-wrap;
             overflow-x: auto;
-            color: #858585;
+            color: #ffffff;
         }
 
         .assistant-return-block.error {
-            background: #2d1519;
-            border-color: #6e2229;
-            color: #f85149;
+            background: #390d0d;
+            border-color: #d33f3f;
+            color: #dd6868;
         }
 
         .message.execution .message-content {
-            background: #2d2a1c;
-            border: 1px solid #4a4520;
-            color: #e3b341;
+            background: #525b67;
+            border: 1px solid #4a54f5;
+            color: #ffffff;
+            box-shadow: 0 4px 8px rgba(74, 84, 245, 0.3);
         }
 
         .message.execution_output .message-content {
-            background: #161b22;
-            border: 1px solid #30363d;
-            color: #8b949e;
+            background: #3c424a;
+            border: 1px solid #525b67;
+            color: #ffffff;
             font-family: 'Monaco', 'Consolas', monospace;
             font-size: 13px;
             white-space: pre-wrap;
         }
 
         .message.error .message-content {
-            background: #2d1519;
-            border: 1px solid #6e2229;
-            color: #f85149;
+            background: #390d0d;
+            border: 1px solid #d33f3f;
+            color: #dd6868;
         }
 
         .message.tool_call .message-content {
-            background: #1e2d3d;
-            border: 1px solid #3b5270;
-            color: #79c0ff;
+            background: #13489c;
+            border: 1px solid #70a1ee;
+            color: #afcaf5;
             font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
             font-size: 12px;
             white-space: pre-wrap;
         }
 
         .message.tool_result .message-content {
-            background: #1e2d2d;
-            border: 1px solid #3b5250;
-            color: #7ee787;
+            background: #0c6542;
+            border: 1px solid #83d69d;
+            color: #b8eec9;
             font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
             font-size: 12px;
             white-space: pre-wrap;
@@ -296,17 +346,17 @@
         }
 
         .message.token-usage .message-content {
-            background: #2d2d30;
-            border: 1px solid #3b3b3f;
-            border-radius: 8px;
+            background: #3c424a;
+            border: 1px solid #525b67;
+            border-radius: 12px;
             padding: 10px 15px;
             max-width: 350px;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
         }
 
         .token-usage-header {
             font-weight: 600;
-            color: #79c0ff;
+            color: #4a54f5;
             margin-bottom: 8px;
             font-size: 13px;
             text-align: center;
@@ -326,60 +376,60 @@
         }
 
         .token-row.total {
-            border-top: 1px solid #3b3b3f;
+            border-top: 1px solid #525b67;
             margin-top: 4px;
             padding-top: 6px;
             font-weight: 600;
         }
 
         .token-label {
-            color: #8b949e;
+            color: #a0a8b2;
             font-size: 12px;
         }
 
         .token-value {
-            color: #e6edf3;
+            color: #ffffff;
             font-size: 13px;
             font-family: 'Consolas', 'Monaco', monospace;
         }
 
         .token-row.total .token-value {
-            color: #79c0ff;
+            color: #4a54f5;
             font-weight: 600;
         }
 
         .message.token-usage.summary .message-content {
-            border: 2px solid #7ee787;
-            background: #1e2d2d;
-            box-shadow: 0 4px 8px rgba(126, 231, 135, 0.2);
+            border: 2px solid #83d69d;
+            background: #0c6542;
+            box-shadow: 0 4px 8px rgba(131, 214, 157, 0.3);
         }
 
         .message.token-usage.summary .token-usage-header {
-            color: #7ee787;
+            color: #b8eec9;
             font-size: 14px;
         }
 
         .token-row.session-totals {
-            border-top: 2px solid #7ee787;
+            border-top: 2px solid #83d69d;
             margin-top: 8px;
             padding-top: 8px;
             font-weight: 600;
         }
 
         .token-row.session-totals .token-value {
-            color: #7ee787;
+            color: #b8eec9;
         }
 
         .token-value.file-name {
             font-size: 11px;
-            color: #8b949e;
+            color: #a0a8b2;
             font-family: 'Consolas', 'Monaco', monospace;
             word-break: break-all;
         }
 
         .token-stats-summary {
-            background: #1e1e1e;
-            border-bottom: 1px solid #3c3c3c;
+            background: #25292e;
+            border-bottom: 1px solid #525b67;
             padding: 8px 16px;
             display: none;
         }
@@ -389,34 +439,34 @@
             align-items: center;
             gap: 12px;
             font-size: 12px;
-            color: #8b949e;
+            color: #a0a8b2;
             justify-content: center;
         }
 
         .stats-title {
             font-weight: 600;
-            color: #e6edf3;
+            color: #ffffff;
         }
 
         .stats-value {
             font-family: 'Consolas', 'Monaco', monospace;
-            color: #79c0ff;
+            color: #4a54f5;
             font-weight: 500;
         }
 
         .stats-value.total {
-            color: #7ee787;
+            color: #83d69d;
             font-weight: 600;
         }
 
         .stats-calls {
-            color: #6e7681;
+            color: #a0a8b2;
             font-style: italic;
         }
 
         .message-time {
             font-size: 12px;
-            color: #6e7681;
+            color: #a0a8b2;
             margin: 5px 15px 0;
             display: flex;
             align-items: center;
@@ -430,7 +480,7 @@
         .session-badge {
             display: inline-block;
             padding: 2px 8px;
-            background: linear-gradient(135deg, #1f6feb 0%, #388bfd 100%);
+            background: #4a54f5;
             color: white;
             border-radius: 12px;
             font-size: 10px;
@@ -440,11 +490,11 @@
         }
 
         .code-block {
-            background: #1e1e1e;
-            color: #cccccc;
+            background: #25292e;
+            color: #ffffff;
             padding: 12px;
-            border-radius: 4px;
-            border: 1px solid #3c3c3c;
+            border-radius: 12px;
+            border: 1px solid #525b67;
             font-family: 'Monaco', 'Consolas', 'Courier New', monospace;
             font-size: 13px;
             white-space: pre-wrap;
@@ -453,19 +503,19 @@
         }
 
         .message-header {
-            color: #858585;
+            color: #a0a8b2;
         }
 
         .message-body {
-            color: #cccccc;
+            color: #ffffff;
         }
 
         .exec-status-text {
-            color: #cccccc;
+            color: #ffffff;
         }
 
         .completion-status {
-            color: #3fb950;
+            color: #83d69d;
         }
 
         /* Action Buttons in Messages */
@@ -477,39 +527,165 @@
         }
 
         .action-button {
-            padding: 5px 10px;
-            background: #2d2d30;
-            border: 1px solid #454545;
-            border-radius: 4px;
+            padding: 8px 16px;
+            background: #3c424a;
+            border: 1px solid #525b67;
+            border-radius: 20px;
             cursor: pointer;
             font-size: 12px;
-            color: #858585;
+            color: #4a54f5;
             text-decoration: none;
             display: inline-flex;
             align-items: center;
-            gap: 4px;
+            gap: 6px;
             transition: all 0.2s;
+            font-weight: 500;
         }
 
         .action-button:hover {
-            background: #3c3c3c;
-            color: #cccccc;
+            background: #525b67;
+            border-color: #4a54f5;
+            transform: translateY(-1px);
+            box-shadow: 0 4px 8px rgba(74, 84, 245, 0.3);
         }
 
         .action-button.primary {
-            background: #094771;
-            border-color: #007acc;
+            background: #4a54f5;
+            border: none;
             color: #ffffff;
+            box-shadow: 0 4px 12px rgba(74, 84, 245, 0.3);
         }
 
         .action-button.primary:hover {
-            background: #005a9e;
+            background: #6c74f7;
+            box-shadow: 0 6px 16px rgba(74, 84, 245, 0.4);
+            transform: translateY(-2px);
+        }
+
+        /* Markdown Typography Styles */
+        .md-heading {
+            font-weight: 600;
+            color: #ffffff;
+            margin: 1.2em 0 0.8em 0;
+            line-height: 1.3;
+            letter-spacing: -0.02em;
+        }
+
+        .md-h1 {
+            font-size: 2em;
+            margin-top: 0;
+        }
+
+        .md-h2 {
+            font-size: 1.5em;
+        }
+
+        .md-h3 {
+            font-size: 1.25em;
+        }
+
+        .md-h4 {
+            font-size: 1.1em;
+        }
+
+        .md-h5, .md-h6 {
+            font-size: 1em;
+        }
+
+        .md-p {
+            margin: 0.8em 0;
+            line-height: 1.7;
+            color: #ffffff;
+        }
+
+        .md-strong {
+            font-weight: 600;
+            color: #ffffff;
+        }
+
+        .md-em {
+            font-style: italic;
+            color: #bcc2c9;
+        }
+
+        .md-code-inline {
+            background: #13489c;
+            color: #afcaf5;
+            padding: 2px 8px;
+            border-radius: 6px;
+            font-family: 'Monaco', 'Menlo', 'Consolas', monospace;
+            font-size: 0.9em;
+            border: 1px solid #70a1ee;
+        }
+
+        .md-code-block {
+            background: #25292e;
+            border: 1px solid #525b67;
+            border-radius: 12px;
+            padding: 16px 20px;
+            margin: 1em 0;
+            overflow-x: auto;
+        }
+
+        .md-code {
+            font-family: 'Monaco', 'Menlo', 'Consolas', monospace;
+            font-size: 0.9em;
+            line-height: 1.6;
+            color: #ffffff;
+        }
+
+        .md-ul, .md-ol {
+            margin: 1em 0;
+            padding-left: 2em;
+        }
+
+        .md-li {
+            margin: 0.5em 0;
+            line-height: 1.7;
+            color: #ffffff;
+        }
+
+        .md-ul .md-li {
+            list-style-type: disc;
+        }
+
+        .md-ol .md-li {
+            list-style-type: decimal;
+        }
+
+        .md-blockquote {
+            border-left: 4px solid #4a54f5;
+            padding-left: 1.2em;
+            margin: 1em 0;
+            color: #bcc2c9;
+            font-style: italic;
+            background: #3c424a;
+            padding: 12px 12px 12px 20px;
+            border-radius: 0 8px 8px 0;
+        }
+
+        .md-hr {
+            border: none;
+            border-top: 2px solid #525b67;
+            margin: 2em 0;
+        }
+
+        .md-link {
+            color: #4a54f5;
+            text-decoration: none;
+            border-bottom: 1px solid #4a54f5;
+            transition: all 0.2s ease;
+        }
+
+        .md-link:hover {
+            border-bottom-color: #6c74f7;
+            color: #6c74f7;
         }
 
         .chat-input-container {
-            padding: 8px 12px;
-            background: #1e1e1e;
-            border-top: 1px solid #2d2d30;
+            padding: 20px 28px;
+            background: #3c424a;
+            border-top: 1px solid #525b67;
         }
 
         .file-selector-container {
@@ -521,54 +697,57 @@
 
         .file-select-button {
             padding: 8px 14px;
-            background: #2d2d30;
-            border: 1px solid #454545;
-            border-radius: 4px;
+            background: #25292e;
+            border: 1px solid #525b67;
+            border-radius: 20px;
             cursor: pointer;
             font-size: 13px;
             transition: all 0.2s;
             white-space: nowrap;
-            color: #cccccc;
+            color: #4a54f5;
+            font-weight: 500;
         }
 
         .file-select-button:hover {
-            background: #3c3c3c;
-            border-color: #007acc;
+            background: #3c424a;
+            border-color: #4a54f5;
+            transform: translateY(-1px);
+            box-shadow: 0 4px 8px rgba(74, 84, 245, 0.3);
         }
 
         .selected-file-display {
             flex: 1;
             padding: 8px 14px;
-            background: #2d2d30;
-            border: 1px solid #454545;
-            border-radius: 4px;
+            background: #25292e;
+            border: 1px solid #525b67;
+            border-radius: 20px;
             font-size: 13px;
-            color: #858585;
+            color: #a0a8b2;
             overflow: hidden;
             text-overflow: ellipsis;
             white-space: nowrap;
         }
 
         .selected-file-display.has-file {
-            background: #2d2d30;
-            border-color: #007acc;
-            color: #cccccc;
+            background: #3c424a;
+            border-color: #4a54f5;
+            color: #ffffff;
         }
 
         .clear-selection-button {
             padding: 4px 8px;
             background: transparent;
             border: none;
-            border-radius: 4px;
+            border-radius: 8px;
             cursor: pointer;
             font-size: 14px;
             transition: background 0.2s;
-            color: #858585;
+            color: #a0a8b2;
         }
 
         .clear-selection-button:hover {
-            background: #3c3c3c;
-            color: #cccccc;
+            background: #3c424a;
+            color: #4a54f5;
         }
 
         .input-row {
@@ -582,15 +761,17 @@
             background: transparent;
             border: none;
             cursor: pointer;
-            color: #858585;
+            color: #a0a8b2;
             font-size: 18px;
-            transition: color 0.2s;
+            transition: all 0.2s;
             display: flex;
             align-items: center;
+            border-radius: 8px;
         }
 
         .attach-button:hover {
-            color: #cccccc;
+            color: #4a54f5;
+            background: #525b67;
         }
 
         .history-toggle-btn {
@@ -598,76 +779,83 @@
             background: transparent;
             border: none;
             cursor: pointer;
-            color: #858585;
+            color: #a0a8b2;
             font-size: 18px;
             transition: all 0.2s;
             display: flex;
             align-items: center;
-            border-radius: 4px;
+            border-radius: 8px;
         }
 
         .history-toggle-btn:hover {
-            background: #3c3c3c;
-            color: #cccccc;
+            background: #525b67;
+            color: #4a54f5;
         }
 
         .history-toggle-btn.active {
-            color: #007acc;
+            color: #4a54f5;
         }
 
         .history-toggle-btn.active:hover {
-            background: #094771;
+            background: #525b67;
         }
 
         .chat-input {
             flex: 1;
-            padding: 10px 14px;
-            border: 1px solid #3c3c3c;
-            border-radius: 4px;
-            font-size: 13px;
+            padding: 14px 20px;
+            border: 1px solid #525b67;
+            border-radius: 20px;
+            font-size: 15px;
+            font-family: 'Poppins', sans-serif;
             outline: none;
-            transition: border-color 0.2s, box-shadow 0.2s;
-            background: #3c3c3c;
-            color: #cccccc;
+            transition: all 0.2s;
+            background: #25292e;
+            color: #ffffff;
         }
 
         .chat-input::placeholder {
-            color: #858585;
+            color: #a0a8b2;
         }
 
         .chat-input:focus {
-            border-color: #007acc;
-            box-shadow: 0 0 0 1px #007acc;
+            border-color: #4a54f5;
+            box-shadow: 0 0 0 3px rgba(74, 84, 245, 0.2);
+            background: #3c424a;
         }
 
         .send-button {
-            padding: 6px;
-            background: transparent;
-            color: #858585;
+            padding: 12px 24px;
+            background: #4a54f5;
+            color: #ffffff;
             border: none;
-            border-radius: 4px;
+            border-radius: 32px;
             cursor: pointer;
-            font-size: 18px;
+            font-size: 15px;
+            font-weight: 500;
             transition: all 0.2s;
             display: flex;
             align-items: center;
+            gap: 6px;
+            box-shadow: 0 4px 12px rgba(74, 84, 245, 0.3);
         }
 
         .send-button:hover {
-            background: #3c3c3c;
-            color: #cccccc;
+            background: #6c74f7;
+            box-shadow: 0 6px 16px rgba(74, 84, 245, 0.4);
+            transform: translateY(-2px);
         }
 
         .send-button:disabled {
-            opacity: 0.6;
+            opacity: 0.5;
             cursor: not-allowed;
             transform: none;
+            box-shadow: 0 2px 6px rgba(74, 84, 245, 0.2);
         }
 
         .typing-indicator {
             display: none;
             padding: 12px 16px;
-            color: #858585;
+            color: #a0a8b2;
             font-style: italic;
             font-size: 13px;
         }
@@ -690,16 +878,16 @@
         }
 
         .modal-content {
-            background-color: #252526;
+            background-color: #3c424a;
             margin: 5% auto;
-            border-radius: 6px;
-            border: 1px solid #454545;
+            border-radius: 20px;
+            border: 1px solid #525b67;
             width: 80%;
             max-width: 800px;
             max-height: 80vh;
             display: flex;
             flex-direction: column;
-            box-shadow: 0 4px 16px rgba(0,0,0,0.6);
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
         }
 
         .modal-header {
@@ -707,14 +895,14 @@
             justify-content: space-between;
             align-items: center;
             padding: 20px;
-            border-bottom: 1px solid #30363d;
+            border-bottom: 1px solid #525b67;
         }
 
         .modal-header h3 {
             margin: 0;
-            color: #cccccc;
+            color: #ffffff;
             font-size: 13px;
-            font-weight: 500;
+            font-weight: 600;
         }
 
         .modal-close {
@@ -722,21 +910,24 @@
             border: none;
             font-size: 20px;
             cursor: pointer;
-            color: #858585;
-            transition: color 0.2s;
+            color: #a0a8b2;
+            transition: all 0.2s;
+            border-radius: 8px;
+            padding: 4px;
         }
 
         .modal-close:hover {
-            color: #cccccc;
+            color: #4a54f5;
+            background: #525b67;
         }
 
         .breadcrumb {
             padding: 8px 16px;
-            background: #1e1e1e;
-            border-bottom: 1px solid #454545;
+            background: #25292e;
+            border-bottom: 1px solid #525b67;
             font-family: 'Courier New', monospace;
             font-size: 12px;
-            color: #858585;
+            color: #a0a8b2;
         }
 
         .file-browser {
@@ -753,21 +944,21 @@
             display: flex;
             align-items: center;
             padding: 8px 16px;
-            border-bottom: 1px solid #2d2d30;
+            border-bottom: 1px solid #525b67;
             cursor: pointer;
             transition: background-color 0.2s;
         }
 
         .file-item:hover {
-            background: #2d2d30;
+            background: #525b67;
         }
 
         .file-item.directory {
-            background: #2d2d30;
+            background: #3c424a;
         }
 
         .file-item.directory:hover {
-            background: #3c3c3c;
+            background: #525b67;
         }
 
         .file-icon {
@@ -780,27 +971,27 @@
         }
 
         .file-name {
-            font-weight: 400;
-            color: #cccccc;
+            font-weight: 500;
+            color: #ffffff;
             margin-bottom: 2px;
             font-size: 13px;
         }
 
         .file-description {
             font-size: 11px;
-            color: #858585;
+            color: #bcc2c9;
             line-height: 1.3;
         }
 
         .file-meta {
             font-size: 11px;
-            color: #6e7681;
+            color: #a0a8b2;
             text-align: right;
         }
 
         .modal-footer {
             padding: 20px;
-            border-top: 1px solid #30363d;
+            border-top: 1px solid #525b67;
             text-align: right;
         }
 
@@ -1634,7 +1825,8 @@
 
                         this.addMessage(data.role === 'user' ? 'user' : 'assistant', data.content, now, {
                             session_id: sessionId,
-                            storeHistory: shouldStoreInHistory
+                            storeHistory: shouldStoreInHistory,
+                            markdownish: isAssistantMessage  // Enable markdown for assistant messages
                         });
 
                         if (data.return_content) {
@@ -1687,19 +1879,50 @@
                         // Handle AST structure update
                         this.renderASTBlocks(data.blocks || [], data.operation);
                     } else if (data.type === 'tool_call') {
-                        // Handle tool call event
-                        const toolMsg = `🔧 Tool Call: ${data.tool_name}\nID: ${data.tool_call_id}\nArgs: ${data.arguments || '{}'}`;
-                        this.addMessage('tool_call', toolMsg, now, { session_id: sessionId });
+                        // Handle tool call event - nest inside execution block if available
+                        const executionId = data.execution_id;
+                        const toolIcon = this.createSVGIcon('tool', 14, '#4A54F5');
+                        const toolContent = `
+                            <div style="font-weight: 500; margin-bottom: 6px; display: flex; align-items: center; gap: 6px; color: #ffffff;">
+                                ${toolIcon}
+                                <span>Tool: <strong style="color: #afcaf5;">${data.tool_name}</strong></span>
+                            </div>
+                            <div style="font-size: 11px; color: #a0a8b2; margin-bottom: 4px; font-family: monospace;">ID: ${data.tool_call_id}</div>
+                            <div style="font-family: 'Monaco', 'Menlo', monospace; font-size: 11px; color: #ffffff; white-space: pre-wrap; max-height: 150px; overflow-y: auto; background: #25292e; padding: 8px; border-radius: 8px; border: 1px solid #525b67;">${data.arguments || '{}'}</div>
+                        `;
+
+                        if (executionId && !this.addNestedEventToExecution(executionId, 'tool_call', toolContent, now)) {
+                            // Fallback if no execution block found
+                            const toolMsg = `🔧 Tool Call: ${data.tool_name}\nID: ${data.tool_call_id}\nArgs: ${data.arguments || '{}'}`;
+                            this.addMessage('tool_call', toolMsg, now, { session_id: sessionId });
+                        }
                     } else if (data.type === 'tool_result') {
-                        // Handle tool result event
+                        // Handle tool result event - nest inside execution block if available
+                        const executionId = data.execution_id;
                         const resultPreview = data.result && data.result.length > 200
                             ? data.result.substring(0, 200) + '...'
                             : data.result || '(empty)';
-                        const toolResultMsg = `✅ Tool Result: ${data.tool_name}\nID: ${data.tool_call_id}\nResult: ${resultPreview}`;
-                        this.addMessage('tool_result', toolResultMsg, now, { session_id: sessionId });
+                        const checkIcon = this.createSVGIcon('checkCircle', 14, '#83d69d');
+                        const toolResultContent = `
+                            <div style="font-weight: 500; margin-bottom: 6px; display: flex; align-items: center; gap: 6px; color: #ffffff;">
+                                ${checkIcon}
+                                <span>Result: <strong style="color: #b8eec9;">${data.tool_name}</strong></span>
+                            </div>
+                            <div style="font-size: 11px; color: #a0a8b2; margin-bottom: 4px; font-family: monospace;">ID: ${data.tool_call_id}</div>
+                            <div style="font-family: 'Monaco', 'Menlo', monospace; font-size: 11px; color: #ffffff; white-space: pre-wrap; max-height: 150px; overflow-y: auto; background: #25292e; padding: 8px; border-radius: 8px; border: 1px solid #525b67;">${resultPreview}</div>
+                        `;
+
+                        if (executionId && !this.addNestedEventToExecution(executionId, 'tool_result', toolResultContent, now)) {
+                            // Fallback if no execution block found
+                            const toolResultMsg = `✅ Tool Result: ${data.tool_name}\nID: ${data.tool_call_id}\nResult: ${resultPreview}`;
+                            this.addMessage('tool_result', toolResultMsg, now, { session_id: sessionId });
+                        }
                     } else if (data.type === 'token_usage') {
                         // Handle token usage event
                         this.addTokenUsageMessage(data, now);
+                    } else if (data.type === 'block_processing') {
+                        // Handle block processing event - highlight active block in AST tree
+                        this.highlightActiveBlock(data.block_id);
                     } else if (data.type === 'keepalive') {
                         // ignore keepalive messages
                     } else {
@@ -1839,6 +2062,27 @@
                 return icons[type] || '📝';
             }
 
+            highlightActiveBlock(blockId) {
+                if (!blockId) return;
+
+                // Remove 'active' class from all blocks
+                this.astBlocks.forEach((blockEl) => {
+                    blockEl.classList.remove('active');
+                });
+
+                // Add 'active' class to the target block
+                const targetBlock = this.astBlocks.get(blockId);
+                if (targetBlock) {
+                    targetBlock.classList.add('active');
+
+                    // Scroll to the active block
+                    targetBlock.scrollIntoView({
+                        behavior: 'smooth',
+                        block: 'nearest'
+                    });
+                }
+            }
+
             async fetchAndStreamChat(payload) {
                 try {
                     const response = await fetch('/api/chat/stream', {
@@ -1885,80 +2129,114 @@
                     return;
                 }
 
-                // Заголовок
+                // Update header with completion status
                 const headerElement = messageElement.querySelector('.message-header');
                 if (headerElement) {
-                    // Ensure status icon exists (✅ or ❌)
+                    // Find and update status icon (replace spinner with checkmark/X)
                     let statusIcon = headerElement.querySelector('.completion-status');
-                    if (!statusIcon) {
-                        statusIcon = document.createElement('span');
-                        statusIcon.className = 'completion-status';
-                        statusIcon.style.marginRight = '6px';
-                        headerElement.insertBefore(statusIcon, headerElement.firstChild);
+                    if (statusIcon) {
+                        if (resolvedStatus === 'error') {
+                            statusIcon.innerHTML = this.createSVGIcon('x', 16, '#ef4444');
+                        } else {
+                            statusIcon.innerHTML = this.createSVGIcon('check', 16, '#10b981');
+                        }
                     }
-                    if (resolvedStatus === 'error') {
-                        statusIcon.textContent = '❌';
-                        statusIcon.style.color = '#c62828';
-                    } else {
-                        statusIcon.textContent = '✅';
-                        statusIcon.style.color = '#2e8b57';
-                    }
-                    // Find status span (prefer class, fallback to first span after check)
+
+                    // Find and update status text
                     let statusSpan = headerElement.querySelector('.exec-status-text');
-                    if (!statusSpan) {
-                        const spans = Array.from(headerElement.querySelectorAll('span')).filter(s => !s.classList.contains('completion-status'));
-                        statusSpan = spans.find(s => /Выполняется|Готово/.test(s.textContent)) || spans[0];
-                        if (statusSpan) statusSpan.classList.add('exec-status-text');
-                    }
                     if (statusSpan) {
+                        // Keep the file name but update status
+                        const currentText = statusSpan.textContent;
+                        const fileMatch = currentText.match(/для файла: (.+)$/);
+                        const fileName = fileMatch ? fileMatch[0] : (file_path ? `для файла: ${file_path}` : '');
+
                         if (resolvedStatus === 'error') {
                             if (typeof duration_ms === 'number') {
                                 const seconds = (duration_ms / 1000).toFixed(1);
-                                statusSpan.textContent = `Ошибка (${seconds}s)`;
+                                statusSpan.textContent = `Ошибка ${fileName} (${seconds}s)`;
                             } else {
-                                statusSpan.textContent = 'Ошибка';
+                                statusSpan.textContent = `Ошибка ${fileName}`;
                             }
+                            statusSpan.style.color = '#ef4444';
                         } else {
                             if (typeof duration_ms === 'number') {
                                 const seconds = (duration_ms / 1000).toFixed(1);
-                                statusSpan.textContent = `Готово (${seconds}s)`;
-                            } else if (/Выполняется/.test(statusSpan.textContent)) {
-                                statusSpan.textContent = 'Готово';
+                                statusSpan.textContent = `Завершено ${fileName} (${seconds}s)`;
+                            } else {
+                                statusSpan.textContent = `Завершено ${fileName}`;
                             }
+                            statusSpan.style.color = '#10b981';
                         }
                     }
                 }
 
-                // Обновить тело: при желании можно обновить текст выполнения
-                const bodyContent = messageElement.querySelector('.message-body .message-content');
-                if (bodyContent) {
+                // Add Diff button icon next to terminal icon if completed successfully
+                if (branch_name && file_path && resolvedStatus !== 'error') {
+                    const leftSection = headerElement.querySelector('div');
+                    if (leftSection && !leftSection.querySelector('.diff-icon-button')) {
+                        const diffIcon = document.createElement('button');
+                        diffIcon.className = 'diff-icon-button';
+                        diffIcon.innerHTML = this.createSVGIcon('document', 16, 'rgba(3, 7, 61, 0.6)');
+                        diffIcon.title = 'Просмотр Diff';
+                        diffIcon.style.background = 'none';
+                        diffIcon.style.border = 'none';
+                        diffIcon.style.cursor = 'pointer';
+                        diffIcon.style.padding = '4px 8px';
+                        diffIcon.style.display = 'flex';
+                        diffIcon.style.alignItems = 'center';
+                        diffIcon.style.opacity = '0.7';
+                        diffIcon.style.transition = 'opacity 0.2s';
+                        diffIcon.onmouseover = () => diffIcon.style.opacity = '1';
+                        diffIcon.onmouseout = () => diffIcon.style.opacity = '0.7';
+                        diffIcon.onclick = (e) => {
+                            e.stopPropagation(); // Prevent collapse/expand
+                            this.showDiffViewer(file_path, branch_name);
+                        };
+
+                        // Insert before terminal button
+                        const terminalButton = leftSection.querySelector('.terminal-icon-button');
+                        if (terminalButton) {
+                            leftSection.insertBefore(diffIcon, terminalButton);
+                        } else {
+                            leftSection.appendChild(diffIcon);
+                        }
+                    }
+                }
+
+                // Add error details as nested event if error occurred
+                if (resolvedStatus === 'error' && (error_message || recent_output)) {
                     const esc = (str) => (str || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-                    if (resolvedStatus === 'error') {
-                        const base = error_message || message || 'Ошибка выполнения';
-                        let snippetHtml = '';
-                        if (recent_output) {
-                            snippetHtml = `<pre style="margin:8px 0 0; padding:8px; background:#fff5f5; border:1px solid #f44336; border-radius:6px; white-space:pre-wrap; font-size:13px; max-height:300px; overflow:auto;">${esc(recent_output)}</pre>`;
-                        }
-                        const meta = (typeof bytes_read === 'number') ? `<div style="font-size:11px; color:#999; margin-top:4px;">bytes: ${bytes_read}</div>` : '';
-                        bodyContent.innerHTML = `${esc(base)}${snippetHtml}${meta}`;
-                    } else if (message) {
-                        bodyContent.textContent = message;
+                    const base = error_message || message || 'Ошибка выполнения';
+                    let snippetHtml = '';
+                    if (recent_output) {
+                        snippetHtml = `<pre style="margin:8px 0 0; padding:8px; background:#fff5f5; border:1px solid #f44336; border-radius:6px; white-space:pre-wrap; font-size:13px; max-height:300px; overflow:auto;">${esc(recent_output)}</pre>`;
                     }
+                    const meta = (typeof bytes_read === 'number') ? `<div style="font-size:11px; color:#999; margin-top:4px;">bytes: ${bytes_read}</div>` : '';
+                    const errorContent = `${esc(base)}${snippetHtml}${meta}`;
+
+                    this.addNestedEventToExecution(execution_id, 'error', errorContent, this.formatTime(new Date().toISOString()));
                 }
 
-                // Добавить кнопку Diff если её еще нет и есть данные
-                if (branch_name && file_path) {
-                    const actionsDiv = messageElement.querySelector('.message-body .message-actions');
-                    if (actionsDiv && !actionsDiv.querySelector('.diff-button')) {
-                        const diffButton = document.createElement('button');
-                        diffButton.className = 'action-button primary diff-button';
-                        diffButton.innerHTML = '📋 Просмотр Diff';
-                        diffButton.onclick = () => this.showDiffViewer(file_path, branch_name);
-                        actionsDiv.insertBefore(diffButton, actionsDiv.firstChild);
+                // Update preview with return_content (for collapsed state)
+                if (return_content && return_content.trim()) {
+                    const previewDiv = messageElement.querySelector('.execution-preview');
+                    if (previewDiv) {
+                        const preview = return_content.length > 150 ? return_content.substring(0, 150) + '...' : return_content;
+                        previewDiv.textContent = preview;
+                        previewDiv.style.display = 'none'; // Show when collapsed
                     }
-                }
 
-                // (Удалено добавление отдельного return-content блока — теперь inline)
+                    // Add full return content as nested event
+                    const returnIcon = this.createSVGIcon('arrowUp', 14, '#4a54f5');
+                    const returnContent = `
+                        <div style="font-weight: 500; margin-bottom: 6px; display: flex; align-items: center; gap: 6px; color: #ffffff;">
+                            ${returnIcon}
+                            <span style="color: #4a54f5;">Результат выполнения</span>
+                        </div>
+                        <pre style="font-family: 'Monaco', 'Menlo', monospace; font-size: 11px; color: #ffffff; white-space: pre-wrap; max-height: 400px; overflow-y: auto; margin: 0; background: #25292e; padding: 8px; border-radius: 12px; border: 1px solid #525b67;">${return_content}</pre>
+                    `;
+                    this.addNestedEventToExecution(execution_id, 'return_value', returnContent, this.formatTime(new Date().toISOString()));
+                }
 
                 console.log('Updated execution message:', execution_id);
             }
@@ -2054,64 +2332,222 @@
                 this.scrollToBottom();
             }
 
+            // SVG Icon Helpers
+            createSVGIcon(type, size = 16, color = 'currentColor') {
+                const icons = {
+                    spinner: `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="10" stroke="${color}" stroke-width="2" stroke-dasharray="15 85" stroke-linecap="round" class="spinner-circle"/></svg>`,
+                    check: `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none"><path d="M20 6L9 17l-5-5" stroke="${color}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
+                    x: `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none"><path d="M18 6L6 18M6 6l12 12" stroke="${color}" stroke-width="2" stroke-linecap="round"/></svg>`,
+                    terminal: `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none"><path d="M4 17l6-6-6-6M12 19h8" stroke="${color}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
+                    document: `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8l-6-6z" stroke="${color}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M14 2v6h6M16 13H8M16 17H8M10 9H8" stroke="${color}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
+                    chevronDown: `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none"><path d="M6 9l6 6 6-6" stroke="${color}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
+                    tool: `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none"><path d="M14.7 6.3a1 1 0 000 1.4l1.6 1.6a1 1 0 001.4 0l3.77-3.77a6 6 0 01-7.94 7.94l-6.91 6.91a2.12 2.12 0 01-3-3l6.91-6.91a6 6 0 017.94-7.94l-3.76 3.76z" stroke="${color}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
+                    checkCircle: `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="10" stroke="${color}" stroke-width="2"/><path d="M9 12l2 2 4-4" stroke="${color}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
+                    chart: `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none"><path d="M18 20V10M12 20V4M6 20v-6" stroke="${color}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
+                    trendingUp: `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none"><path d="M23 6l-9.5 9.5-5-5L1 18" stroke="${color}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M17 6h6v6" stroke="${color}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
+                    arrowUp: `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none"><path d="M12 19V5M5 12l7-7 7 7" stroke="${color}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
+                    settings: `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="3" stroke="${color}" stroke-width="2"/><path d="M12 1v6m0 6v6M5.6 5.6l4.2 4.2m4.2 4.2l4.2 4.2M1 12h6m6 0h6M5.6 18.4l4.2-4.2m4.2-4.2l4.2-4.2" stroke="${color}" stroke-width="2" stroke-linecap="round"/></svg>`
+                };
+                return icons[type] || '';
+            }
+
             addExecutionRunningMessage(message, time, filePath, executionId) {
                 console.log('DEBUG: addExecutionRunningMessage called with:', { message, time, filePath, executionId });
-                
+
+                // Check if execution block already exists (prevent duplicates)
+                const existing = document.querySelector(`[data-execution-id="${executionId}"]`);
+                if (existing) {
+                    console.log('DEBUG: Execution block already exists for', executionId);
+                    return;
+                }
+
                 const messageDiv = document.createElement('div');
-                messageDiv.className = 'message execution';
+                messageDiv.className = 'message execution expandable';
                 messageDiv.setAttribute('data-execution-id', executionId);
 
-                // Заголовок с временем
+                // Заголовок с статус-иконкой, файлом, терминалом и временем
                 const headerDiv = document.createElement('div');
-                headerDiv.className = 'message-header';
+                headerDiv.className = 'message-header execution-header';
                 headerDiv.style.display = 'flex';
                 headerDiv.style.justifyContent = 'space-between';
                 headerDiv.style.alignItems = 'center';
                 headerDiv.style.marginBottom = '8px';
-                headerDiv.style.fontSize = '12px';
-                headerDiv.style.color = '#666';
+                headerDiv.style.fontSize = '13px';
+                headerDiv.style.color = '#333';
+                headerDiv.style.cursor = 'pointer';
+                headerDiv.style.userSelect = 'none';
 
+                const leftSection = document.createElement('div');
+                leftSection.style.display = 'flex';
+                leftSection.style.alignItems = 'center';
+                leftSection.style.gap = '8px';
+
+                // Status icon (spinner while running)
+                const statusIcon = document.createElement('span');
+                statusIcon.className = 'completion-status';
+                statusIcon.innerHTML = this.createSVGIcon('spinner', 16, '#4A54F5');
+                statusIcon.style.display = 'flex';
+                statusIcon.style.alignItems = 'center';
+
+                // Expand/collapse indicator
+                const expandIcon = document.createElement('span');
+                expandIcon.className = 'expand-icon';
+                expandIcon.innerHTML = this.createSVGIcon('chevronDown', 14, 'rgba(3, 7, 61, 0.6)');
+                expandIcon.style.transition = 'transform 0.2s';
+                expandIcon.style.display = 'flex';
+                expandIcon.style.alignItems = 'center';
+
+                // File name and status text
                 const titleSpan = document.createElement('span');
-                titleSpan.textContent = 'Выполняется...';
                 titleSpan.className = 'exec-status-text';
-                
+                titleSpan.textContent = filePath ? `Выполнение: ${filePath}` : message;
+                titleSpan.style.fontWeight = '500';
+                titleSpan.style.color = '#ffffff';
+
+                // Terminal icon button
+                const terminalIcon = document.createElement('button');
+                terminalIcon.className = 'terminal-icon-button';
+                terminalIcon.innerHTML = this.createSVGIcon('terminal', 16, 'rgba(3, 7, 61, 0.6)');
+                terminalIcon.title = 'Открыть терминал';
+                terminalIcon.style.background = 'none';
+                terminalIcon.style.border = 'none';
+                terminalIcon.style.cursor = 'pointer';
+                terminalIcon.style.padding = '4px 8px';
+                terminalIcon.style.display = 'flex';
+                terminalIcon.style.alignItems = 'center';
+                terminalIcon.style.opacity = '0.7';
+                terminalIcon.style.transition = 'opacity 0.2s';
+                terminalIcon.onmouseover = () => terminalIcon.style.opacity = '1';
+                terminalIcon.onmouseout = () => terminalIcon.style.opacity = '0.7';
+                terminalIcon.onclick = (e) => {
+                    e.stopPropagation(); // Prevent collapse/expand
+                    this.showTerminalViewer(filePath, executionId);
+                };
+
+                leftSection.appendChild(statusIcon);
+                leftSection.appendChild(expandIcon);
+                leftSection.appendChild(titleSpan);
+                leftSection.appendChild(terminalIcon);
+
                 const timeSpan = document.createElement('span');
                 timeSpan.className = 'message-time';
                 timeSpan.textContent = time;
+                timeSpan.style.fontSize = '11px';
+                timeSpan.style.color = '#a0a8b2';
 
-                headerDiv.appendChild(titleSpan);
+                headerDiv.appendChild(leftSection);
                 headerDiv.appendChild(timeSpan);
 
-                // Содержимое сообщения
+                // Preview section for collapsed state (shows @return result)
+                const previewDiv = document.createElement('div');
+                previewDiv.className = 'execution-preview';
+                previewDiv.style.marginTop = '12px';
+                previewDiv.style.padding = '12px 16px';
+                previewDiv.style.background = '#25292e';
+                previewDiv.style.borderRadius = '12px';
+                previewDiv.style.fontSize = '13px';
+                previewDiv.style.color = '#ffffff';
+                previewDiv.style.display = 'none'; // Hidden until we have return content
+                previewDiv.style.maxHeight = '80px';
+                previewDiv.style.overflow = 'hidden';
+                previewDiv.style.textOverflow = 'ellipsis';
+                previewDiv.style.border = '1px solid rgba(3, 7, 61, 0.08)';
+
+                // Collapsible body for nested events (tool calls, token usage)
                 const bodyDiv = document.createElement('div');
-                bodyDiv.className = 'message-body';
-                
-                const contentDiv = document.createElement('div');
-                contentDiv.className = 'message-content';
-                contentDiv.textContent = message;
+                bodyDiv.className = 'message-body execution-body';
+                bodyDiv.style.marginTop = '12px';
+                bodyDiv.style.padding = '16px';
+                bodyDiv.style.background = '#25292e';
+                bodyDiv.style.borderRadius = '12px';
+                bodyDiv.style.display = 'block'; // Start expanded
 
-                // Добавить кнопку терминала для наблюдения в реальном времени
-                const actionsDiv = document.createElement('div');
-                actionsDiv.className = 'message-actions';
+                // Container for nested events
+                const eventsContainer = document.createElement('div');
+                eventsContainer.className = 'execution-events';
+                eventsContainer.setAttribute('data-execution-id', executionId);
 
-                // Кнопка терминала
-                const terminalButton = document.createElement('button');
-                terminalButton.className = 'action-button primary';
-                terminalButton.innerHTML = '💻 Терминал (в реальном времени)';
-                terminalButton.onclick = () => this.showTerminalViewer(filePath, executionId);
+                bodyDiv.appendChild(eventsContainer);
 
-                actionsDiv.appendChild(terminalButton);
-
-                bodyDiv.appendChild(contentDiv);
-                bodyDiv.appendChild(actionsDiv);
+                // Toggle expand/collapse on header click
+                headerDiv.onclick = () => {
+                    const isCollapsed = bodyDiv.style.display === 'none';
+                    bodyDiv.style.display = isCollapsed ? 'block' : 'none';
+                    previewDiv.style.display = isCollapsed ? 'none' : 'block';
+                    expandIcon.style.transform = isCollapsed ? 'rotate(0deg)' : 'rotate(-90deg)';
+                };
 
                 messageDiv.appendChild(headerDiv);
+                messageDiv.appendChild(previewDiv);
                 messageDiv.appendChild(bodyDiv);
 
                 this.messagesContainer.appendChild(messageDiv);
                 this.scrollToBottom();
-                
+
                 console.log('DEBUG: addExecutionRunningMessage completed, message added to DOM');
+            }
+
+            // Helper function to append nested events to execution block
+            addNestedEventToExecution(executionId, eventType, content, time) {
+                const eventsContainer = document.querySelector(`.execution-events[data-execution-id="${executionId}"]`);
+                if (!eventsContainer) {
+                    console.warn('No execution block found for', executionId, '- event will not be nested');
+                    return false;
+                }
+
+                const eventDiv = document.createElement('div');
+                eventDiv.className = `nested-event ${eventType}`;
+                eventDiv.style.marginBottom = '8px';
+                eventDiv.style.padding = '8px 12px';
+                eventDiv.style.borderRadius = '6px';
+                eventDiv.style.fontSize = '12px';
+                eventDiv.style.backgroundColor = '#f5f5f5';
+
+                if (eventType === 'tool_call') {
+                    eventDiv.style.backgroundColor = '#f0f8ff';
+                    eventDiv.style.borderLeft = '3px solid #4A54F5';
+                } else if (eventType === 'tool_result') {
+                    eventDiv.style.backgroundColor = '#f0fff4';
+                    eventDiv.style.borderLeft = '3px solid #10b981';
+                } else if (eventType === 'token_usage') {
+                    eventDiv.style.backgroundColor = '#fffbeb';
+                    eventDiv.style.borderLeft = '3px solid #f59e0b';
+                } else if (eventType === 'token_usage_summary') {
+                    eventDiv.style.backgroundColor = '#f0fff4';
+                    eventDiv.style.borderLeft = '3px solid #10b981';
+                    eventDiv.style.boxShadow = '0 2px 8px rgba(16, 185, 129, 0.15)';
+                } else if (eventType === 'return_value') {
+                    eventDiv.style.backgroundColor = '#faf5ff';
+                    eventDiv.style.borderLeft = '3px solid #8b5cf6';
+                    eventDiv.style.boxShadow = '0 2px 8px rgba(139, 92, 246, 0.15)';
+                } else if (eventType === 'error') {
+                    eventDiv.style.backgroundColor = '#fef2f2';
+                    eventDiv.style.borderLeft = '3px solid #ef4444';
+                    eventDiv.style.color = '#ef4444';
+                }
+
+                const contentDiv = document.createElement('div');
+                contentDiv.className = 'nested-event-content';
+                if (typeof content === 'string') {
+                    contentDiv.innerHTML = content;
+                } else {
+                    contentDiv.appendChild(content);
+                }
+
+                const timeSpan = document.createElement('span');
+                timeSpan.style.fontSize = '10px';
+                timeSpan.style.color = '#999';
+                timeSpan.style.marginTop = '4px';
+                timeSpan.style.display = 'block';
+                timeSpan.textContent = time;
+
+                eventDiv.appendChild(contentDiv);
+                eventDiv.appendChild(timeSpan);
+
+                eventsContainer.appendChild(eventDiv);
+                this.scrollToBottom();
+
+                return true;
             }
 
             addExecutionCompleteMessage(message, time, filePath, branchName, executionId) {
@@ -2194,17 +2630,108 @@
                 this.scrollToBottom();
             }
 
-            renderMarkdownish(text) {
+            renderMarkdown(text) {
                 if (!text) return '';
+
                 const esc = (str) => str
                     .replace(/&/g, '&amp;')
                     .replace(/</g, '&lt;')
                     .replace(/>/g, '&gt;');
+
+                // Split into blocks
+                const blocks = text.split(/\n\n+/);
+
+                return blocks.map(block => {
+                    const trimmed = block.trim();
+                    if (!trimmed) return '';
+
+                    // Code blocks (```lang\ncode\n```)
+                    if (trimmed.startsWith('```')) {
+                        const match = trimmed.match(/^```(\w+)?\n([\s\S]*?)\n?```$/);
+                        if (match) {
+                            const [, lang, code] = match;
+                            return `<pre class="md-code-block"><code class="md-code ${lang ? 'language-' + lang : ''}">${esc(code)}</code></pre>`;
+                        }
+                    }
+
+                    // Headers
+                    const headerMatch = trimmed.match(/^(#{1,6})\s+(.+)$/m);
+                    if (headerMatch) {
+                        const level = headerMatch[1].length;
+                        const text = headerMatch[2];
+                        return `<h${level} class="md-heading md-h${level}">${this.processInlineMarkdown(text)}</h${level}>`;
+                    }
+
+                    // Unordered lists
+                    if (trimmed.match(/^[-*+]\s/m)) {
+                        const items = trimmed.split('\n')
+                            .filter(line => line.match(/^[-*+]\s/))
+                            .map(line => {
+                                const text = line.replace(/^[-*+]\s+/, '');
+                                return `<li class="md-li">${this.processInlineMarkdown(text)}</li>`;
+                            });
+                        return `<ul class="md-ul">${items.join('')}</ul>`;
+                    }
+
+                    // Ordered lists
+                    if (trimmed.match(/^\d+\.\s/m)) {
+                        const items = trimmed.split('\n')
+                            .filter(line => line.match(/^\d+\.\s/))
+                            .map(line => {
+                                const text = line.replace(/^\d+\.\s+/, '');
+                                return `<li class="md-li">${this.processInlineMarkdown(text)}</li>`;
+                            });
+                        return `<ol class="md-ol">${items.join('')}</ol>`;
+                    }
+
+                    // Blockquotes
+                    if (trimmed.startsWith('>')) {
+                        const quote = trimmed.split('\n')
+                            .map(line => line.replace(/^>\s?/, ''))
+                            .join('\n');
+                        return `<blockquote class="md-blockquote">${this.processInlineMarkdown(quote)}</blockquote>`;
+                    }
+
+                    // Horizontal rule
+                    if (trimmed.match(/^[-*_]{3,}$/)) {
+                        return '<hr class="md-hr">';
+                    }
+
+                    // Paragraph
+                    return `<p class="md-p">${this.processInlineMarkdown(trimmed)}</p>`;
+                }).join('');
+            }
+
+            processInlineMarkdown(text) {
+                const esc = (str) => str
+                    .replace(/&/g, '&amp;')
+                    .replace(/</g, '&lt;')
+                    .replace(/>/g, '&gt;');
+
                 let html = esc(text);
-                html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
-                html = html.replace(/`([^`]+)`/g, '<code>$1</code>');
+
+                // Bold
+                html = html.replace(/\*\*(.+?)\*\*/g, '<strong class="md-strong">$1</strong>');
+                html = html.replace(/__(.+?)__/g, '<strong class="md-strong">$1</strong>');
+
+                // Italic
+                html = html.replace(/\*(.+?)\*/g, '<em class="md-em">$1</em>');
+                html = html.replace(/_(.+?)_/g, '<em class="md-em">$1</em>');
+
+                // Inline code
+                html = html.replace(/`([^`]+)`/g, '<code class="md-code-inline">$1</code>');
+
+                // Links
+                html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" class="md-link" target="_blank" rel="noopener">$1</a>');
+
+                // Line breaks
                 html = html.replace(/\n/g, '<br>');
+
                 return html;
+            }
+
+            renderMarkdownish(text) {
+                return this.renderMarkdown(text);
             }
 
             // Generic addMessage used by handleMessage for user/assistant/error
@@ -2277,22 +2804,18 @@
             }
 
             addTokenUsageMessage(data, time) {
-                const tokenDiv = document.createElement('div');
+                const executionId = data.execution_id;
                 const isSummary = data.is_summary === true;
-                tokenDiv.className = `message token-usage${isSummary ? ' summary' : ''}`;
-
-                const contentDiv = document.createElement('div');
-                contentDiv.className = 'message-content';
 
                 const modelName = data.model || 'unknown';
                 const inputTokens = (data.input_tokens || 0).toLocaleString();
                 const outputTokens = (data.output_tokens || 0).toLocaleString();
                 const totalTokens = (data.input_tokens + data.output_tokens || 0).toLocaleString();
 
-                let headerIcon = '📊';
+                let headerIcon = this.createSVGIcon('chart', 14, '#d7a558');
                 let headerText = 'Token Usage';
                 if (isSummary) {
-                    headerIcon = '📈';
+                    headerIcon = this.createSVGIcon('trendingUp', 14, '#6a9955');
                     headerText = 'File Summary';
                 }
 
@@ -2303,43 +2826,50 @@
                     const sessionOutput = (data.total_output || 0).toLocaleString();
                     const sessionTotal = ((data.total_input || 0) + (data.total_output || 0)).toLocaleString();
                     summaryHtml = `
-                        <div class="token-row session-totals">
-                            <span class="token-label">Session Total:</span>
-                            <span class="token-value">${sessionTotal} (${sessionInput}/${sessionOutput})</span>
+                        <div style="margin-top: 8px; padding-top: 8px; border-top: 1px solid #ddd; font-weight: 500;">
+                            <div>Session Total: ${sessionTotal} (${sessionInput}/${sessionOutput})</div>
                         </div>
                     `;
                 }
 
-                contentDiv.innerHTML = `
-                    <div class="token-usage-header">${headerIcon} ${headerText}</div>
-                    <div class="token-usage-details">
-                        ${data.source_file && isSummary ? `<div class="token-row"><span class="token-label">File:</span><span class="token-value file-name">${data.source_file}</span></div>` : ''}
-                        ${!isSummary ? `<div class="token-row"><span class="token-label">Model:</span><span class="token-value">${modelName}</span></div>` : ''}
-                        <div class="token-row">
-                            <span class="token-label">${isSummary ? 'File ' : ''}Input:</span>
-                            <span class="token-value">${inputTokens}</span>
-                        </div>
-                        <div class="token-row">
-                            <span class="token-label">${isSummary ? 'File ' : ''}Output:</span>
-                            <span class="token-value">${outputTokens}</span>
-                        </div>
-                        <div class="token-row total">
-                            <span class="token-label">${isSummary ? 'File ' : ''}Total:</span>
-                            <span class="token-value">${totalTokens}</span>
-                        </div>
+                const tokenContent = `
+                    <div style="font-weight: 500; margin-bottom: 6px; display: flex; align-items: center; gap: 6px; color: #03073D;">
+                        ${headerIcon}
+                        <span>${headerText}</span>
+                    </div>
+                    <div style="font-size: 11px;">
+                        ${data.source_file && isSummary ? `<div style="margin-bottom: 4px; color: rgba(3, 7, 61, 0.6);">File: <strong style="color: #03073D;">${data.source_file}</strong></div>` : ''}
+                        ${!isSummary ? `<div style="margin-bottom: 4px; color: rgba(3, 7, 61, 0.6);">Model: <strong style="color: #03073D;">${modelName}</strong></div>` : ''}
+                        <div style="margin-bottom: 2px; color: rgba(3, 7, 61, 0.6);">${isSummary ? 'File ' : ''}Input: <strong style="color: #03073D;">${inputTokens}</strong></div>
+                        <div style="margin-bottom: 2px; color: rgba(3, 7, 61, 0.6);">${isSummary ? 'File ' : ''}Output: <strong style="color: #03073D;">${outputTokens}</strong></div>
+                        <div style="margin-top: 4px; color: #4A54F5; font-weight: 500;">${isSummary ? 'File ' : ''}Total: <strong>${totalTokens}</strong></div>
                         ${summaryHtml}
                     </div>
                 `;
 
-                const timeDiv = document.createElement('div');
-                timeDiv.className = 'message-time';
-                timeDiv.textContent = time;
+                // Try to nest inside execution block
+                const eventType = isSummary ? 'token_usage_summary' : 'token_usage';
+                if (executionId && this.addNestedEventToExecution(executionId, eventType, tokenContent, time)) {
+                    // Successfully nested, skip creating separate message
+                } else {
+                    // Fallback: create standalone message
+                    const tokenDiv = document.createElement('div');
+                    tokenDiv.className = `message token-usage${isSummary ? ' summary' : ''}`;
 
-                tokenDiv.appendChild(contentDiv);
-                tokenDiv.appendChild(timeDiv);
+                    const contentDiv = document.createElement('div');
+                    contentDiv.className = 'message-content';
+                    contentDiv.innerHTML = tokenContent;
 
-                this.messagesContainer.appendChild(tokenDiv);
-                this.scrollToBottom();
+                    const timeDiv = document.createElement('div');
+                    timeDiv.className = 'message-time';
+                    timeDiv.textContent = time;
+
+                    tokenDiv.appendChild(contentDiv);
+                    tokenDiv.appendChild(timeDiv);
+
+                    this.messagesContainer.appendChild(tokenDiv);
+                    this.scrollToBottom();
+                }
 
                 // Accumulate session statistics (only for non-summary events to avoid double counting)
                 if (!isSummary) {

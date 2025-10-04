@@ -23,8 +23,9 @@ from rich import print
 from rich.console import Console
 from core.paths import set_session_cwd
 
-# Import emit_ast_snapshot for AST visualization
-from core.event_emitters import emit_ast_snapshot
+# Import event emitters for AST visualization and block tracking
+from core.event_emitters import emit_ast_snapshot, emit_event
+from core.events.types import EventType
 
 def get_relative_path(base_dir: str, file_path: str) -> str:
     """Convert absolute path to relative path based on base directory."""
@@ -201,6 +202,13 @@ def run(filename: str, param_node: Optional[Union[Node, AST]] = None, create_new
                 current_node.enabled = False
 
             if current_node.type == NodeType.OPERATION:
+                # Emit block processing event for UI highlighting
+                emit_event(
+                    EventType.BLOCK_PROCESSING,
+                    block_id=current_node.key or current_node.hash,
+                    operation=current_node.name
+                )
+
                 operation_name = f"@{current_node.name}"
                 if operation_name == "@import":
                     current_node = process_import(ast, current_node)

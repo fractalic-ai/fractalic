@@ -16,6 +16,7 @@ class EventType(str, Enum):
     TOOL_RESULT = "tool_result"
     LLM_CHUNK = "llm_chunk"
     TOKEN_USAGE = "token_usage"
+    BLOCK_PROCESSING = "block_processing"
 
 
 def _now() -> float:
