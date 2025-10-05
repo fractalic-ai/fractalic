@@ -181,6 +181,9 @@ class StreamProcessor:
                         # Only show new content since last chunk
                         if txt != self.last_chunk:
                             self.ui.show("", txt, end="")
+                            # Don't emit streaming chunks to web UI - they are incomplete (missing tool calls)
+                            # Final complete response will be emitted via return_content
+                            # emit_event(EventType.CHAT_MESSAGE, role='assistant', content=txt)
                             self.last_chunk = txt
             # Add final newline after streaming is complete
             self.ui.show("", "")
@@ -240,6 +243,9 @@ class ToolCallStreamProcessor:
                     
                     if display_content:
                         self.ui.show("", display_content, end="")
+                        # Don't emit streaming chunks to web UI - they are incomplete (missing tool calls)
+                        # Final complete response will be emitted via return_content
+                        # emit_event(EventType.CHAT_MESSAGE, role='assistant', content=display_content)
                         self.last_chunk = display_content
                 
                 # Handle tool call streaming

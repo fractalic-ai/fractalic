@@ -436,9 +436,29 @@ export class UIRenderer {
     // ========== AST RENDERING ==========
 
     renderASTBlocks(blocks, operationType, container, bubbleRefs = null) {
-        // Remove all pending inline blocks before rendering new AST
+        // SAVE pending blocks before clearing - map them by parent block ID
+        const pendingBlocksMap = new Map();
         const pendingBlocks = container.querySelectorAll('.pending-event-inline');
-        pendingBlocks.forEach(block => block.remove());
+        console.log(`[AST] Found ${pendingBlocks.length} pending blocks to save`);
+        pendingBlocks.forEach(block => {
+            // Find parent AST block by going backwards through siblings
+            let parent = block.previousElementSibling;
+            while (parent) {
+                if (parent.classList.contains('ast-block')) {
+                    const parentBlockId = parent.dataset.blockId;
+                    if (!pendingBlocksMap.has(parentBlockId)) {
+                        pendingBlocksMap.set(parentBlockId, []);
+                    }
+                    // Clone the element to preserve it (including timestamp and styling)
+                    const clonedBlock = block.cloneNode(true);
+                    pendingBlocksMap.get(parentBlockId).push(clonedBlock);
+                    console.log(`[AST] Saved pending block for parent: ${parentBlockId.substring(0, 8)} (ts: ${block.dataset.timestamp})`);
+                    break;
+                }
+                // Skip over other pending blocks to find the AST block
+                parent = parent.previousElementSibling;
+            }
+        });
 
         // Clear container if no blocks
         if (!blocks || blocks.length === 0) {
@@ -481,6 +501,40 @@ export class UIRenderer {
     // Append in order
     container.appendChild(blockEl);
     newBlocksMap.set(blockId, blockEl);
+
+    // RESTORE pending blocks for this AST block in chronological order
+    if (pendingBlocksMap.has(blockId)) {
+        const savedPendingBlocks = pendingBlocksMap.get(blockId);
+
+        // DEBUG: Log timestamps before sorting
+        console.log(`[AST] Pending blocks BEFORE sort:`, savedPendingBlocks.map(b => ({
+            ts: b.dataset.timestamp,
+            isSummary: b.dataset.isSummary,
+            preview: b.textContent.substring(0, 30)
+        })));
+
+        // Sort by timestamp to maintain chronological order
+        savedPendingBlocks.sort((a, b) => {
+            const tsA = parseInt(a.dataset.timestamp || '0');
+            const tsB = parseInt(b.dataset.timestamp || '0');
+            return tsA - tsB;
+        });
+
+        // DEBUG: Log timestamps after sorting
+        console.log(`[AST] Pending blocks AFTER sort:`, savedPendingBlocks.map(b => ({
+            ts: b.dataset.timestamp,
+            isSummary: b.dataset.isSummary,
+            preview: b.textContent.substring(0, 30)
+        })));
+
+        console.log(`[AST] Restoring ${savedPendingBlocks.length} pending blocks for: ${blockId.substring(0, 8)} (sorted by timestamp)`);
+        // Insert pending blocks right after their parent AST block
+        savedPendingBlocks.forEach(pendingBlock => {
+            blockEl.insertAdjacentElement('afterend', pendingBlock);
+            // Update blockEl reference to keep inserting after the last pending block
+            blockEl = pendingBlock;
+        });
+    }
         });
 
         // Replace old map with new one
@@ -615,7 +669,7 @@ export class UIRenderer {
         }
     }
 
-    addPendingBlockAfterActive(executionId, content) {
+    addPendingBlockAfterActive(executionId, content, timestamp = Date.now(), isSummary = false) {
         if (!executionId || !this.client.executionBubbles.has(executionId)) return;
 
         const bubbleRefs = this.client.executionBubbles.get(executionId);
@@ -637,6 +691,21 @@ export class UIRenderer {
         // Create pending block element
         const pendingBlock = document.createElement('div');
         pendingBlock.className = 'pending-event-inline';
+        pendingBlock.dataset.timestamp = timestamp.toString();
+        pendingBlock.dataset.isSummary = isSummary.toString();
+
+        // Add special styling for summary blocks
+        if (isSummary) {
+            pendingBlock.style.cssText = `
+                margin-top: 12px;
+                padding: 12px;
+                background: rgba(106, 153, 85, 0.1);
+                border: 1px solid rgba(106, 153, 85, 0.3);
+                border-radius: 8px;
+                border-left: 3px solid #6a9955;
+            `;
+        }
+
         pendingBlock.innerHTML = content;
 
         // Insert after active block

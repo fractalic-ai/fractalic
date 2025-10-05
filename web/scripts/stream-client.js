@@ -68,7 +68,8 @@ export class StreamClient {
                         data.content.includes('Фракталик запущен') ||
                         data.content.includes('Фракталик завершил') ||
                         data.content.startsWith('⚙️') ||
-                        data.content.startsWith('✅')
+                        data.content.startsWith('✅') ||
+                        data.content.startsWith('❌')
                     );
 
                     // Store ALL user messages and ALL assistant responses, except system messages
@@ -89,17 +90,17 @@ export class StreamClient {
                     if (isAssistantMessage && execId && this.client.executionBubbles.has(execId)) {
                         const bubbleRefs = this.client.executionBubbles.get(execId);
 
-                        const rendered = this.client.uiRenderer.renderMarkdownish(data.content);
-
                         // Clear "Waiting for response..." placeholder on first message
                         const currentContent = bubbleRefs.responseContent.textContent;
                         if (currentContent.includes('Waiting for response')) {
                             bubbleRefs.responseContent.innerHTML = '';
                         }
 
-                        // Append new message (accumulate, don't replace)
+                        // Show system messages (⚙️, ✅, ❌) directly
+                        // Note: return_content is handled separately below
+                        const rendered = this.client.uiRenderer.renderMarkdownish(data.content);
                         const messageDiv = document.createElement('div');
-                        messageDiv.className = 'message-content';  // Add class for markdown styling
+                        messageDiv.className = 'message-content system-message';
                         messageDiv.style.cssText = 'margin-bottom: 12px;';
                         messageDiv.innerHTML = rendered;
                         bubbleRefs.responseContent.appendChild(messageDiv);
@@ -133,6 +134,7 @@ export class StreamClient {
                         const execId = data.execution_id;
                         if (execId && this.client.executionBubbles.has(execId)) {
                             const bubbleRefs = this.client.executionBubbles.get(execId);
+
                             const checkIcon = createSVGIcon('checkCircle', 16, '#83d69d');
                             const title = bubbleRefs.title;
                             const filePath = data.target || data.file_path || '';
@@ -195,7 +197,9 @@ export class StreamClient {
                             <div style="font-size: 11px; color: #a0a8b2; margin-bottom: 4px; font-family: monospace;">ID: ${data.tool_call_id}</div>
                             <div style="font-family: 'Monaco', 'Menlo', monospace; font-size: 11px; white-space: pre-wrap; max-height: 150px; overflow-y: auto; background: #3c424a; padding: 8px; border-radius: 8px;">${data.arguments || '{}'}</div>
                         `;
-                        this.client.uiRenderer.addPendingBlockAfterActive(execId, eventHtml);
+                        // Use server timestamp (convert from seconds to milliseconds)
+                        const timestamp = data.timestamp ? data.timestamp * 1000 : Date.now();
+                        this.client.uiRenderer.addPendingBlockAfterActive(execId, eventHtml, timestamp);
                     }
                     break;
                 }
@@ -216,7 +220,9 @@ export class StreamClient {
                             <div style="font-size: 11px; color: #a0a8b2; margin-bottom: 4px; font-family: monospace;">ID: ${data.tool_call_id}</div>
                             <div style="font-family: 'Monaco', 'Menlo', monospace; font-size: 11px; white-space: pre-wrap; max-height: 150px; overflow-y: auto; background: #3c424a; padding: 8px; border-radius: 8px;">${resultPreview}</div>
                         `;
-                        this.client.uiRenderer.addPendingBlockAfterActive(execId, eventHtml);
+                        // Use server timestamp (convert from seconds to milliseconds)
+                        const timestamp = data.timestamp ? data.timestamp * 1000 : Date.now();
+                        this.client.uiRenderer.addPendingBlockAfterActive(execId, eventHtml, timestamp);
                     }
                     break;
                 }
@@ -249,23 +255,28 @@ export class StreamClient {
                                 output: outputTokens
                             });
 
-                            // Add inline token block in Inspect mode
-                            const chartIcon = createSVGIcon('chart', 14, '#d7a558');
+                            // Add inline token block in Inspect mode with timestamp for chronological ordering
+                            const chartIcon = createSVGIcon('chart', 14, isSummary ? '#6a9955' : '#d7a558');
                             const inputStr = inputTokens.toLocaleString();
                             const outputStr = outputTokens.toLocaleString();
                             const totalStr = (inputTokens + outputTokens).toLocaleString();
                             const modelName = data.model || 'unknown';
+                            const sourceFile = data.source_file || '';
 
                             const tokenEventHtml = `
                                 <div style="font-weight: 500; margin-bottom: 4px; display: flex; align-items: center; gap: 6px;">
                                     ${chartIcon}
-                                    <span style="color: #d7a558;">Tokens</span>
+                                    <span style="color: ${isSummary ? '#6a9955' : '#d7a558'};">${isSummary ? 'File Summary' : 'Tokens'}</span>
                                 </div>
                                 <div style="font-size: 11px; color: #a0a8b2; font-family: monospace;">
-                                    Model: ${modelName} | In: ${inputStr} | Out: ${outputStr} | Total: ${totalStr}
+                                    ${isSummary && sourceFile ? `File: ${sourceFile}<br/>` : ''}
+                                    ${isSummary ? 'Total ' : ''}${!isSummary ? `Model: ${modelName} | ` : ''}Input: ${inputStr} | ${isSummary ? 'Total ' : ''}Output: ${outputStr} | Total: ${totalStr}
                                 </div>
                             `;
-                            this.client.uiRenderer.addPendingBlockAfterActive(execId, tokenEventHtml);
+
+                            // Use server timestamp (convert from seconds to milliseconds)
+                            const timestamp = data.timestamp ? data.timestamp * 1000 : Date.now();
+                            this.client.uiRenderer.addPendingBlockAfterActive(execId, tokenEventHtml, timestamp, isSummary);
                         }
 
                         // Update header token counter
@@ -298,16 +309,20 @@ export class StreamClient {
             }
 
             // Handle return_content for ANY event type (separate from event type dispatch)
+            // Note: return_content is now emitted as regular CHAT_MESSAGE from fractalic.py:522
+            // So this block may not be used anymore
             if (data.return_content) {
+                console.log('[DEBUG] Received event with return_content field (unexpected!)');
                 const execId = data.execution_id;
                 if (execId && this.client.executionBubbles.has(execId)) {
                     const bubbleRefs = this.client.executionBubbles.get(execId);
+
                     const rendered = this.client.uiRenderer.renderMarkdownish(data.return_content);
 
-                    // APPEND final result (don't replace intermediate messages)
+                    // Add final result
                     const resultDiv = document.createElement('div');
-                    resultDiv.className = 'message-content';
-                    resultDiv.style.cssText = 'margin-top: 16px; padding-top: 16px; border-top: 1px solid #525b67;';
+                    resultDiv.className = 'message-content final-result';
+                    resultDiv.style.cssText = 'margin-bottom: 12px;';
                     resultDiv.innerHTML = rendered;
                     bubbleRefs.responseContent.appendChild(resultDiv);
                 } else {

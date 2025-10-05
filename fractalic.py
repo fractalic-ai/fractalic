@@ -506,14 +506,24 @@ def main():
             print(f"[ERROR fractalic.py] {result['error']}")
             sys.exit(1)
         
+        # DEBUG: Log return_content status
+        print(f"[DEBUG] result.get('return_content'): {bool(result.get('return_content'))}")
+        if result.get('return_content'):
+            print(f"[DEBUG] return_content length: {len(result['return_content'])}")
+            print(f"[DEBUG] return_content preview: {result['return_content'][:200]}")
+
+        # Emit return_content FIRST (before completion message)
+        if result.get('return_content'):
+            # Emit the actual returned content as a chat message for the new architecture
+            emit_event(EventType.CHAT_MESSAGE, role='assistant', content=result['return_content'])
+
+        # Then emit completion message
         completion_message = f"✅ Фракталик завершил выполнение файла: {display_name}"
         if result.get('branch_name'):
             completion_message += f" (ветка: {result['branch_name']})"
         emit_event(EventType.CHAT_MESSAGE, role='assistant', content=completion_message)
-        if result.get('return_content'):
-            # Emit the actual returned content as a chat message for the new architecture
-            emit_event(EventType.CHAT_MESSAGE, role='assistant', content=result['return_content'])
-        # Emit explicit completion lifecycle event for streaming clients
+
+        # Finally emit explicit completion lifecycle event for streaming clients
         try:
             emit_event(EventType.EXECUTION, phase='complete', target=display_name)
         except Exception:
