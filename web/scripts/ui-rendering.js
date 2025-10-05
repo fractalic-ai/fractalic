@@ -11,36 +11,42 @@ export class UIRenderer {
         this.messageKeys = new Set();
         this.astBlocks = new Map();
         this.isFirstASTSnapshot = true;
+        this.markedConfigured = false;
     }
 
     // ========== MARKDOWN RENDERING ==========
 
+    configureMarked() {
+        if (this.markedConfigured || typeof marked === 'undefined') return;
+
+        // Configure marked-highlight extension if available
+        if (typeof markedHighlight !== 'undefined' && typeof hljs !== 'undefined') {
+            marked.use(markedHighlight.markedHighlight({
+                langPrefix: 'hljs language-',
+                highlight(code, lang) {
+                    const language = hljs.getLanguage(lang) ? lang : 'plaintext';
+                    return hljs.highlight(code, { language }).value;
+                }
+            }));
+        }
+
+        marked.setOptions({
+            breaks: true,  // Convert \n to <br>
+            gfm: true,     // GitHub Flavored Markdown
+            headerIds: false,
+            mangle: false
+        });
+
+        this.markedConfigured = true;
+    }
+
     renderMarkdown(text) {
         if (!text) return '';
 
-        // Configure marked.js options
-        if (typeof marked !== 'undefined') {
-            marked.setOptions({
-                breaks: true,  // Convert \n to <br>
-                gfm: true,     // GitHub Flavored Markdown
-                headerIds: false,
-                mangle: false,
-                highlight: function(code, lang) {
-                    // Use highlight.js if available
-                    if (typeof hljs !== 'undefined' && lang && hljs.getLanguage(lang)) {
-                        try {
-                            return hljs.highlight(code, { language: lang }).value;
-                        } catch (err) {
-                            console.warn('Highlight.js error:', err);
-                        }
-                    }
-                    // Fallback to escaped code
-                    return code.replace(/&/g, '&amp;')
-                              .replace(/</g, '&lt;')
-                              .replace(/>/g, '&gt;');
-                }
-            });
+        // Ensure marked.js is configured once
+        this.configureMarked();
 
+        if (typeof marked !== 'undefined') {
             try {
                 const html = marked.parse(text);
                 return html;
