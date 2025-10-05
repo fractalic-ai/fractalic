@@ -18,101 +18,46 @@ export class UIRenderer {
     renderMarkdown(text) {
         if (!text) return '';
 
-        const esc = (str) => str
-            .replace(/&/g, '&amp;')
-            .replace(/</g, '&lt;')
-            .replace(/>/g, '&gt;');
-
-        // Split into blocks
-        const blocks = text.split(/\n\n+/);
-
-        return blocks.map(block => {
-            const trimmed = block.trim();
-            if (!trimmed) return '';
-
-            // Code blocks (```lang\ncode\n```)
-            if (trimmed.startsWith('```')) {
-                const match = trimmed.match(/^```(\w+)?\n([\s\S]*?)\n?```$/);
-                if (match) {
-                    const [, lang, code] = match;
-                    return `<pre class="md-code-block"><code class="md-code ${lang ? 'language-' + lang : ''}">${esc(code)}</code></pre>`;
+        // Configure marked.js options
+        if (typeof marked !== 'undefined') {
+            marked.setOptions({
+                breaks: true,  // Convert \n to <br>
+                gfm: true,     // GitHub Flavored Markdown
+                headerIds: false,
+                mangle: false,
+                highlight: function(code, lang) {
+                    // Use highlight.js if available
+                    if (typeof hljs !== 'undefined' && lang && hljs.getLanguage(lang)) {
+                        try {
+                            return hljs.highlight(code, { language: lang }).value;
+                        } catch (err) {
+                            console.warn('Highlight.js error:', err);
+                        }
+                    }
+                    // Fallback to escaped code
+                    return code.replace(/&/g, '&amp;')
+                              .replace(/</g, '&lt;')
+                              .replace(/>/g, '&gt;');
                 }
+            });
+
+            try {
+                const html = marked.parse(text);
+                return html;
+            } catch (err) {
+                console.error('Marked.js parsing error:', err);
+                // Fallback to escaped text
+                return '<pre>' + text.replace(/&/g, '&amp;')
+                                     .replace(/</g, '&lt;')
+                                     .replace(/>/g, '&gt;') + '</pre>';
             }
+        }
 
-            // Headers
-            const headerMatch = trimmed.match(/^(#{1,6})\s+(.+)$/m);
-            if (headerMatch) {
-                const level = headerMatch[1].length;
-                const text = headerMatch[2];
-                return `<h${level} class="md-heading md-h${level}">${this.processInlineMarkdown(text)}</h${level}>`;
-            }
-
-            // Unordered lists
-            if (trimmed.match(/^[-*+]\s/m)) {
-                const items = trimmed.split('\n')
-                    .filter(line => line.match(/^[-*+]\s/))
-                    .map(line => {
-                        const text = line.replace(/^[-*+]\s+/, '');
-                        return `<li class="md-li">${this.processInlineMarkdown(text)}</li>`;
-                    });
-                return `<ul class="md-ul">${items.join('')}</ul>`;
-            }
-
-            // Ordered lists
-            if (trimmed.match(/^\d+\.\s/m)) {
-                const items = trimmed.split('\n')
-                    .filter(line => line.match(/^\d+\.\s/))
-                    .map(line => {
-                        const text = line.replace(/^\d+\.\s+/, '');
-                        return `<li class="md-li">${this.processInlineMarkdown(text)}</li>`;
-                    });
-                return `<ol class="md-ol">${items.join('')}</ol>`;
-            }
-
-            // Blockquotes
-            if (trimmed.startsWith('>')) {
-                const quote = trimmed.split('\n')
-                    .map(line => line.replace(/^>\s?/, ''))
-                    .join('\n');
-                return `<blockquote class="md-blockquote">${this.processInlineMarkdown(quote)}</blockquote>`;
-            }
-
-            // Horizontal rule
-            if (trimmed.match(/^[-*_]{3,}$/)) {
-                return '<hr class="md-hr">';
-            }
-
-            // Paragraph
-            return `<p class="md-p">${this.processInlineMarkdown(trimmed)}</p>`;
-        }).join('');
-    }
-
-    processInlineMarkdown(text) {
-        const esc = (str) => str
-            .replace(/&/g, '&amp;')
-            .replace(/</g, '&lt;')
-            .replace(/>/g, '&gt;');
-
-        let html = esc(text);
-
-        // Bold
-        html = html.replace(/\*\*(.+?)\*\*/g, '<strong class="md-strong">$1</strong>');
-        html = html.replace(/__(.+?)__/g, '<strong class="md-strong">$1</strong>');
-
-        // Italic
-        html = html.replace(/\*(.+?)\*/g, '<em class="md-em">$1</em>');
-        html = html.replace(/_(.+?)_/g, '<em class="md-em">$1</em>');
-
-        // Inline code
-        html = html.replace(/`([^`]+)`/g, '<code class="md-code-inline">$1</code>');
-
-        // Links
-        html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" class="md-link" target="_blank" rel="noopener">$1</a>');
-
-        // Line breaks
-        html = html.replace(/\n/g, '<br>');
-
-        return html;
+        // Fallback if marked.js is not loaded
+        console.warn('marked.js not loaded, using fallback renderer');
+        return '<pre>' + text.replace(/&/g, '&amp;')
+                             .replace(/</g, '&lt;')
+                             .replace(/>/g, '&gt;') + '</pre>';
     }
 
     renderMarkdownish(text) {
@@ -483,7 +428,6 @@ export class UIRenderer {
             header,
             tokenCounter,  // Reference to token counter badge
             activeBlockId: null,  // Track currently processing block
-            processedEventIds: new Set(),  // Track processed events to prevent duplicates
             blockTokens: new Map(),  // blockId -> {input, output} token stats
             totalTokens: {input: 0, output: 0}  // Execution-level accumulator
         };
