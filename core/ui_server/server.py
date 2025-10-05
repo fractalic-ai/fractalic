@@ -88,21 +88,36 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Serve existing fractalic_chat.html (legacy client) at /chat if present in project root
-@app.get("/chat")
-async def serve_chat():
+# Mount static files for modular web structure OR fallback to legacy file
+root = get_fractalic_root()
+web_dir = Path(root) / "web"
+
+if web_dir.exists():
     try:
-        root = get_fractalic_root()
-        candidate_names = ["fractalic_chat.html", "fractalic_chat_fixed.html"]
-        for name in candidate_names:
-            p = Path(root) / name
-            if p.exists():
-                return FileResponse(str(p), media_type="text/html")
-        raise HTTPException(status_code=404, detail="Chat client html not found")
-    except HTTPException:
-        raise
+        # Mount /chat to serve the entire web directory with index.html as default
+        app.mount("/chat", StaticFiles(directory=str(web_dir), html=True), name="chat")
+        print(f"✅ Mounted /chat → {web_dir}")
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to load chat html: {e}")
+        print(f"Warning: Could not mount /chat static files: {e}")
+else:
+    # Fallback: serve legacy fractalic_chat.html at /chat if web/ doesn't exist
+    print(f"ℹ️  web/ folder not found, using fallback endpoint for fractalic_chat.html")
+
+    @app.get("/chat")
+    async def serve_chat_fallback():
+        try:
+            root = get_fractalic_root()
+            candidate_names = ["fractalic_chat.html", "fractalic_chat_fixed.html"]
+            for name in candidate_names:
+                p = Path(root) / name
+                if p.exists():
+                    print(f"📄 Serving {name} from {p}")
+                    return FileResponse(str(p), media_type="text/html")
+            raise HTTPException(status_code=404, detail="Chat client html not found")
+        except HTTPException:
+            raise
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Failed to load chat html: {e}")
 
 # Define the settings file path using centralized path management
 def get_current_settings_path():

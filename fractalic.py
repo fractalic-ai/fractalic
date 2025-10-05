@@ -258,28 +258,24 @@ def run_fractalic(input_file, task_file=None, param_input_user_request=None, par
                         
                         # Render the AST to markdown using the proper function
                         render_ast_to_markdown(result_nodes, temp_path)
-                        
+
                         # Read back the properly rendered content
                         with open(temp_path, 'r', encoding='utf-8') as f:
                             return_content = f.read()
-                        
+
                         # Clean up temporary file
                         os.unlink(temp_path)
-                        
+
                     except Exception as e:
-                        # print(f"DEBUG: Error in AST rendering: {e}")
                         # Fallback: try to read from the ctx_file if it exists
                         if ctx_file and os.path.exists(ctx_file):
                             try:
                                 with open(ctx_file, 'r', encoding='utf-8') as f:
                                     return_content = f.read()
-                                # print(f"DEBUG: Successfully read content from ctx_file: {ctx_file}")
                             except Exception as ctx_e:
-                                # print(f"DEBUG: Failed to read ctx_file {ctx_file}: {ctx_e}")
                                 pass
-                                
+
             except Exception as e:
-                # print(f"DEBUG: Exception in return content extraction: {e}")
                 pass
                 
         except (BlockNotFoundError, UnknownOperationError, FileNotFoundError, ValueError) as e:

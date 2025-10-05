@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Fractalic Chat Agent</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="styles/styles.css">
+</head>
+<body>
+    <div class="main-container">
+        <div class="chat-container">
+            <div class="connection-status" style="display:flex;align-items:center;gap:16px;flex-wrap:wrap;">
+                <span id="connectionStatus" class="status-disconnected">🔴 Подключение...</span>
+                <div class="file-selector-container" style="margin:0;">
+                    <button class="file-select-button" id="selectFileBtn">
+                        📁 Выбрать MD файл
+                    </button>
+                    <span class="selected-file-display" id="selectedFile">Файл не выбран</span>
+                    <button class="clear-selection-button" id="clearSelection" style="display: none;" title="Очистить выбор">✕</button>
+                </div>
+            </div>
+
+            <div class="chat-messages" id="messages"></div>
+
+            <div class="typing-indicator" id="typingIndicator">
+                Агент обрабатывает ваш запрос...
+            </div>
+
+            <div class="chat-input-container">
+                <div class="input-row">
+                    <button class="attach-button" id="fileSelectBtn" title="Выбрать MD файл">📎</button>
+                    <input type="text" class="chat-input" id="chatInput"
+                           placeholder="Add context (#), extensions (@), commands (/)"
+                           maxlength="1000" disabled>
+                    <button class="history-toggle-btn active" id="historyToggle" title="Использовать историю сообщений">📜</button>
+                    <button class="send-button" id="sendButton" disabled>▶</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- File Browser Modal -->
+    <div id="fileBrowserModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>Выбор MD файла</h3>
+                <button class="modal-close" id="modalCloseBtn">✕</button>
+            </div>
+            <div class="breadcrumb">
+                <span id="currentPath">.</span>
+            </div>
+            <div class="file-browser">
+                <div id="fileList" class="file-list">
+                    <!-- Files will be loaded here -->
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button id="cancelBtn">Отмена</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Diff Viewer Modal -->
+    <div id="diffViewerModal" class="modal">
+        <div class="modal-content diff-modal">
+            <div class="modal-header">
+                <h3>Diff: Original vs Context</h3>
+                <button class="modal-close" id="diffModalCloseBtn">✕</button>
+            </div>
+            <div class="diff-container">
+                <div class="diff-viewer">
+                    <pre id="diffContent" class="diff-content"></pre>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button id="closeDiffBtn">Закрыть</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Terminal Viewer Modal -->
+    <div id="terminalViewerModal" class="modal">
+        <div class="modal-content terminal-modal">
+            <div class="modal-header">
+                <h3>Terminal: <span id="terminalFileName">Выполнение</span></h3>
+                <button class="modal-close" id="terminalModalCloseBtn">✕</button>
+            </div>
+            <div class="terminal-status" id="terminalStatus">
+                Подключение к терминалу...
+            </div>
+            <div class="terminal-container">
+                <div class="terminal-viewer">
+                    <pre id="terminalContent" class="terminal-content"></pre>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button id="closeTerminalBtn">Закрыть</button>
+            </div>
+        </div>
+    </div>
+
+    <script type="module" src="scripts/main.js"></script>
+</body>
+</html>

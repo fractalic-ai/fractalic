@@ -871,6 +871,9 @@ class liteclient:
                              "content": content,
                              "tool_calls": tool_calls or None})
 
+                # Don't emit CHAT_MESSAGE here - return_content is already emitted from fractalic.py
+                # with full markdown including headers and tool calls
+
                 # Accumulate usage from this turn
                 if usage_info:
                     if hasattr(usage_info, 'prompt_tokens'):

@@ -46,8 +46,8 @@ if [ ! -f "fractalic.py" ]; then
 fi
 
 # Проверяем наличие файла чата
-if [ ! -f "fractalic_chat.html" ]; then
-    echo "❌ Ошибка: Файл fractalic_chat.html не найден"
+if [ ! -f "fractalic_chat.html" ] && [ ! -f "web/index.html" ]; then
+    echo "❌ Ошибка: Не найден ни fractalic_chat.html ни web/index.html"
     exit 1
 fi
 
