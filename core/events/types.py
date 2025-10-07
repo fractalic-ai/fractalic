@@ -10,6 +10,7 @@ import uuid
 class EventType(str, Enum):
     CHAT_MESSAGE = "chat_message"
     EXECUTION = "execution"
+    WORKFLOW_COMPLETE = "workflow_complete"  # Завершение выполнения @run операции (агента)
     ERROR = "error"
     AST_UPDATE = "ast_update"
     TOOL_CALL = "tool_call"
@@ -69,6 +70,21 @@ class ExecutionEvent(BaseEvent):
     def to_dict(self) -> Dict[str, Any]:
         base = super().to_dict()
         base.update({"phase": self.phase, "target": self.target})
+        return base
+
+
+@dataclass
+class WorkflowCompleteEvent(BaseEvent):
+    target: Optional[str] = None  # workflow file path
+    return_content: Optional[str] = None  # content returned by @return
+    status: str = "success"  # success|error
+
+    def __post_init__(self):
+        self.type = EventType.WORKFLOW_COMPLETE
+
+    def to_dict(self) -> Dict[str, Any]:
+        base = super().to_dict()
+        base.update({"target": self.target, "return_content": self.return_content, "status": self.status})
         return base
 
 

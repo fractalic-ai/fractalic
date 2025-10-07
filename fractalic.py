@@ -377,11 +377,10 @@ def run_fractalic(input_file, task_file=None, param_input_user_request=None, par
         if execution_successful:
             # Build success output
             output = f"Execution completed. Branch: {branch_name}, Context: {ctx_hash}"
-            # NOTE: return_content emission moved to main() to avoid duplication
-            # It will be emitted there along with other lifecycle events
-            # Emit execution complete
+            # Emit workflow complete (agent/file execution finished)
+            # This is different from EXECUTION.complete which signals the entire process end
             try:
-                emit_event(EventType.EXECUTION, phase='complete', target=str(input_file))
+                emit_event(EventType.WORKFLOW_COMPLETE, target=str(input_file), return_content=return_content)
             except Exception:
                 pass
 
@@ -405,7 +404,7 @@ def run_fractalic(input_file, task_file=None, param_input_user_request=None, par
             # Build failure output but still include partial state
             error_msg = "Execution failed but call tree state was preserved"
             try:
-                emit_event(EventType.EXECUTION, phase='error', target=str(input_file))
+                emit_event(EventType.WORKFLOW_COMPLETE, target=str(input_file), return_content=return_content, status='error')
             except Exception:
                 pass
             return {
@@ -514,8 +513,10 @@ def main():
 
         # Emit return_content FIRST (before completion message)
         if result.get('return_content'):
+            print(f"[DEBUG] Emitting return_content CHAT_MESSAGE, execution_id: {os.getenv('FRACTALIC_EXECUTION_ID')}")
             # Emit the actual returned content as a chat message for the new architecture
             emit_event(EventType.CHAT_MESSAGE, role='assistant', content=result['return_content'])
+            print(f"[DEBUG] return_content CHAT_MESSAGE emitted successfully")
 
         # Then emit completion message
         completion_message = f"✅ Фракталик завершил выполнение файла: {display_name}"
