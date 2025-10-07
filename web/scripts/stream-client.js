@@ -121,26 +121,25 @@ export class StreamClient {
                 }
 
                 case 'workflow_complete': {
-                    // Agent/workflow file completion (from @run operation)
+                    // Workflow completion event (from @run operation / agent execution)
                     const execId = data.execution_id;
                     if (execId && this.client.executionBubbles.has(execId)) {
                         const bubbleRefs = this.client.executionBubbles.get(execId);
                         const filePath = data.target || '';
                         const fileName = filePath.split('/').pop() || filePath;
-                        const status = data.status || 'success';
 
                         // Create a small notification in the response area
                         const notification = document.createElement('div');
                         notification.style.cssText = `
                             padding: 6px 10px;
                             margin: 4px 0;
-                            border-left: 3px solid ${status === 'success' ? '#83d69d' : '#d33f3f'};
-                            background: ${status === 'success' ? 'rgba(131, 214, 157, 0.1)' : 'rgba(211, 63, 63, 0.1)'};
+                            border-left: 3px solid #83d69d;
+                            background: rgba(131, 214, 157, 0.1);
                             font-size: 12px;
-                            color: ${status === 'success' ? '#83d69d' : '#d33f3f'};
+                            color: #83d69d;
                             border-radius: 3px;
                         `;
-                        notification.textContent = `${status === 'success' ? '✓' : '✗'} Agent completed: ${fileName}`;
+                        notification.textContent = `✓ Agent completed: ${fileName}`;
 
                         bubbleRefs.responseContent.appendChild(notification);
 
@@ -162,46 +161,74 @@ export class StreamClient {
                     break;
                 }
 
-                case 'execution': {
-                    if (data.phase === 'ack' || data.phase === 'start') {
-                        // Create execution bubble if doesn't exist
-                        const execId = data.execution_id;
-                        if (!this.client.executionBubbles.has(execId)) {
-                            const filePath = data.target || data.file_path || (this.client.selectedFile || '');
-                            const bubbleRefs = this.client.uiRenderer.createExecutionBubble(execId, filePath, now);
-                            this.client.executionBubbles.set(execId, bubbleRefs);
-                        }
-                    } else if (data.phase === 'complete') {
-                        // Update bubble status to completed
-                        const execId = data.execution_id;
-                        if (execId && this.client.executionBubbles.has(execId)) {
-                            const bubbleRefs = this.client.executionBubbles.get(execId);
+                case 'workflow_error': {
+                    // Workflow error event
+                    const execId = data.execution_id;
+                    if (execId && this.client.executionBubbles.has(execId)) {
+                        const bubbleRefs = this.client.executionBubbles.get(execId);
+                        const filePath = data.target || '';
+                        const fileName = filePath.split('/').pop() || filePath;
 
-                            const checkIcon = createSVGIcon('checkCircle', 16, '#83d69d');
-                            const title = bubbleRefs.title;
-                            const filePath = data.target || data.file_path || '';
-                            title.innerHTML = `
-                                ${checkIcon}
-                                <span>Completed: ${filePath}</span>
-                                <span style="font-size: 11px; color: #83d69d; margin-left: 8px;">✓ Done</span>
-                            `;
-                            bubbleRefs.bubble.style.borderColor = '#83d69d';
-                        }
-                    } else if (data.phase === 'error') {
-                        // Update bubble status to error
-                        const execId = data.execution_id;
-                        if (execId && this.client.executionBubbles.has(execId)) {
-                            const bubbleRefs = this.client.executionBubbles.get(execId);
-                            const errorIcon = createSVGIcon('error', 16, '#d33f3f');
-                            const title = bubbleRefs.title;
-                            const filePath = data.target || data.file_path || '';
-                            title.innerHTML = `
-                                ${errorIcon}
-                                <span>Error: ${filePath}</span>
-                                <span style="font-size: 11px; color: #d33f3f; margin-left: 8px;">✗ Failed</span>
-                            `;
-                            bubbleRefs.bubble.style.borderColor = '#d33f3f';
-                        }
+                        const notification = document.createElement('div');
+                        notification.style.cssText = `
+                            padding: 6px 10px;
+                            margin: 4px 0;
+                            border-left: 3px solid #d33f3f;
+                            background: rgba(211, 63, 63, 0.1);
+                            font-size: 12px;
+                            color: #d33f3f;
+                            border-radius: 3px;
+                        `;
+                        notification.textContent = `✗ Agent failed: ${fileName}`;
+                        bubbleRefs.responseContent.appendChild(notification);
+                    }
+                    break;
+                }
+
+                case 'execution_start': {
+                    // Create execution bubble if doesn't exist
+                    const execId = data.execution_id;
+                    if (!this.client.executionBubbles.has(execId)) {
+                        const filePath = data.target || data.file_path || (this.client.selectedFile || '');
+                        const bubbleRefs = this.client.uiRenderer.createExecutionBubble(execId, filePath, now);
+                        this.client.executionBubbles.set(execId, bubbleRefs);
+                    }
+                    break;
+                }
+
+                case 'execution_complete': {
+                    // Update bubble status to completed
+                    const execId = data.execution_id;
+                    if (execId && this.client.executionBubbles.has(execId)) {
+                        const bubbleRefs = this.client.executionBubbles.get(execId);
+
+                        const checkIcon = createSVGIcon('checkCircle', 16, '#83d69d');
+                        const title = bubbleRefs.title;
+                        const filePath = data.target || data.file_path || '';
+                        title.innerHTML = `
+                            ${checkIcon}
+                            <span>Completed: ${filePath}</span>
+                            <span style="font-size: 11px; color: #83d69d; margin-left: 8px;">✓ Done</span>
+                        `;
+                        bubbleRefs.bubble.style.borderColor = '#83d69d';
+                    }
+                    break;
+                }
+
+                case 'execution_error': {
+                    // Update bubble status to error
+                    const execId = data.execution_id;
+                    if (execId && this.client.executionBubbles.has(execId)) {
+                        const bubbleRefs = this.client.executionBubbles.get(execId);
+                        const errorIcon = createSVGIcon('error', 16, '#d33f3f');
+                        const title = bubbleRefs.title;
+                        const filePath = data.target || data.file_path || '';
+                        title.innerHTML = `
+                            ${errorIcon}
+                            <span>Error: ${filePath}</span>
+                            <span style="font-size: 11px; color: #d33f3f; margin-left: 8px;">✗ Failed</span>
+                        `;
+                        bubbleRefs.bubble.style.borderColor = '#d33f3f';
                     }
                     break;
                 }
@@ -353,8 +380,8 @@ export class StreamClient {
             // Handle return_content for ANY event type (separate from event type dispatch)
             // Note: return_content is now emitted as regular CHAT_MESSAGE from fractalic.py:522
             // So this block may not be used anymore
-            // Skip workflow_complete as it has its own dedicated handler above
-            if (data.return_content && data.type !== 'workflow_complete') {
+            // Skip workflow events as they have their own dedicated handler above
+            if (data.return_content && data.type !== 'workflow_complete' && data.type !== 'workflow_error') {
                 console.log('[DEBUG] Received event with return_content field (unexpected!)');
                 const execId = data.execution_id;
                 if (execId && this.client.executionBubbles.has(execId)) {

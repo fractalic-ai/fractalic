@@ -1,102 +1,68 @@
-from __future__ import annotations
+"""Event types for Fractalic event system.
 
-from dataclasses import dataclass, field
+All events are sent via HTTP using emit_event() from core.event_emitters.
+The emit_event() function is type-agnostic and accepts any payload via **kwargs.
+
+Event structure:
+    {
+        "type": str,              # Event type from EventType enum
+        "execution_id": str,      # Auto-injected from FRACTALIC_EXECUTION_ID env
+        "session_id": str,        # Auto-injected, groups related executions
+        "timestamp": float,       # Auto-injected Unix timestamp
+        **payload                 # Event-specific fields (see below)
+    }
+"""
+
 from enum import Enum
-from typing import Any, Dict, Optional
-import time
-import uuid
 
 
 class EventType(str, Enum):
+    """Event types with their expected payload fields.
+
+    Usage: emit_event(EventType.CHAT_MESSAGE, role="user", content="Hello")
+
+    All event types use unique identifiers - no phase/status fields needed.
+    """
+
+    # ===== Chat messages =====
+    # Payload: role (str), content (str)
     CHAT_MESSAGE = "chat_message"
-    EXECUTION = "execution"
-    WORKFLOW_COMPLETE = "workflow_complete"  # Завершение выполнения @run операции (агента)
+
+    # ===== Execution lifecycle (main process) =====
+    # Payload: target (Optional[str])
+    EXECUTION_START = "execution_start"
+    EXECUTION_COMPLETE = "execution_complete"
+    EXECUTION_ERROR = "execution_error"
+
+    # ===== Workflow lifecycle (@run operation / agent execution) =====
+    # Payload: target (Optional[str]), return_content (Optional[str])
+    WORKFLOW_START = "workflow_start"
+    WORKFLOW_COMPLETE = "workflow_complete"
+    WORKFLOW_ERROR = "workflow_error"
+
+    # ===== Error events =====
+    # Payload: message (str), details (Optional[str])
     ERROR = "error"
+
+    # ===== AST structure updates =====
+    # Payload: operation (str), blocks (List[Dict])
     AST_UPDATE = "ast_update"
+
+    # ===== Tool interactions =====
+    # Payload: tool_name (str), args (Dict)
     TOOL_CALL = "tool_call"
+    # Payload: tool_name (str), result (Any)
     TOOL_RESULT = "tool_result"
+
+    # ===== LLM streaming =====
+    # Payload: content (str), block_id (Optional[str])
     LLM_CHUNK = "llm_chunk"
+
+    # ===== Token usage tracking =====
+    # Payload: input_tokens (int), output_tokens (int), model (str),
+    #          block_id (Optional[str]), file_path (Optional[str])
     TOKEN_USAGE = "token_usage"
+
+    # ===== Block processing =====
+    # Payload: block_id (str), operation (str), status (str)
     BLOCK_PROCESSING = "block_processing"
-
-
-def _now() -> float:
-    return time.time()
-
-
-def _gen_id() -> str:
-    return uuid.uuid4().hex
-
-
-@dataclass
-class BaseEvent:
-    # "type" is assigned by subclasses in __post_init__
-    type: EventType = field(init=False)
-    timestamp: float = field(default_factory=_now)
-    event_id: str = field(default_factory=_gen_id)
-    execution_id: Optional[str] = None
-
-    def to_dict(self) -> Dict[str, Any]:  # minimal stable schema
-        return {
-            "type": self.type.value,
-            "timestamp": self.timestamp,
-            "event_id": self.event_id,
-            "execution_id": self.execution_id,
-        }
-
-
-@dataclass
-class ChatMessageEvent(BaseEvent):
-    role: str = "assistant"
-    content: str = ""
-
-    def __post_init__(self):
-        self.type = EventType.CHAT_MESSAGE  # enforce
-
-    def to_dict(self) -> Dict[str, Any]:
-        base = super().to_dict()
-        base.update({"role": self.role, "content": self.content})
-        return base
-
-
-@dataclass
-class ExecutionEvent(BaseEvent):
-    phase: str = "start"  # start|complete|error
-    target: Optional[str] = None  # path or description
-
-    def __post_init__(self):
-        self.type = EventType.EXECUTION
-
-    def to_dict(self) -> Dict[str, Any]:
-        base = super().to_dict()
-        base.update({"phase": self.phase, "target": self.target})
-        return base
-
-
-@dataclass
-class WorkflowCompleteEvent(BaseEvent):
-    target: Optional[str] = None  # workflow file path
-    return_content: Optional[str] = None  # content returned by @return
-    status: str = "success"  # success|error
-
-    def __post_init__(self):
-        self.type = EventType.WORKFLOW_COMPLETE
-
-    def to_dict(self) -> Dict[str, Any]:
-        base = super().to_dict()
-        base.update({"target": self.target, "return_content": self.return_content, "status": self.status})
-        return base
-
-
-@dataclass
-class ErrorEvent(BaseEvent):
-    message: str = ""
-    details: Optional[str] = None
-
-    def __post_init__(self):
-        self.type = EventType.ERROR
-
-    def to_dict(self) -> Dict[str, Any]:
-        base = super().to_dict()
-        base.update({"message": self.message, "details": self.details})
-        return base

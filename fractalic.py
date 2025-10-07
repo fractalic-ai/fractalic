@@ -377,10 +377,11 @@ def run_fractalic(input_file, task_file=None, param_input_user_request=None, par
         if execution_successful:
             # Build success output
             output = f"Execution completed. Branch: {branch_name}, Context: {ctx_hash}"
-            # Emit workflow complete (agent/file execution finished)
-            # This is different from EXECUTION.complete which signals the entire process end
+            # Emit workflow completion (agent/file execution finished)
+            # This is different from EXECUTION_COMPLETE which signals the entire process end
             try:
-                emit_event(EventType.WORKFLOW_COMPLETE, target=str(input_file), return_content=return_content)
+                emit_event(EventType.WORKFLOW_COMPLETE, target=str(input_file),
+                          return_content=return_content)
             except Exception:
                 pass
 
@@ -404,7 +405,8 @@ def run_fractalic(input_file, task_file=None, param_input_user_request=None, par
             # Build failure output but still include partial state
             error_msg = "Execution failed but call tree state was preserved"
             try:
-                emit_event(EventType.WORKFLOW_COMPLETE, target=str(input_file), return_content=return_content, status='error')
+                emit_event(EventType.WORKFLOW_ERROR, target=str(input_file),
+                          return_content=return_content)
             except Exception:
                 pass
             return {
@@ -480,7 +482,7 @@ def main():
 
     try:
         # Execution start event
-        emit_event(EventType.EXECUTION, phase='start', target=display_name)
+        emit_event(EventType.EXECUTION_START, target=display_name)
         emit_event(EventType.CHAT_MESSAGE, role='assistant', content=f"⚙️ Фракталик запущен для файла: {display_name}")
         # Call the core execution function
         result = run_fractalic(
@@ -497,7 +499,7 @@ def main():
         
         if not result['success']:
             error_text = result.get('error') or result.get('output') or ''
-            emit_event(EventType.EXECUTION, phase='error', target=display_name)
+            emit_event(EventType.EXECUTION_ERROR, target=display_name)
             if error_text:
                 emit_event(EventType.CHAT_MESSAGE, role='assistant', content=f"❌ Фракталик завершился с ошибкой при выполнении {display_name}\n{error_text}")
             else:
@@ -526,7 +528,7 @@ def main():
 
         # Finally emit explicit completion lifecycle event for streaming clients
         try:
-            emit_event(EventType.EXECUTION, phase='complete', target=display_name)
+            emit_event(EventType.EXECUTION_COMPLETE, target=display_name)
         except Exception:
             pass
 
@@ -571,12 +573,12 @@ def main():
 
 
     except (BlockNotFoundError, UnknownOperationError, FileNotFoundError, ValueError) as e:
-        emit_event(EventType.EXECUTION, phase='error', target=display_name)
+        emit_event(EventType.EXECUTION_ERROR, target=display_name)
         emit_event(EventType.CHAT_MESSAGE, role='assistant', content=f"❌ Фракталик завершился с ошибкой при выполнении {display_name}: {str(e)}")
         print(f"[ERROR fractalic.py] {str(e)}")
         sys.exit(1)
     except Exception as e:
-        emit_event(EventType.EXECUTION, phase='error', target=display_name)
+        emit_event(EventType.EXECUTION_ERROR, target=display_name)
         emit_event(EventType.CHAT_MESSAGE, role='assistant', content=f"❌ Непредвиденная ошибка при выполнении {display_name}: {str(e)}")
         # Check if this is a linting error and try to get context information
         if e.__class__.__name__ == 'FractalicLintError':

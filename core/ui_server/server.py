@@ -1661,23 +1661,23 @@ async def stream_chat_events(request: Request):
                         while events_queues[execution_id]:
                             event = events_queues[execution_id].popleft()
                             event_type = event.get('type')
-                            print(f"[DEBUG /api/chat/stream] Streaming event: {event_type} phase={event.get('phase')} status={event.get('status')} for {execution_id}")
+                            print(f"[DEBUG /api/chat/stream] Streaming event: {event_type} for {execution_id}")
                             yield f"{json.dumps(event, ensure_ascii=False)}\n"
                             events_found = True
 
-                            # EXECUTION.complete is the FINAL event (not WORKFLOW_COMPLETE)
+                            # EXECUTION_COMPLETE/ERROR are FINAL events (not WORKFLOW_COMPLETE)
                             # WORKFLOW_COMPLETE means an agent/file finished, but process continues
-                            if event_type == 'execution' and event.get('phase') == 'complete':
-                                print(f"[DEBUG /api/chat/stream] EXECUTION complete detected - this is the final event for {execution_id}")
+                            if event_type == 'execution_complete':
+                                print(f"[DEBUG /api/chat/stream] EXECUTION_COMPLETE detected - this is the final event for {execution_id}")
                                 completion_event_seen = True
-                            elif event_type == 'execution' and event.get('phase') == 'error':
-                                print(f"[DEBUG /api/chat/stream] EXECUTION error detected for {execution_id}")
+                            elif event_type == 'execution_error':
+                                print(f"[DEBUG /api/chat/stream] EXECUTION_ERROR detected for {execution_id}")
                                 completion_event_seen = True
 
                     # After draining current queue, check if we saw execution completion
                     if completion_event_seen and not completed:
                         print(f"[DEBUG /api/chat/stream] EXECUTION complete seen, waiting for any trailing events for {execution_id}")
-                        await asyncio.sleep(2)  # Shorter wait since EXECUTION.complete is now truly last
+                        await asyncio.sleep(2)  # Shorter wait since EXECUTION_COMPLETE is now truly last
                         # Drain any trailing events (shouldn't be any, but just in case)
                         final_count = 0
                         with events_lock:
