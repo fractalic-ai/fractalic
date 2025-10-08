@@ -572,15 +572,16 @@ async def cleanup_mcp_manager():
 
 # Helper functions
 def get_repo(repo_path: str):
+    """Get Git repository object (old compatibility, rarely used now)."""
     resolved_path = Path(repo_path).resolve()
     if not resolved_path.is_dir():
         raise HTTPException(status_code=400, detail="Invalid repository path")
     try:
         repo = git.Repo(resolved_path)
         set_repo_path(resolved_path)
+        return repo
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error initializing git repository: {e}")
-    return repo
 
 def get_file_content(repo, commit_hash, filepath):
     try:
@@ -667,7 +668,8 @@ async def list_directory(path: str = Query("")):
     for item in resolved_path.iterdir():
         is_dir = item.is_dir()
         is_git_repo = False
-        if is_dir and (item / '.git').is_dir():
+        # Check for .fractalic directory (storage-based sessions) instead of .git
+        if is_dir and (item / '.fractalic').is_dir():
             is_git_repo = True
         items.append({
             'name': item.name,
@@ -692,84 +694,78 @@ async def list_directory(path: str = Query("")):
 
 @app.get("/branches_and_commits/")
 async def get_branches_and_commits(repo_path: str = Query(...)):
+    """List storage sessions as 'branches' for frontend."""
+    from core.ui_server.storage_git_bridge import list_storage_sessions_as_branches
+
     try:
-        repo = get_repo(repo_path)
-        branches_data = []
-        # Filter out main branch, only get custom branches
-        branches = [b for b in repo.branches if b.name != 'main']
-        branches = sorted(branches, key=lambda b: b.commit.committed_datetime, reverse=True)
-
-        for branch in branches:
-            try:
-                call_tree_file_content = repo.git.show(f'{branch.name}:call_tree.json')
-                call_tree = json.loads(call_tree_file_content)
-            except Exception as e:
-                print(f"Error reading call_tree.json from branch {branch.name}: {str(e)}")
-                continue
-
-            branch_node = {
-                'id': branch.name,
-                'text': branch.name,
-                'state': {'opened': True},
-                'children': []
-            }
-
-            def build_tree(node):
-                node_id = f"{node['ctx_file']}_{node['ctx_commit_hash']}"
-                tree_node = {
-                    'id': node_id,
-                    'text': node['ctx_file'],
-                    'ctx_file': node['ctx_file'],
-                    'filename': node['filename'],
-                    'md_file': node['filename'],
-                    'md_commit_hash': node['md_commit_hash'],
-                    'ctx_commit_hash': node['ctx_commit_hash'],
-                    'trc_file': node.get('trc_file', ''),  # Add trc_file field
-                    'trc_commit_hash': node.get('trc_commit_hash', ''),  # Add trc_commit_hash field
-                    'branch': branch.name,
-                    'children': []
-                }
-                for child in node.get('children', []):
-                    child_node = build_tree(child)
-                    tree_node['children'].append(child_node)
-                return tree_node
-
-            root_node = build_tree(call_tree)
-            branch_node['children'].append(root_node)
-            branches_data.append(branch_node)
-
-        return branches_data
+        # Return ONLY storage sessions (execution_id as "branch name")
+        return list_storage_sessions_as_branches(repo_path=repo_path)
     except Exception as e:
-        print(f"Error processing branches and commits: {str(e)}")
+        print(f"Error listing storage sessions: {str(e)}")
+        import traceback
+        traceback.print_exc()
         return JSONResponse(status_code=500, content={"detail": f"Internal Server Error: {str(e)}"})
 
 @app.get("/get_file_content/")
-async def get_file_content_endpoint(repo_path: str = Query(...), file_path: str = Query(...), commit_hash: str = Query(...)):
+async def get_file_content_endpoint(
+    repo_path: str = Query(...),
+    file_path: str = Query(...),
+    commit_hash: str = Query(...)
+):
+    """Get file using Git adapter (searches all sessions)."""
+    from core.ui_server.storage_git_bridge import get_artifact_from_storage
+
     try:
-        repo = get_repo(repo_path)
-        try:
-            file_content = repo.git.show(f'{commit_hash}:{file_path}')
-        except Exception as e:
-            raise HTTPException(status_code=404, detail=f"File not found in commit {commit_hash}: {str(e)}")
-        return PlainTextResponse(file_content)
+        # Search all sessions for artifact
+        from pathlib import Path
+        sessions_dir = Path(repo_path) / '.fractalic' / 'sessions'
+
+        if sessions_dir.exists():
+            for session_dir in sessions_dir.iterdir():
+                if not session_dir.is_dir():
+                    continue
+
+                execution_id = session_dir.name
+                content = get_artifact_from_storage(execution_id, commit_hash, file_path, repo_path)
+
+                if content:
+                    return PlainTextResponse(content)
+
+        raise HTTPException(status_code=404, detail=f"File not found: {file_path}")
     except Exception as e:
         print(f"Error fetching file content: {str(e)}")
+        import traceback
+        traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Internal Server Error: {str(e)}")
 
 @app.get("/get_enriched_call_tree/")
 async def get_enriched_call_tree(repo_path: str = Query(...), branch: str = Query(...)):
-    try:
-        repo = get_repo(repo_path)
-        call_tree_file_content = repo.git.show(f'{branch}:call_tree.json')
-        call_tree = json.loads(call_tree_file_content)
+    """Get enriched call tree using Git adapter for storage."""
+    from core.ui_server.storage_git_bridge import is_storage_session, load_call_tree_from_storage
+    from core.storage.git_api_adapter import get_repo_adapter
 
+    try:
+        # 'branch' is actually execution_id
+        if not is_storage_session(branch):
+            raise HTTPException(status_code=404, detail=f"Session not found: {branch}")
+
+        # Load call tree from storage
+        call_tree = load_call_tree_from_storage(branch)
+        if not call_tree:
+            raise HTTPException(status_code=404, detail=f"Call tree not found for session {branch}")
+
+        # Create Git adapter for this session
+        repo = get_repo_adapter(repo_path, execution_id=branch)
+
+        # Enrich with content from storage
         enriched_call_tree = enrich_call_tree(call_tree, repo)
 
         return JSONResponse(content=enriched_call_tree)
     except Exception as e:
         print(f"Error fetching enriched call tree: {str(e)}")
+        import traceback
+        traceback.print_exc()
         return JSONResponse(status_code=500, content={"detail": f"Internal Server Error: {str(e)}"})
-
 
 @app.get("/get_file_content_disk/")
 async def get_file_content_disk(path: str = Query(...)):
@@ -1817,6 +1813,151 @@ async def stream_terminal_output(execution_id: str):
         media_type='text/plain',
         headers={'Cache-Control': 'no-cache'}
     )
+
+# ============================================================================
+# Storage Mode API - Session Management
+# ============================================================================
+
+@app.get("/api/storage/sessions")
+async def list_storage_sessions():
+    """
+    List all storage sessions.
+
+    Returns session information similar to /branches_and_commits/
+    but for storage mode.
+    """
+    try:
+        from core.storage import get_sessions_dir
+        sessions_dir = get_sessions_dir()
+
+        if not sessions_dir.exists():
+            return []
+
+        sessions_data = []
+
+        for session_dir in sorted(sessions_dir.iterdir(), key=lambda p: p.stat().st_mtime, reverse=True):
+            if not session_dir.is_dir():
+                continue
+
+            execution_id = session_dir.name
+
+            # Read session metadata
+            metadata_file = session_dir / 'metadata' / 'session.json'
+            session_metadata = {}
+            if metadata_file.exists():
+                with open(metadata_file, 'r') as f:
+                    session_metadata = json.load(f)
+
+            # Find call_tree in artifacts
+            artifacts_dir = session_dir / 'artifacts' / 'nodes'
+            call_tree = None
+
+            if artifacts_dir.exists():
+                for node_dir in artifacts_dir.iterdir():
+                    if not node_dir.is_dir():
+                        continue
+
+                    call_tree_file = node_dir / 'call_tree.dat'
+                    if call_tree_file.exists():
+                        with open(call_tree_file, 'r') as f:
+                            call_tree = json.load(f)
+                        break
+
+            if not call_tree:
+                # No call tree found, skip this session
+                continue
+
+            # Build session node similar to branch node structure
+            session_node = {
+                'id': execution_id,
+                'text': f"Session {execution_id[:8]}... ({session_metadata.get('created_at', 'unknown')})",
+                'state': {'opened': True},
+                'children': [],
+                'execution_id': execution_id,
+                'type': 'storage_session'
+            }
+
+            # Build tree from call_tree (same structure as Git mode)
+            def build_tree(node):
+                node_id = f"{node.get('ctx_file', 'unknown')}_{node.get('ctx_commit_hash', 'unknown')}"
+                tree_node = {
+                    'id': node_id,
+                    'text': node.get('ctx_file', 'unknown'),
+                    'ctx_file': node.get('ctx_file'),
+                    'filename': node.get('filename'),
+                    'md_file': node.get('filename'),
+                    'md_commit_hash': node.get('md_commit_hash'),
+                    'ctx_commit_hash': node.get('ctx_commit_hash'),
+                    'trc_file': node.get('trc_file', ''),
+                    'trc_commit_hash': node.get('trc_commit_hash', ''),
+                    'execution_id': execution_id,  # Add execution_id for storage mode
+                    'children': []
+                }
+                for child in node.get('children', []):
+                    child_node = build_tree(child)
+                    tree_node['children'].append(child_node)
+                return tree_node
+
+            root_node = build_tree(call_tree)
+            session_node['children'].append(root_node)
+            sessions_data.append(session_node)
+
+        return sessions_data
+
+    except Exception as e:
+        print(f"Error listing storage sessions: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return JSONResponse(status_code=500, content={"detail": f"Internal Server Error: {str(e)}"})
+
+
+@app.get("/api/storage/sessions/{execution_id}")
+async def get_storage_session(execution_id: str):
+    """Get detailed information about a specific storage session."""
+    try:
+        from core.storage import get_sessions_dir
+        sessions_dir = get_sessions_dir()
+        session_dir = sessions_dir / execution_id
+
+        if not session_dir.exists():
+            raise HTTPException(status_code=404, detail=f"Session {execution_id} not found")
+
+        # Read metadata
+        metadata_file = session_dir / 'metadata' / 'session.json'
+        metadata = {}
+        if metadata_file.exists():
+            with open(metadata_file, 'r') as f:
+                metadata = json.load(f)
+
+        # List all nodes
+        artifacts_dir = session_dir / 'artifacts' / 'nodes'
+        nodes = []
+
+        if artifacts_dir.exists():
+            for node_dir in artifacts_dir.iterdir():
+                if not node_dir.is_dir():
+                    continue
+
+                node_info = {
+                    'node_id': node_dir.name,
+                    'artifacts': [f.name for f in node_dir.iterdir() if f.is_file()]
+                }
+                nodes.append(node_info)
+
+        return {
+            'execution_id': execution_id,
+            'metadata': metadata,
+            'nodes': nodes,
+            'workspace_dir': str(session_dir / 'workspace'),
+            'artifacts_dir': str(artifacts_dir)
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Error getting storage session: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Internal Server Error: {str(e)}")
+
 
 # Helper to emit execution lifecycle - now just logs
 async def emit_execution_start(file_path: str, execution_id: str):

@@ -1,10 +1,10 @@
 #!/bin/bash
 
 # ===================================================
-# Run Server Script for Fractalic Application (Dev Auto-Reload)
+# Run Server Script for Fractalic Application
 # ===================================================
-# Adds automatic reload on file changes using uvicorn --reload
-# Set DISABLE_RELOAD=1 to disable.
+# Runs server without auto-reload by default (production mode)
+# Set ENABLE_RELOAD=1 to enable auto-reload for development.
 # ===================================================
 
 # Get the directory of the script (project root)
@@ -23,12 +23,12 @@ fi
 # Stay in project root directory
 cd "$SCRIPT_DIR" || { echo "❌ Error: Failed to enter $SCRIPT_DIR"; exit 1; }
 
-if [ "${DISABLE_RELOAD}" = "1" ]; then
-  RELOAD_FLAG=""
-  echo "🚀 Starting Fractalic server (no auto-reload)"
-else
+if [ "${ENABLE_RELOAD}" = "1" ]; then
   RELOAD_FLAG="--reload"
   echo "🚀 Starting Fractalic server with auto-reload enabled"
+else
+  RELOAD_FLAG=""
+  echo "🚀 Starting Fractalic server (production mode)"
 fi
 
 echo "📂 Working directory: $(pwd)"

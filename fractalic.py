@@ -36,6 +36,9 @@ from core.render.render_ast import render_ast_to_markdown
 # Import centralized path management
 from core.paths import set_session_root, validate_session_safety, get_session_root
 
+# Import storage layer
+from core.storage import get_session_storage
+
 # Import event emission
 from core.event_emitters import emit_event
 from core.events.types import EventType
@@ -173,21 +176,46 @@ def run_fractalic(input_file, task_file=None, param_input_user_request=None, par
         
         # Set environment variable for API key
         os.environ[f"{provider.upper()}_API_KEY"] = final_api_key
-        
-        # Change working directory to session_root (where the input .md file is located)
-        # This ensures git operations and file operations happen in the right place
+
+        # ============ NEW STORAGE ARCHITECTURE ============
+        # Get execution_id from environment (set by server.py) or generate if CLI mode
+        execution_id = os.getenv('FRACTALIC_EXECUTION_ID')
+        if not execution_id:
+            # CLI mode: generate new execution_id
+            import uuid
+            execution_id = str(uuid.uuid4())
+            os.environ['FRACTALIC_EXECUTION_ID'] = execution_id
+
+        # Create isolated session through storage API
+        storage = get_session_storage()
+        session_ctx = storage.create_session(
+            execution_id=execution_id,
+            source_dir=input_file_dir,
+            initial_file=input_file_path.name,
+            settings=settings
+        )
+
+        print(f"[Storage] Created session {execution_id}")
+        print(f"[Storage] Workspace: {session_ctx.workspace_dir}")
+
+        # IMPORTANT: Keep session_root pointing to ORIGINAL directory
+        # This ensures settings.toml and mcp_servers.json are found correctly
         session_root = get_session_root()
-        os.chdir(str(session_root))
-        print(f"Changed working directory to: {session_root}")
+
+        # Change working directory to WORKSPACE (isolated copy)
+        os.chdir(str(session_ctx.workspace_dir))
+        print(f"[Storage] Changed CWD to workspace: {session_ctx.workspace_dir}")
         
         # Reset token stats for this new session
         
-        # Validate input file exists (use the basename since we're already in the right directory)
+        # Validate input file exists in workspace
         input_file_basename = input_file_path.name
-        if not input_file_path.exists():
+        workspace_input_file = session_ctx.workspace_dir / input_file_basename
+
+        if not workspace_input_file.exists():
             return {
                 'success': False,
-                'error': f"Input file not found: {input_file}",
+                'error': f"Input file not found in workspace: {input_file_basename}",
                 'output': '',
                 'explicit_return': False,
                 'return_content': None,
@@ -300,16 +328,17 @@ def run_fractalic(input_file, task_file=None, param_input_user_request=None, par
                 return
             call_tree_path = os.path.join('.', 'call_tree.json')
             files_to_commit = [call_tree_path]
-            
+
             try:
+                # Generate call tree JSON content
+                call_tree_content = None
                 if call_tree_root is not None:
                     # Save actual call tree state
-                    with open(call_tree_path, 'w', encoding='utf-8') as json_file:
-                        call_tree_root.ctx_file = ctx_file
-                        call_tree_root.ctx_hash = ctx_hash
-                        call_tree_root.trc_file = trc_file  
-                        call_tree_root.trc_hash = trc_hash  
-                        json_file.write(call_tree_root.to_json())
+                    call_tree_root.ctx_file = ctx_file
+                    call_tree_root.ctx_hash = ctx_hash
+                    call_tree_root.trc_file = trc_file
+                    call_tree_root.trc_hash = trc_hash
+                    call_tree_content = call_tree_root.to_json()
                 else:
                     # Create minimal call tree if no execution happened
                     from core.operations.call_tree import CallTreeNode
@@ -320,49 +349,56 @@ def run_fractalic(input_file, task_file=None, param_input_user_request=None, par
                         ctx_file=ctx_file,
                         trc_file=trc_file
                     )
+                    call_tree_content = minimal_call_tree.to_json()
+
+                if execution_id:
+                    # Storage mode: Save call tree via storage API
+                    import json
+                    call_tree_dict = json.loads(call_tree_content)
+                    storage.save_call_tree(execution_id, call_tree_dict)
+                    print(f"[INFO] Call tree saved to storage: call_tree.json")
+                else:
+                    # Legacy Git mode: Write file and commit
                     with open(call_tree_path, 'w', encoding='utf-8') as json_file:
-                        json_file.write(minimal_call_tree.to_json())
-                
-                # Check for any uncommitted ctx/trc files and include them in commit
-                ctx_file_path = None
-                trc_file_path = None
-                if ctx_file:
-                    ctx_file_path = os.path.join('.', os.path.basename(ctx_file))
-                    if os.path.exists(ctx_file_path):
-                        files_to_commit.append(ctx_file_path)
-                
-                if trc_file:
-                    trc_file_path = os.path.join('.', os.path.basename(trc_file))
-                    if os.path.exists(trc_file_path):
-                        files_to_commit.append(trc_file_path)
-                
-                # Also check for ctx/trc files based on input filename
-                base_name = os.path.splitext(input_file_basename)[0]
-                potential_ctx = f"{base_name}.ctx"
-                potential_trc = f"{base_name}.trc"
-                
-                if os.path.exists(potential_ctx) and potential_ctx not in files_to_commit:
-                    files_to_commit.append(potential_ctx)
-                    
-                if os.path.exists(potential_trc) and potential_trc not in files_to_commit:
-                    files_to_commit.append(potential_trc)
-                        
-                # Commit all relevant files
-                # Skip git commit if ephemeral
-                if os.environ.get('FRACTALIC_EPHEMERAL_SESSION') == '1' or input_file.endswith('.chat_run.md'):
-                    return
-                try:
-                    md_commit_hash = commit_changes(
-                        '.',
-                        "Saving call_tree.json with execution state and any pending files",
-                        files_to_commit,
-                        None,
-                        None
-                    )
-                    print(f"[INFO] Call tree and files saved and committed: {', '.join(files_to_commit)}")
-                except Exception as commit_e:
-                    print(f"[WARNING] Files saved but commit failed: {commit_e}")
-                    
+                        json_file.write(call_tree_content)
+
+                    # Check for any uncommitted ctx/trc files and include them in commit
+                    ctx_file_path = None
+                    trc_file_path = None
+                    if ctx_file:
+                        ctx_file_path = os.path.join('.', os.path.basename(ctx_file))
+                        if os.path.exists(ctx_file_path):
+                            files_to_commit.append(ctx_file_path)
+
+                    if trc_file:
+                        trc_file_path = os.path.join('.', os.path.basename(trc_file))
+                        if os.path.exists(trc_file_path):
+                            files_to_commit.append(trc_file_path)
+
+                    # Also check for ctx/trc files based on input filename
+                    base_name = os.path.splitext(input_file_basename)[0]
+                    potential_ctx = f"{base_name}.ctx"
+                    potential_trc = f"{base_name}.trc"
+
+                    if os.path.exists(potential_ctx) and potential_ctx not in files_to_commit:
+                        files_to_commit.append(potential_ctx)
+
+                    if os.path.exists(potential_trc) and potential_trc not in files_to_commit:
+                        files_to_commit.append(potential_trc)
+
+                    # Commit all relevant files
+                    try:
+                        md_commit_hash = commit_changes(
+                            '.',
+                            "Saving call_tree.json with execution state and any pending files",
+                            files_to_commit,
+                            None,
+                            None
+                        )
+                        print(f"[INFO] Call tree and files saved and committed: {', '.join(files_to_commit)}")
+                    except Exception as commit_e:
+                        print(f"[WARNING] Files saved but commit failed: {commit_e}")
+
             except Exception as save_e:
                 print(f"[ERROR] Failed to save call tree: {save_e}")
                 import traceback

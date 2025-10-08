@@ -10,14 +10,15 @@ from core.ast_md.node import Node, NodeType, OperationType
 from core.errors import BlockNotFoundError, UnknownOperationError
 from core.config import Config
 from core.utils import parse_file, get_content_without_header
-from core.render.render_ast import render_ast_to_markdown, render_ast_to_trace
+from core.render.render_ast import render_ast_to_markdown, render_ast_to_trace, render_ast_to_markdown_string, render_ast_to_trace_string
 from core.operations.import_op import process_import
 from core.operations.llm_op import process_llm
 from core.operations.goto_op import process_goto
 from core.operations.shell_op import process_shell
 from core.operations.return_op import process_return
 from core.operations.call_tree import CallTreeNode
-from core.git import ensure_git_repo, create_session_branch, commit_changes
+from core.git import ensure_git_repo, create_session_branch, commit_changes  # Legacy compatibility
+from core.storage import get_session_storage  # NEW: Storage API
 from core.simple_token_tracker import token_tracker
 from rich import print
 from rich.console import Console
@@ -66,19 +67,28 @@ def run(filename: str, param_node: Optional[Union[Node, AST]] = None, create_new
     if ephemeral:
         create_new_branch = False  # force disable branch creation / commits
 
+    # Get storage instance and execution_id
+    storage = get_session_storage()
+    execution_id = os.getenv('FRACTALIC_EXECUTION_ID')
+
     goto_count = {}
     branch_name = None
     original_cwd = os.getcwd()
-    
+
     # Flag to track if execution ended with @return operation
     explicit_return = False
-    
+
     try:
         os.chdir(file_dir)
         # Keep paths session_cwd in sync with the currently executing file directory
         set_session_cwd(file_dir)
 
-        if create_new_branch and not ephemeral:
+        # Set branch_name based on mode
+        if execution_id:
+            # Storage mode: Use execution_id as branch name
+            branch_name = execution_id
+        elif create_new_branch and not ephemeral:
+            # Legacy Git mode: Create new branch
             ensure_git_repo(base_dir)
             branch_name = create_session_branch(base_dir, "Testing-git-operations")
             console.print(f"[light_green]✓[/light_green] git. new branch created: [cyan]{branch_name}[/cyan]")
@@ -88,23 +98,34 @@ def run(filename: str, param_node: Optional[Union[Node, AST]] = None, create_new
         if not os.path.exists(local_file_name):
             raise FileNotFoundError(f"File not found: {local_file_name}")
 
+        # Handle file hashing (legacy Git mode or storage mode)
         if not ephemeral:
-            if relative_file_path not in committed_files:
-                try:
-                    md_commit_hash = commit_changes(
-                        base_dir,
-                        "Operation [@run] execution start",
-                        [local_file_name],
-                        p_parent_filename,
-                        p_parent_operation
-                    )
-                    committed_files.add(relative_file_path)
-                    file_commit_hashes[relative_file_path] = md_commit_hash
-                except Exception as e:
-                    print(f"[ERROR runner.py] Error committing file {relative_file_path}: {str(e)}")
-                    raise
+            if execution_id:
+                # Storage mode: Generate content hash without Git commit
+                with open(local_file_name, 'r', encoding='utf-8') as f:
+                    file_content = f.read()
+                # Use simple hash for md_commit_hash (legacy field compatibility)
+                import hashlib
+                md_commit_hash = hashlib.sha256(file_content.encode('utf-8')).hexdigest()[:40]
+                file_commit_hashes[relative_file_path] = md_commit_hash
             else:
-                md_commit_hash = file_commit_hashes[relative_file_path]
+                # Legacy Git mode
+                if relative_file_path not in committed_files:
+                    try:
+                        md_commit_hash = commit_changes(
+                            base_dir,
+                            "Operation [@run] execution start",
+                            [local_file_name],
+                            p_parent_filename,
+                            p_parent_operation
+                        )
+                        committed_files.add(relative_file_path)
+                        file_commit_hashes[relative_file_path] = md_commit_hash
+                    except Exception as e:
+                        print(f"[ERROR runner.py] Error committing file {relative_file_path}: {str(e)}")
+                        raise
+                else:
+                    md_commit_hash = file_commit_hashes[relative_file_path]
         else:
             md_commit_hash = None  # No commit in ephemeral mode
 
@@ -142,8 +163,8 @@ def run(filename: str, param_node: Optional[Union[Node, AST]] = None, create_new
                 print(f"[ERROR runner.py] Could not read file: {str(read_error)}")
             raise
 
-        # RESTORING LOGIC 
-        # Initialize call tree node with relative path
+        # RESTORING LOGIC
+        # Initialize call tree node with relative path and new storage fields
         if p_call_tree_node is None:
             call_tree_node = CallTreeNode(
                 operation='@run',
@@ -152,8 +173,15 @@ def run(filename: str, param_node: Optional[Union[Node, AST]] = None, create_new
                 md_commit_hash=md_commit_hash,
                 ctx_commit_hash=None,
                 ctx_file=None,
-                parent=None
+                parent=None,
+                # NEW storage fields
+                node_id=str(uuid.uuid4())[:12],
+                execution_id=execution_id,
+                original_file_path=relative_file_path,
+                workspace_file_path=abs_path,
+                workspace_cwd=file_dir
             )
+            call_tree_node = call_tree_node
             new_node = call_tree_node
         else:
             new_node = CallTreeNode(
@@ -163,7 +191,13 @@ def run(filename: str, param_node: Optional[Union[Node, AST]] = None, create_new
                 md_commit_hash=md_commit_hash,
                 ctx_commit_hash=None,
                 ctx_file=None,
-                parent=p_call_tree_node
+                parent=p_call_tree_node,
+                # NEW storage fields
+                node_id=str(uuid.uuid4())[:12],
+                execution_id=execution_id,
+                original_file_path=relative_file_path,
+                workspace_file_path=abs_path,
+                workspace_cwd=file_dir
             )
             p_call_tree_node.add_child(new_node)
 
@@ -249,36 +283,76 @@ def run(filename: str, param_node: Optional[Union[Node, AST]] = None, create_new
                     emit_ast_snapshot(ast, operation_type="return")
                     if return_result:
                         ctx_filename = Path(local_file_name).with_suffix('.ctx')
-                        output_file = os.path.join(file_dir, ctx_filename)
-
                         trc_filename = Path(local_file_name).with_suffix('.trc')
-                        trc_output_file = os.path.join(file_dir, trc_filename)
 
-                        relative_ctx_path = get_relative_path(base_dir, output_file)
-                        relative_trc_path = get_relative_path(base_dir, trc_output_file)
+                        if execution_id:
+                            # Storage mode: Save artifacts via storage API
+                            ctx_content = render_ast_to_markdown_string(ast)
+                            trc_content = render_ast_to_trace_string(ast)
 
-                        render_ast_to_markdown(ast, output_file)
-                        render_ast_to_trace(ast, trc_output_file)
+                            ctx_artifact_path = storage.save_node_artifact(
+                                execution_id=execution_id,
+                                node_id=new_node.node_id,
+                                artifact_type='ctx',
+                                content=ctx_content,
+                                filename=ctx_filename.name
+                            )
 
-                        ctx_commit_hash = commit_changes(
-                            base_dir,
-                            "@return operation",
-                            [local_file_name, ctx_filename, trc_filename],  # Include trc_filename
-                            p_parent_filename,
-                            p_parent_operation
-                        )
+                            trc_artifact_path = storage.save_node_artifact(
+                                execution_id=execution_id,
+                                node_id=new_node.node_id,
+                                artifact_type='trc',
+                                content=trc_content,
+                                filename=trc_filename.name
+                            )
 
-                        console.print(f"[light_green]✓[/light_green] git. context commited: [light_green]{ctx_filename}[/light_green]")
-                        console.print(f"[light_green]✓[/light_green] git. trace file commited: [light_green]{trc_filename}[/light_green]")
+                            # Update node with artifact paths (relative to artifacts dir)
+                            relative_ctx_path = f"{new_node.artifacts_dir}/{ctx_filename.name}"
+                            relative_trc_path = f"{new_node.artifacts_dir}/{trc_filename.name}"
 
-                        new_node.ctx_file = relative_ctx_path
-                        new_node.ctx_commit_hash = ctx_commit_hash
-                        new_node.trc_file = relative_trc_path
-                        new_node.trc_commit_hash = ctx_commit_hash  # Same commit hash as ctx
+                            console.print(f"[light_green]✓[/light_green] storage. context saved: [light_green]{ctx_filename}[/light_green]")
+                            console.print(f"[light_green]✓[/light_green] storage. trace file saved: [light_green]{trc_filename}[/light_green]")
+
+                            # For EventMessage compatibility: use md_commit_hash (not artifact path)
+                            ctx_hash = md_commit_hash
+                            trc_hash = md_commit_hash
+
+                            new_node.ctx_file = relative_ctx_path
+                            new_node.ctx_commit_hash = ctx_hash
+                            new_node.trc_file = relative_trc_path
+                            new_node.trc_commit_hash = trc_hash
+                        else:
+                            # Legacy Git mode
+                            output_file = os.path.join(file_dir, ctx_filename)
+                            trc_output_file = os.path.join(file_dir, trc_filename)
+
+                            relative_ctx_path = get_relative_path(base_dir, output_file)
+                            relative_trc_path = get_relative_path(base_dir, trc_output_file)
+
+                            render_ast_to_markdown(ast, output_file)
+                            render_ast_to_trace(ast, trc_output_file)
+
+                            ctx_commit_hash = commit_changes(
+                                base_dir,
+                                "@return operation",
+                                [local_file_name, ctx_filename, trc_filename],
+                                p_parent_filename,
+                                p_parent_operation
+                            )
+
+                            console.print(f"[light_green]✓[/light_green] git. context commited: [light_green]{ctx_filename}[/light_green]")
+                            console.print(f"[light_green]✓[/light_green] git. trace file commited: [light_green]{trc_filename}[/light_green]")
+
+                            new_node.ctx_file = relative_ctx_path
+                            new_node.ctx_commit_hash = ctx_commit_hash
+                            new_node.trc_file = relative_trc_path
+                            new_node.trc_commit_hash = ctx_commit_hash
 
                         # Set explicit return flag to True
                         explicit_return = True
-                        return return_result, new_node, relative_ctx_path, ctx_commit_hash, relative_trc_path, ctx_commit_hash, branch_name, explicit_return
+                        ctx_hash = new_node.ctx_commit_hash
+                        trc_hash = new_node.trc_commit_hash
+                        return return_result, new_node, relative_ctx_path, ctx_hash, relative_trc_path, trc_hash, branch_name, explicit_return
                     break  # Exit processing on return
                 else:
                     raise UnknownOperationError(f"Unknown operation: {operation_name}")
@@ -286,108 +360,177 @@ def run(filename: str, param_node: Optional[Union[Node, AST]] = None, create_new
                 current_node = current_node.next
 
         ctx_filename = Path(local_file_name).with_suffix('.ctx')
-        output_file = os.path.join(file_dir, ctx_filename)
-
         trc_filename = Path(local_file_name).with_suffix('.trc')
-        trc_output_file = os.path.join(file_dir, trc_filename)
-        
-        relative_ctx_path = os.path.relpath(output_file, base_dir)
-        relative_trc_path = os.path.relpath(trc_output_file, base_dir)
-        
-        render_ast_to_markdown(ast, output_file)
-        render_ast_to_trace(ast, trc_output_file)
 
-        ctx_commit_hash = commit_changes(
-            base_dir,
-            "Final processed files",
-            [local_file_name, ctx_filename, trc_filename],  # Include trc_filename in commit
-            p_parent_filename,
-            p_parent_operation
-        )
-        console.print(f"[light_green]✓[/light_green] git. main context commited: [light_green]{ctx_filename}[/light_green]")
-        console.print(f"[light_green]✓[/light_green] git. trace file commited: [light_green]{trc_filename}[/light_green]")
+        if execution_id:
+            # Storage mode: Save artifacts via storage API
+            ctx_content = render_ast_to_markdown_string(ast)
+            trc_content = render_ast_to_trace_string(ast)
+
+            # Save artifacts and get relative paths
+            ctx_artifact_path = storage.save_node_artifact(
+                execution_id=execution_id,
+                node_id=new_node.node_id,
+                artifact_type='ctx',
+                content=ctx_content,
+                filename=ctx_filename.name
+            )
+
+            trc_artifact_path = storage.save_node_artifact(
+                execution_id=execution_id,
+                node_id=new_node.node_id,
+                artifact_type='trc',
+                content=trc_content,
+                filename=trc_filename.name
+            )
+
+            # Update node with artifact paths (relative to artifacts dir)
+            relative_ctx_path = f"{new_node.artifacts_dir}/{ctx_filename.name}"
+            relative_trc_path = f"{new_node.artifacts_dir}/{trc_filename.name}"
+
+            # For EventMessage compatibility: use md_commit_hash (not artifact path)
+            ctx_commit_hash = md_commit_hash
+            trc_commit_hash = md_commit_hash
+
+            console.print(f"[light_green]✓[/light_green] storage. main context saved: [light_green]{ctx_filename}[/light_green]")
+            console.print(f"[light_green]✓[/light_green] storage. trace file saved: [light_green]{trc_filename}[/light_green]")
+        else:
+            # Legacy Git mode
+            output_file = os.path.join(file_dir, ctx_filename)
+            trc_output_file = os.path.join(file_dir, trc_filename)
+
+            relative_ctx_path = os.path.relpath(output_file, base_dir)
+            relative_trc_path = os.path.relpath(trc_output_file, base_dir)
+
+            render_ast_to_markdown(ast, output_file)
+            render_ast_to_trace(ast, trc_output_file)
+
+            ctx_commit_hash = commit_changes(
+                base_dir,
+                "Final processed files",
+                [local_file_name, ctx_filename, trc_filename],
+                p_parent_filename,
+                p_parent_operation
+            )
+            trc_commit_hash = ctx_commit_hash  # Same commit hash as ctx
+
+            console.print(f"[light_green]✓[/light_green] git. main context commited: [light_green]{ctx_filename}[/light_green]")
+            console.print(f"[light_green]✓[/light_green] git. trace file commited: [light_green]{trc_filename}[/light_green]")
 
         # Update node with ctx and trc file information
         new_node.ctx_file = relative_ctx_path
         new_node.ctx_commit_hash = ctx_commit_hash
         new_node.trc_file = relative_trc_path
-        new_node.trc_commit_hash = ctx_commit_hash  # Same commit hash as ctx
+        new_node.trc_commit_hash = trc_commit_hash
 
-        return ast, new_node, relative_ctx_path, ctx_commit_hash, relative_trc_path, ctx_commit_hash, branch_name, explicit_return
+        return ast, new_node, relative_ctx_path, ctx_commit_hash, relative_trc_path, trc_commit_hash, branch_name, explicit_return
 
     except Exception as e:
         import traceback
+        import hashlib
         tb = traceback.format_exc()
 
-        # Same logic to render .ctx:
         ctx_filename = Path(local_file_name).with_suffix('.ctx')
-        output_file = os.path.join(file_dir, ctx_filename)
-
         trc_filename = Path(local_file_name).with_suffix('.trc')
-        trc_output_file = os.path.join(file_dir, trc_filename)
+
+        # Generate error content
+        ctx_content = ""
+        trc_content = "[]"  # Empty JSON array for trace
 
         # Only render AST if it was successfully created (linting passed)
         if 'ast' in locals():
-            render_ast_to_markdown(ast, output_file)
-            render_ast_to_trace(ast, trc_output_file)
+            ctx_content = render_ast_to_markdown_string(ast)
+            trc_content = render_ast_to_trace_string(ast)
         else:
             # Create context file for linting errors with actual error details
-            with open(output_file, 'w', encoding='utf-8') as f:
-                f.write(f"# Linting Errors in {os.path.basename(local_file_name)}\n\n")
-                f.write(f"File failed linting validation before parsing.\n\n")
-                
-                # Include formatted linting errors if available
-                if hasattr(e, 'formatted_errors') and e.formatted_errors:
-                    f.write("## Linting Error Details\n\n")
-                    f.write("```\n")
-                    f.write(e.formatted_errors)
-                    f.write("\n```\n\n")
-            
-            # Create empty trace file
-            with open(trc_output_file, 'w', encoding='utf-8') as f:
-                f.write("[]")  # Empty JSON array
+            ctx_content = f"# Linting Errors in {os.path.basename(local_file_name)}\n\n"
+            ctx_content += f"File failed linting validation before parsing.\n\n"
 
-        # Append traceback and exception text to the .ctx file
-        with open(output_file, 'a', encoding='utf-8') as f:
-            f.write("\n# Exception Trace\n")
-            
-            # For linting errors, show the basic message
+            # Include formatted linting errors if available
             if hasattr(e, 'formatted_errors') and e.formatted_errors:
-                f.write("Linting validation failed\n")
-            else:
-                f.write(str(e))
-            
-            f.write("\n```\n")
-            f.write(tb)
-            f.write("```\n")
+                ctx_content += "## Linting Error Details\n\n"
+                ctx_content += "```\n"
+                ctx_content += e.formatted_errors
+                ctx_content += "\n```\n\n"
 
-        # Commit changes without modifying git functions
-        ctx_commit_hash = commit_changes(
-            base_dir,
-            "Exception caught: appended traceback",
-            [local_file_name, ctx_filename, trc_filename],  # Include trc_filename
-            p_parent_filename,
-            p_parent_operation
-        )
-        
-        relative_ctx_path = get_relative_path(base_dir, output_file)
-        relative_trc_path = get_relative_path(base_dir, trc_output_file)
-        
-        console.print(f"[bright_red]✓[/bright_red] git. context commited with exception info: [bright_red]{ctx_filename}[/bright_red]")
-        console.print(f"[bright_red]✓[/bright_red] git. trace file commited with exception info: [bright_red]{trc_filename}[/bright_red]")
+        # Append traceback and exception text to the content
+        ctx_content += "\n# Exception Trace\n"
+
+        # For linting errors, show the basic message
+        if hasattr(e, 'formatted_errors') and e.formatted_errors:
+            ctx_content += "Linting validation failed\n"
+        else:
+            ctx_content += str(e)
+
+        ctx_content += "\n```\n"
+        ctx_content += tb
+        ctx_content += "```\n"
+
+        if execution_id and 'new_node' in locals():
+            # Storage mode: Save error artifacts via storage API
+            ctx_artifact_path = storage.save_node_artifact(
+                execution_id=execution_id,
+                node_id=new_node.node_id,
+                artifact_type='ctx',
+                content=ctx_content,
+                filename=ctx_filename.name
+            )
+
+            trc_artifact_path = storage.save_node_artifact(
+                execution_id=execution_id,
+                node_id=new_node.node_id,
+                artifact_type='trc',
+                content=trc_content,
+                filename=trc_filename.name
+            )
+
+            relative_ctx_path = f"{new_node.artifacts_dir}/{ctx_filename.name}"
+            relative_trc_path = f"{new_node.artifacts_dir}/{trc_filename.name}"
+
+            # For EventMessage compatibility: use md_commit_hash (not artifact path)
+            ctx_commit_hash = md_commit_hash
+            trc_commit_hash = md_commit_hash
+
+            console.print(f"[bright_red]✓[/bright_red] storage. context saved with exception info: [bright_red]{ctx_filename}[/bright_red]")
+            console.print(f"[bright_red]✓[/bright_red] storage. trace file saved with exception info: [bright_red]{trc_filename}[/bright_red]")
+        else:
+            # Legacy Git mode or no node created
+            output_file = os.path.join(file_dir, ctx_filename)
+            trc_output_file = os.path.join(file_dir, trc_filename)
+
+            with open(output_file, 'w', encoding='utf-8') as f:
+                f.write(ctx_content)
+
+            with open(trc_output_file, 'w', encoding='utf-8') as f:
+                f.write(trc_content)
+
+            ctx_commit_hash = commit_changes(
+                base_dir,
+                "Exception caught: appended traceback",
+                [local_file_name, ctx_filename, trc_filename],
+                p_parent_filename,
+                p_parent_operation
+            )
+            trc_commit_hash = ctx_commit_hash  # Same commit hash as ctx
+
+            relative_ctx_path = get_relative_path(base_dir, output_file)
+            relative_trc_path = get_relative_path(base_dir, trc_output_file)
+
+            console.print(f"[bright_red]✓[/bright_red] git. context commited with exception info: [bright_red]{ctx_filename}[/bright_red]")
+            console.print(f"[bright_red]✓[/bright_red] git. trace file commited with exception info: [bright_red]{trc_filename}[/bright_red]")
 
         # Make sure new_node references updated ctx_file and trc_file data (only if it exists)
         if 'new_node' in locals():
             new_node.ctx_file = relative_ctx_path
             new_node.ctx_commit_hash = ctx_commit_hash
             new_node.trc_file = relative_trc_path
-            new_node.trc_commit_hash = ctx_commit_hash  # Same commit hash as ctx
+            new_node.trc_commit_hash = trc_commit_hash
 
             # Return results back to fractalic with trace information
             return ast, new_node, new_node.ctx_file, ctx_commit_hash, new_node.trc_file, new_node.trc_commit_hash, branch_name, explicit_return
         else:
             # For linting errors, return minimal valid response
-            return None, None, relative_ctx_path, ctx_commit_hash, relative_trc_path, ctx_commit_hash, branch_name, False
+            return None, None, relative_ctx_path, ctx_commit_hash, relative_trc_path, trc_commit_hash, branch_name, False
 
     finally:
         os.chdir(original_cwd)
@@ -557,6 +700,13 @@ def process_run(ast: AST, current_node: Node, local_file_name, parent_operation,
         )
 
     # Handle results insertion
+    # If child module didn't execute @return, create error block instead of returning full context
+    if not explicit_return:
+        # Create error block for missing @return
+        error_content = "# Error in module\n\nError - no @return result\n"
+        error_ast = AST(error_content)
+        run_result = error_ast
+
     if target_block_id:
         perform_ast_operation(
             run_result,
