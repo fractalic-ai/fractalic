@@ -363,7 +363,43 @@ def run_fractalic(input_file, task_file=None, param_input_user_request=None, par
         
         # Always save call tree state
         save_call_tree_state()
-        
+
+        # Save token statistics to session metadata
+        try:
+            from core.simple_token_tracker import token_tracker
+            token_stats = {
+                'total_input_tokens': token_tracker.global_input_tokens,
+                'total_output_tokens': token_tracker.global_output_tokens,
+                'total_tokens': token_tracker.global_input_tokens + token_tracker.global_output_tokens,
+                'total_cost': token_tracker.global_cost,
+                'files': {}
+            }
+
+            # Add per-file stats
+            for file_key, stats in token_tracker.filestats.items():
+                token_stats['files'][file_key] = {
+                    'input_tokens': stats['file_input_tokens'],
+                    'output_tokens': stats['file_output_tokens'],
+                    'cost': stats.get('file_cost', 0.0),
+                    'calls_count': len(stats['calls'])
+                }
+
+            # Update session metadata with token stats
+            session_ctx = storage.get_session_context(execution_id)
+            if session_ctx and session_ctx.metadata:
+                session_ctx.metadata.token_stats = token_stats
+                # Save metadata first
+                from pathlib import Path as PathLib
+                import json
+                metadata_dir = PathLib(session_ctx.workspace_dir).parent / "metadata"
+                metadata_path = metadata_dir / "session.json"
+                with open(metadata_path, 'w', encoding='utf-8') as f:
+                    json.dump(session_ctx.metadata.to_dict(), f, indent=2)
+                # Then mark session as completed
+                storage.update_session_status(execution_id, 'completed')
+        except Exception as stats_e:
+            print(f"[WARNING] Failed to save token statistics: {stats_e}")
+
         # Determine if execution was successful
         execution_successful = (result_nodes is not None and call_tree_root is not None)
         

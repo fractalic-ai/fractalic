@@ -90,6 +90,7 @@ class SessionMetadata:
         status: Session status (running, completed, failed)
         initial_file: Initial .md file that started the session
         settings: Copy of settings used for this session
+        token_stats: Token usage and cost statistics for the session
         extra: Additional metadata fields
     """
     execution_id: str
@@ -100,6 +101,7 @@ class SessionMetadata:
     status: str = "running"
     initial_file: Optional[str] = None
     settings: Optional[Dict[str, Any]] = None
+    token_stats: Optional[Dict[str, Any]] = None
     extra: Dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> Dict[str, Any]:
@@ -113,6 +115,7 @@ class SessionMetadata:
             'status': self.status,
             'initial_file': self.initial_file,
             'settings': self.settings,
+            'token_stats': self.token_stats,
             'extra': self.extra,
         }
 
@@ -128,6 +131,7 @@ class SessionMetadata:
             status=data.get('status', 'running'),
             initial_file=data.get('initial_file'),
             settings=data.get('settings'),
+            token_stats=data.get('token_stats'),
             extra=data.get('extra', {}),
         )
 

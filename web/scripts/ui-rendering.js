@@ -185,11 +185,35 @@ export class UIRenderer {
         const outputTokens = (data.output_tokens || 0).toLocaleString();
         const totalTokens = (data.input_tokens + data.output_tokens || 0).toLocaleString();
 
+        // Extract cost information
+        const responseCost = data.response_cost || 0;
+        const inputCost = data.input_cost || 0;
+        const outputCost = data.output_cost || 0;
+        const toolUsageCost = data.tool_usage_cost || 0;
+
         let headerIcon = this.createSVGIcon('chart', 14, '#d7a558');
         let headerText = 'Token Usage';
         if (isSummary) {
             headerIcon = this.createSVGIcon('trendingUp', 14, '#6a9955');
             headerText = 'File Summary';
+        }
+
+        // Format cost display
+        let costHtml = '';
+        if (responseCost > 0) {
+            if (isSummary) {
+                // For summary, show total cost only (no breakdown since we aggregate multiple calls)
+                costHtml = `<div style="margin-top: 4px; color: #10b981; font-weight: 500;">${isSummary ? 'File ' : ''}Cost: <strong>$${responseCost.toFixed(6)}</strong></div>`;
+            } else {
+                // For individual calls, show cost breakdown
+                const inputCostStr = inputCost > 0 ? `$${inputCost.toFixed(6)}` : '$0';
+                const outputCostStr = outputCost > 0 ? `$${outputCost.toFixed(6)}` : '$0';
+                costHtml = `<div style="margin-top: 4px; color: #10b981; font-weight: 500;">Cost: ${inputCostStr} / ${outputCostStr}`;
+                if (toolUsageCost > 0) {
+                    costHtml += ` [tool: $${toolUsageCost.toFixed(6)}]`;
+                }
+                costHtml += ` = <strong>$${responseCost.toFixed(6)}</strong></div>`;
+            }
         }
 
         // For summary, show file totals AND global session totals
@@ -216,6 +240,7 @@ export class UIRenderer {
                 <div style="margin-bottom: 2px; color: rgba(3, 7, 61, 0.6);">${isSummary ? 'File ' : ''}Input: <strong style="color: #03073D;">${inputTokens}</strong></div>
                 <div style="margin-bottom: 2px; color: rgba(3, 7, 61, 0.6);">${isSummary ? 'File ' : ''}Output: <strong style="color: #03073D;">${outputTokens}</strong></div>
                 <div style="margin-top: 4px; color: #4A54F5; font-weight: 500;">${isSummary ? 'File ' : ''}Total: <strong>${totalTokens}</strong></div>
+                ${costHtml}
                 ${summaryHtml}
             </div>
         `;
@@ -724,6 +749,7 @@ export class UIRenderer {
 
         const totalInput = bubbleRefs.totalTokens.input;
         const totalOutput = bubbleRefs.totalTokens.output;
+        const totalCost = bubbleRefs.totalTokens.cost || 0;
 
         if (totalInput === 0 && totalOutput === 0) {
     // No tokens yet, keep hidden
@@ -742,9 +768,18 @@ export class UIRenderer {
         const inputStr = formatNum(totalInput);
         const outputStr = formatNum(totalOutput);
 
-        bubbleRefs.tokenCounter.textContent = `🎯 ${inputStr}/${outputStr}`;
+        // Add cost to display if available
+        let displayText = `🎯 ${inputStr}/${outputStr}`;
+        let tooltipText = `Token usage - Input: ${totalInput.toLocaleString()} / Output: ${totalOutput.toLocaleString()}`;
+
+        if (totalCost > 0) {
+            displayText += ` 💰$${totalCost.toFixed(6)}`;
+            tooltipText += ` | Cost: $${totalCost.toFixed(6)}`;
+        }
+
+        bubbleRefs.tokenCounter.textContent = displayText;
         bubbleRefs.tokenCounter.style.display = 'block';
-        bubbleRefs.tokenCounter.title = `Token usage - Input: ${totalInput.toLocaleString()} / Output: ${totalOutput.toLocaleString()}`;
+        bubbleRefs.tokenCounter.title = tooltipText;
     }
 
     // ========== EXECUTION MESSAGE HANDLING ==========

@@ -534,7 +534,19 @@ def process_llm(ast: AST, current_node: Node, call_tree_node=None, committed_fil
         if isinstance(response, dict) and 'usage' in response and response['usage']:
             # Get source file context for tracking
             source_file = getattr(ast, 'source_file', None) or getattr(ast, 'filename', None) or 'unknown'
-            
+
+            # Get cost information from token_tracker
+            from core.simple_token_tracker import token_tracker
+            cost_info = {}
+            last_call_stats = token_tracker.get_last_call_stats(source_file)
+            if last_call_stats:
+                cost_info = {
+                    'response_cost': last_call_stats.get('response_cost', 0.0),
+                    'input_cost': last_call_stats.get('input_cost', 0.0),
+                    'output_cost': last_call_stats.get('output_cost', 0.0),
+                    'tool_usage_cost': last_call_stats.get('tool_usage_cost', 0.0),
+                }
+
             # Store usage data in node for trace files
             current_node.token_usage = {
                 'usage': response['usage'],
@@ -542,7 +554,8 @@ def process_llm(ast: AST, current_node: Node, call_tree_node=None, committed_fil
                 'operation_id': f"llm_{current_node.id}",
                 'operation_type': "llm_call",
                 'source_file': source_file,
-                'timestamp': time.time()
+                'timestamp': time.time(),
+                'cost': cost_info  # Add cost information
             }
             
             # Token tracking is handled by the OpenAI client in real-time
@@ -643,7 +656,14 @@ def process_llm(ast: AST, current_node: Node, call_tree_node=None, committed_fil
                      total_input=global_stats['global_input_tokens'],
                      total_output=global_stats['global_output_tokens'],
                      source_file=source_file,
-                     is_summary=True)
+                     is_summary=True,
+                     # Add cost information for summary
+                     response_cost=file_stats.get('file_cost', 0.0),
+                     # Note: For summary, we don't have per-call breakdown, so we pass file total as response_cost
+                     # Frontend can display it as total cost for the file
+                     input_cost=0.0,
+                     output_cost=0.0,
+                     tool_usage_cost=0.0)
 
     except Exception as e:
         # Restore original API key on error

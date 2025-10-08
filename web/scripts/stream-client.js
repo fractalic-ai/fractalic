@@ -307,21 +307,38 @@ export class StreamClient {
                         const inputTokens = data.input_tokens || 0;
                         const outputTokens = data.output_tokens || 0;
 
+                        // Extract cost information
+                        const responseCost = data.response_cost || 0.0;
+                        const inputCost = data.input_cost || 0.0;
+                        const outputCost = data.output_cost || 0.0;
+                        const toolUsageCost = data.tool_usage_cost || 0.0;
+
+                        // Initialize cost tracking if not present
+                        if (!bubbleRefs.totalTokens.cost) {
+                            bubbleRefs.totalTokens.cost = 0.0;
+                        }
+
                         // For summary events, SET totals (already cumulative from backend)
                         // For non-summary events, ACCUMULATE
                         if (isSummary) {
                             bubbleRefs.totalTokens.input = inputTokens;
                             bubbleRefs.totalTokens.output = outputTokens;
+                            bubbleRefs.totalTokens.cost = responseCost;
                         } else {
                             bubbleRefs.totalTokens.input += inputTokens;
                             bubbleRefs.totalTokens.output += outputTokens;
+                            bubbleRefs.totalTokens.cost += responseCost;
                         }
 
                         // Store block-level stats if block_id provided
                         if (blockId) {
                             bubbleRefs.blockTokens.set(blockId, {
                                 input: inputTokens,
-                                output: outputTokens
+                                output: outputTokens,
+                                inputCost: inputCost,
+                                outputCost: outputCost,
+                                toolUsageCost: toolUsageCost,
+                                totalCost: responseCost
                             });
 
                             // Add inline token block in Inspect mode with timestamp for chronological ordering
@@ -332,6 +349,24 @@ export class StreamClient {
                             const modelName = data.model || 'unknown';
                             const sourceFile = data.source_file || '';
 
+                            // Format cost display (similar to terminal format: +176 ($0.000044) / +187 ($0.000374))
+                            let costDisplay = '';
+                            if (responseCost > 0) {
+                                if (isSummary) {
+                                    // For summary, show total cost only (no breakdown)
+                                    costDisplay = ` | Cost: $${responseCost.toFixed(6)}`;
+                                } else {
+                                    // For individual calls, show cost breakdown
+                                    const inputCostStr = inputCost > 0 ? `$${inputCost.toFixed(6)}` : '$0';
+                                    const outputCostStr = outputCost > 0 ? `$${outputCost.toFixed(6)}` : '$0';
+                                    costDisplay = ` | Cost: ${inputCostStr} / ${outputCostStr}`;
+                                    if (toolUsageCost > 0) {
+                                        costDisplay += ` [tool: $${toolUsageCost.toFixed(6)}]`;
+                                    }
+                                    costDisplay += ` = $${responseCost.toFixed(6)}`;
+                                }
+                            }
+
                             const tokenEventHtml = `
                                 <div style="font-weight: 500; margin-bottom: 4px; display: flex; align-items: center; gap: 6px;">
                                     ${chartIcon}
@@ -339,7 +374,7 @@ export class StreamClient {
                                 </div>
                                 <div style="font-size: 11px; color: #a0a8b2; font-family: monospace;">
                                     ${isSummary && sourceFile ? `File: ${sourceFile}<br/>` : ''}
-                                    ${isSummary ? 'Total ' : ''}${!isSummary ? `Model: ${modelName} | ` : ''}Input: ${inputStr} | ${isSummary ? 'Total ' : ''}Output: ${outputStr} | Total: ${totalStr}
+                                    ${isSummary ? 'Total ' : ''}${!isSummary ? `Model: ${modelName} | ` : ''}Input: ${inputStr} | ${isSummary ? 'Total ' : ''}Output: ${outputStr} | Total: ${totalStr}${costDisplay}
                                 </div>
                             `;
 

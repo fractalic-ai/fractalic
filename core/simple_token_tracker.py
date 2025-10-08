@@ -156,38 +156,43 @@ class SimpleTokenTracker:
         fcost = stats["file_cost"]
         schema_part = f" +schema {schema_adjustment}" if schema_adjustment > 0 else ""
 
-        # Format cost display
+        # Format cost display with improved readability
         if response_cost > 0:
-            cost_breakdown = ""
-            if input_cost > 0 or output_cost > 0:
-                cost_breakdown = f" (+in: ${input_cost:.6f}, +out: ${output_cost:.6f}"
-                if tool_usage_cost > 0:
-                    cost_breakdown += f", +tool: ${tool_usage_cost:.6f}"
-                cost_breakdown += ")"
-            cost_display = f" | ${response_cost:.6f}{cost_breakdown}"
+            # Format individual token costs
+            in_cost_str = f"${input_cost:.6f}" if input_cost > 0 else "$0"
+            out_cost_str = f"${output_cost:.6f}" if output_cost > 0 else "$0"
+
+            # Build token display with inline costs
+            token_display = f"+{delta_in}{schema_part} ({in_cost_str}) / +{delta_out} ({out_cost_str})"
+
+            # Add tool cost if present
+            if tool_usage_cost > 0:
+                token_display += f" [tool: ${tool_usage_cost:.6f}]"
+
             file_cost_display = f" | ${fcost:.6f}"
             session_cost_display = f" | ${self.global_cost:.6f}"
         else:
-            cost_display = ""
+            token_display = f"+{delta_in}{schema_part}/+{delta_out}"
             file_cost_display = ""
             session_cost_display = ""
 
         print(
-            f"\033[90mTOKENS +in/+out: +{delta_in}{schema_part}/+{delta_out}{cost_display} | "
+            f"\033[90mTOKENS +in/+out: {token_display} | "
             f"file total: {fin}/{fout}{file_cost_display} | "
             f"session total: {self.global_input_tokens}/{self.global_output_tokens}{session_cost_display} | "
             f"file: {file_key} | model: {model}\033[0m"
         )
 
     # -------- summaries / getters --------
-    def get_file_stats(self, filename: str) -> Dict[str, int]:
+    def get_file_stats(self, filename: str) -> Dict[str, Any]:
         file_key = self._current_file_key(filename)
         stats = self.filestats.get(file_key)
         if not stats:
-            return {"file_input_tokens": 0, "file_output_tokens": 0}
+            return {"file_input_tokens": 0, "file_output_tokens": 0, "file_cost": 0.0}
         return {
             "file_input_tokens": stats["file_input_tokens"],
             "file_output_tokens": stats["file_output_tokens"],
+            "file_cost": stats.get("file_cost", 0.0),
         }
 
     def get_all_file_stats(self) -> Dict[str, Dict[str, Any]]:
@@ -200,10 +205,11 @@ class SimpleTokenTracker:
             }
         return out
 
-    def get_global_stats(self) -> Dict[str, int]:
+    def get_global_stats(self) -> Dict[str, Any]:
         return {
             "global_input_tokens": self.global_input_tokens,
             "global_output_tokens": self.global_output_tokens,
+            "global_cost": self.global_cost,
         }
 
     def print_session_summary(self) -> None:
@@ -214,13 +220,23 @@ class SimpleTokenTracker:
             fin = stats["file_input_tokens"]
             fout = stats["file_output_tokens"]
             total = fin + fout
-            print(f"  📄 {file_key}: in {fin:,} | out {fout:,} | total {total:,} | calls {len(stats['calls'])}")
+            fcost = stats.get("file_cost", 0.0)
+
+            # Format cost display
+            cost_str = f" | cost ${fcost:.6f}" if fcost > 0 else ""
+            print(f"  📄 {file_key}: in {fin:,} | out {fout:,} | total {total:,}{cost_str} | calls {len(stats['calls'])}")
+
         print("\nSession totals:")
         sin = self.global_input_tokens
         sout = self.global_output_tokens
         print(f"  📊 Input:  {sin:,}")
         print(f"  📊 Output: {sout:,}")
         print(f"  📊 Total:  {sin + sout:,}")
+
+        # Add session cost if available
+        if self.global_cost > 0:
+            print(f"  💰 Cost:   ${self.global_cost:.6f}")
+
         print("=" * 60)
 
     # -------- legacy compatibility (thin wrappers) --------
