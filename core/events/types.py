@@ -60,7 +60,9 @@ class EventType(str, Enum):
 
     # ===== Token usage tracking =====
     # Payload: input_tokens (int), output_tokens (int), model (str),
-    #          block_id (Optional[str]), file_path (Optional[str])
+    #          block_id (Optional[str]), file_path (Optional[str]),
+    #          response_cost (Optional[float]), input_cost (Optional[float]),
+    #          output_cost (Optional[float]), tool_usage_cost (Optional[float])
     TOKEN_USAGE = "token_usage"
 
     # ===== Block processing =====

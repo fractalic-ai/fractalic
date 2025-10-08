@@ -34,6 +34,11 @@ class CallRecord:
     total_output_seen: int
     timestamp: str
     schema_adjustment: int = 0  # extra prompt tokens added for tool schema not billed/reported
+    # Cost tracking (from LiteLLM)
+    response_cost: float = 0.0  # total cost in USD
+    input_cost: float = 0.0  # input/prompt cost in USD
+    output_cost: float = 0.0  # output/completion cost in USD
+    tool_usage_cost: float = 0.0  # tool usage cost in USD
 
 
 class SimpleTokenTracker:
@@ -41,6 +46,7 @@ class SimpleTokenTracker:
         self.session_start = datetime.utcnow()
         self.global_input_tokens = 0
         self.global_output_tokens = 0
+        self.global_cost = 0.0  # Total session cost in USD
         self.filestats: Dict[str, Dict[str, Any]] = {}
         self.file_run_counters: Dict[str, int] = {}
         self.current_model = None  # Updated by caller (openai client)
@@ -54,18 +60,35 @@ class SimpleTokenTracker:
         self.filestats[file_key] = {
             "file_input_tokens": 0,            # aggregated deltas
             "file_output_tokens": 0,           # aggregated deltas
+            "file_cost": 0.0,                  # aggregated cost in USD
             "last_seen_input": 0,              # last cumulative reported
             "last_seen_output": 0,             # last cumulative reported
             "calls": []  # list[CallRecord]
         }
 
-    def record_call(self, filename: str, model: str, reported_input_tokens: int, reported_output_tokens: int, *, schema_adjustment: int = 0) -> None:
+    def record_call(
+        self,
+        filename: str,
+        model: str,
+        reported_input_tokens: int,
+        reported_output_tokens: int,
+        *,
+        schema_adjustment: int = 0,
+        response_cost: float = 0.0,
+        input_cost: float = 0.0,
+        output_cost: float = 0.0,
+        tool_usage_cost: float = 0.0
+    ) -> None:
         """Record an LLM API call.
 
         reported_* values may be per-call or cumulative; we convert to delta
         relative to last seen per file run.
         schema_adjustment: additional prompt tokens attributable to tool/function schema
                             that the provider did not report but we include for realistic context size.
+        response_cost: total cost in USD (from LiteLLM)
+        input_cost: input/prompt cost in USD (from LiteLLM cost_breakdown)
+        output_cost: output/completion cost in USD (from LiteLLM cost_breakdown)
+        tool_usage_cost: tool usage cost in USD (from LiteLLM cost_breakdown)
         """
         if filename not in self.file_run_counters:
             self.start_file(filename)
@@ -104,6 +127,11 @@ class SimpleTokenTracker:
             stats["file_output_tokens"] += delta_out
             self.global_output_tokens += delta_out
 
+        # Update cost aggregates
+        if response_cost > 0:
+            stats["file_cost"] += response_cost
+            self.global_cost += response_cost
+
         call_index = len(stats["calls"]) + 1
         stats["calls"].append(
             CallRecord(
@@ -114,16 +142,41 @@ class SimpleTokenTracker:
                 total_input_seen=reported_input_tokens,
                 total_output_seen=reported_output_tokens,
                 timestamp=datetime.utcnow().isoformat(),
-                schema_adjustment=schema_adjustment
+                schema_adjustment=schema_adjustment,
+                response_cost=response_cost,
+                input_cost=input_cost,
+                output_cost=output_cost,
+                tool_usage_cost=tool_usage_cost
             )
         )
 
-        # Immediate compact print (show deltas)
+        # Immediate compact print (show deltas with cost)
         fin = stats["file_input_tokens"]
         fout = stats["file_output_tokens"]
+        fcost = stats["file_cost"]
         schema_part = f" +schema {schema_adjustment}" if schema_adjustment > 0 else ""
+
+        # Format cost display
+        if response_cost > 0:
+            cost_breakdown = ""
+            if input_cost > 0 or output_cost > 0:
+                cost_breakdown = f" (+in: ${input_cost:.6f}, +out: ${output_cost:.6f}"
+                if tool_usage_cost > 0:
+                    cost_breakdown += f", +tool: ${tool_usage_cost:.6f}"
+                cost_breakdown += ")"
+            cost_display = f" | ${response_cost:.6f}{cost_breakdown}"
+            file_cost_display = f" | ${fcost:.6f}"
+            session_cost_display = f" | ${self.global_cost:.6f}"
+        else:
+            cost_display = ""
+            file_cost_display = ""
+            session_cost_display = ""
+
         print(
-            f"\033[90mTOKENS +in/+out: +{delta_in}{schema_part}/+{delta_out} | file total: {fin}/{fout} | session total: {self.global_input_tokens}/{self.global_output_tokens} | file: {file_key} | model: {model}\033[0m"
+            f"\033[90mTOKENS +in/+out: +{delta_in}{schema_part}/+{delta_out}{cost_display} | "
+            f"file total: {fin}/{fout}{file_cost_display} | "
+            f"session total: {self.global_input_tokens}/{self.global_output_tokens}{session_cost_display} | "
+            f"file: {file_key} | model: {model}\033[0m"
         )
 
     # -------- summaries / getters --------
@@ -190,7 +243,8 @@ class SimpleTokenTracker:
     def get_last_call_stats(self, filename: str = None) -> dict | None:
         """Get statistics for the last LLM call.
 
-        Returns dict with: model, input_tokens, output_tokens, total_input, total_output
+        Returns dict with: model, input_tokens, output_tokens, total_input, total_output,
+                          response_cost, input_cost, output_cost, tool_usage_cost
         or None if no calls recorded.
         """
         if filename:
@@ -203,7 +257,11 @@ class SimpleTokenTracker:
                     "output_tokens": last_call.output_tokens,
                     "total_input": last_call.total_input_seen,
                     "total_output": last_call.total_output_seen,
-                    "timestamp": last_call.timestamp
+                    "timestamp": last_call.timestamp,
+                    "response_cost": last_call.response_cost,
+                    "input_cost": last_call.input_cost,
+                    "output_cost": last_call.output_cost,
+                    "tool_usage_cost": last_call.tool_usage_cost
                 }
 
         # If no filename, try to get the most recent call from any file
@@ -219,7 +277,11 @@ class SimpleTokenTracker:
                 "output_tokens": last_call.output_tokens,
                 "total_input": last_call.total_input_seen,
                 "total_output": last_call.total_output_seen,
-                "timestamp": last_call.timestamp
+                "timestamp": last_call.timestamp,
+                "response_cost": last_call.response_cost,
+                "input_cost": last_call.input_cost,
+                "output_cost": last_call.output_cost,
+                "tool_usage_cost": last_call.tool_usage_cost
             }
 
         return None

@@ -32,10 +32,25 @@ from core.events.types import EventType                # Event types
 _TOOL_SCHEMA_TOKEN_CACHE = {}
 
 # Custom callback for token and cost tracking
-# NOTE: Heuristic tool-schema augmentation removed per request – now records raw LiteLLM numbers only.
+# Extracts detailed cost breakdown from LiteLLM's StandardLoggingPayload
 def fractalic_cost_callback(kwargs, completion_response, start_time, end_time):
     try:
+        # Extract total cost
         response_cost = kwargs.get("response_cost") or 0.0
+
+        # Extract detailed cost breakdown from StandardLoggingPayload
+        input_cost = 0.0
+        output_cost = 0.0
+        tool_usage_cost = 0.0
+
+        standard_logging_object = kwargs.get("standard_logging_object")
+        if standard_logging_object:
+            cost_breakdown = standard_logging_object.get("cost_breakdown", {})
+            if cost_breakdown:
+                input_cost = cost_breakdown.get("input_cost", 0.0)
+                output_cost = cost_breakdown.get("output_cost", 0.0)
+                tool_usage_cost = cost_breakdown.get("tool_usage_cost", 0.0)
+
         usage = getattr(completion_response, 'usage', None)
         if not usage:
             return
@@ -58,13 +73,17 @@ def fractalic_cost_callback(kwargs, completion_response, start_time, end_time):
         model = kwargs.get("model", "unknown")
         token_tracker.current_model = model
 
-        # Record raw numbers (no heuristic adjustments)
-        token_tracker.record_llm_call_with_cost_silent(
+        # Record with detailed cost breakdown
+        token_tracker.record_call(
             filename,
+            model,
             reported_input_tokens,
             reported_output_tokens,
-            turn_info,
-            response_cost
+            schema_adjustment=0,
+            response_cost=response_cost,
+            input_cost=input_cost,
+            output_cost=output_cost,
+            tool_usage_cost=tool_usage_cost
         )
     except Exception:
         pass
@@ -898,7 +917,7 @@ class liteclient:
                     # LLM finished conversation naturally - display tokens now
                     token_tracker.print_last_call_status()
 
-                    # Emit token usage event
+                    # Emit token usage event with cost information
                     token_stats = token_tracker.get_last_call_stats()
                     if token_stats:
                         emit_event(EventType.TOKEN_USAGE,
@@ -907,7 +926,11 @@ class liteclient:
                                  input_tokens=token_stats["input_tokens"],
                                  output_tokens=token_stats["output_tokens"],
                                  total_input=token_stats["total_input"],
-                                 total_output=token_stats["total_output"])
+                                 total_output=token_stats["total_output"],
+                                 response_cost=token_stats.get("response_cost", 0.0),
+                                 input_cost=token_stats.get("input_cost", 0.0),
+                                 output_cost=token_stats.get("output_cost", 0.0),
+                                 tool_usage_cost=token_stats.get("tool_usage_cost", 0.0))
                     break
 
                 # ---- execute tool calls ----
@@ -952,7 +975,7 @@ class liteclient:
                         # Display token usage after tool execution completes but before showing response
                         token_tracker.print_last_call_status()
 
-                        # Emit token usage event
+                        # Emit token usage event with cost information
                         token_stats = token_tracker.get_last_call_stats()
                         if token_stats:
                             emit_event(EventType.TOKEN_USAGE,
@@ -961,7 +984,11 @@ class liteclient:
                                      input_tokens=token_stats["input_tokens"],
                                      output_tokens=token_stats["output_tokens"],
                                      total_input=token_stats["total_input"],
-                                     total_output=token_stats["total_output"])
+                                     total_output=token_stats["total_output"],
+                                     response_cost=token_stats.get("response_cost", 0.0),
+                                     input_cost=token_stats.get("input_cost", 0.0),
+                                     output_cost=token_stats.get("output_cost", 0.0),
+                                     tool_usage_cost=token_stats.get("tool_usage_cost", 0.0))
 
                         # Format response for display and context
                         if res and (res.strip().startswith(('{', '['))):
