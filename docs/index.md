@@ -28,7 +28,7 @@ features:
   - title: Progressive Elaboration
     details: Start simple and grow structure without refactoring. Add complexity only when needed.
   - title: Transparent Execution
-    details: See exactly how your document evolves. Full execution traceability with git-backed sessions.
+    details: See exactly how your document evolves. Full execution traceability with isolated session storage.
 ---
 
 ## What is Fractalic?

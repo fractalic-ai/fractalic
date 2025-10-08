@@ -17,8 +17,7 @@ from core.operations.goto_op import process_goto
 from core.operations.shell_op import process_shell
 from core.operations.return_op import process_return
 from core.operations.call_tree import CallTreeNode
-from core.git import ensure_git_repo, create_session_branch, commit_changes  # Legacy compatibility
-from core.storage import get_session_storage  # NEW: Storage API
+from core.storage import get_session_storage
 from core.simple_token_tracker import token_tracker
 from rich import print
 from rich.console import Console
@@ -83,51 +82,24 @@ def run(filename: str, param_node: Optional[Union[Node, AST]] = None, create_new
         # Keep paths session_cwd in sync with the currently executing file directory
         set_session_cwd(file_dir)
 
-        # Set branch_name based on mode
-        if execution_id:
-            # Storage mode: Use execution_id as branch name
-            branch_name = execution_id
-        elif create_new_branch and not ephemeral:
-            # Legacy Git mode: Create new branch
-            ensure_git_repo(base_dir)
-            branch_name = create_session_branch(base_dir, "Testing-git-operations")
-            console.print(f"[light_green]✓[/light_green] git. new branch created: [cyan]{branch_name}[/cyan]")
+        # Set branch_name to execution_id (always set by fractalic.py)
+        branch_name = execution_id
 
         relative_file_path = os.path.relpath(abs_path, base_dir)
 
         if not os.path.exists(local_file_name):
             raise FileNotFoundError(f"File not found: {local_file_name}")
 
-        # Handle file hashing (legacy Git mode or storage mode)
+        # Generate content hash for file
         if not ephemeral:
-            if execution_id:
-                # Storage mode: Generate content hash without Git commit
-                with open(local_file_name, 'r', encoding='utf-8') as f:
-                    file_content = f.read()
-                # Use simple hash for md_commit_hash (legacy field compatibility)
-                import hashlib
-                md_commit_hash = hashlib.sha256(file_content.encode('utf-8')).hexdigest()[:40]
-                file_commit_hashes[relative_file_path] = md_commit_hash
-            else:
-                # Legacy Git mode
-                if relative_file_path not in committed_files:
-                    try:
-                        md_commit_hash = commit_changes(
-                            base_dir,
-                            "Operation [@run] execution start",
-                            [local_file_name],
-                            p_parent_filename,
-                            p_parent_operation
-                        )
-                        committed_files.add(relative_file_path)
-                        file_commit_hashes[relative_file_path] = md_commit_hash
-                    except Exception as e:
-                        print(f"[ERROR runner.py] Error committing file {relative_file_path}: {str(e)}")
-                        raise
-                else:
-                    md_commit_hash = file_commit_hashes[relative_file_path]
+            with open(local_file_name, 'r', encoding='utf-8') as f:
+                file_content = f.read()
+            # Generate hash for tracking file version
+            import hashlib
+            md_commit_hash = hashlib.sha256(file_content.encode('utf-8')).hexdigest()[:40]
+            file_commit_hashes[relative_file_path] = md_commit_hash
         else:
-            md_commit_hash = None  # No commit in ephemeral mode
+            md_commit_hash = None  # No hash in ephemeral mode
 
         # RESTORING LOGIC  
         # Process the AST
@@ -321,32 +293,6 @@ def run(filename: str, param_node: Optional[Union[Node, AST]] = None, create_new
                             new_node.ctx_commit_hash = ctx_hash
                             new_node.trc_file = relative_trc_path
                             new_node.trc_commit_hash = trc_hash
-                        else:
-                            # Legacy Git mode
-                            output_file = os.path.join(file_dir, ctx_filename)
-                            trc_output_file = os.path.join(file_dir, trc_filename)
-
-                            relative_ctx_path = get_relative_path(base_dir, output_file)
-                            relative_trc_path = get_relative_path(base_dir, trc_output_file)
-
-                            render_ast_to_markdown(ast, output_file)
-                            render_ast_to_trace(ast, trc_output_file)
-
-                            ctx_commit_hash = commit_changes(
-                                base_dir,
-                                "@return operation",
-                                [local_file_name, ctx_filename, trc_filename],
-                                p_parent_filename,
-                                p_parent_operation
-                            )
-
-                            console.print(f"[light_green]✓[/light_green] git. context commited: [light_green]{ctx_filename}[/light_green]")
-                            console.print(f"[light_green]✓[/light_green] git. trace file commited: [light_green]{trc_filename}[/light_green]")
-
-                            new_node.ctx_file = relative_ctx_path
-                            new_node.ctx_commit_hash = ctx_commit_hash
-                            new_node.trc_file = relative_trc_path
-                            new_node.trc_commit_hash = ctx_commit_hash
 
                         # Set explicit return flag to True
                         explicit_return = True
@@ -394,28 +340,6 @@ def run(filename: str, param_node: Optional[Union[Node, AST]] = None, create_new
 
             console.print(f"[light_green]✓[/light_green] storage. main context saved: [light_green]{ctx_filename}[/light_green]")
             console.print(f"[light_green]✓[/light_green] storage. trace file saved: [light_green]{trc_filename}[/light_green]")
-        else:
-            # Legacy Git mode
-            output_file = os.path.join(file_dir, ctx_filename)
-            trc_output_file = os.path.join(file_dir, trc_filename)
-
-            relative_ctx_path = os.path.relpath(output_file, base_dir)
-            relative_trc_path = os.path.relpath(trc_output_file, base_dir)
-
-            render_ast_to_markdown(ast, output_file)
-            render_ast_to_trace(ast, trc_output_file)
-
-            ctx_commit_hash = commit_changes(
-                base_dir,
-                "Final processed files",
-                [local_file_name, ctx_filename, trc_filename],
-                p_parent_filename,
-                p_parent_operation
-            )
-            trc_commit_hash = ctx_commit_hash  # Same commit hash as ctx
-
-            console.print(f"[light_green]✓[/light_green] git. main context commited: [light_green]{ctx_filename}[/light_green]")
-            console.print(f"[light_green]✓[/light_green] git. trace file commited: [light_green]{trc_filename}[/light_green]")
 
         # Update node with ctx and trc file information
         new_node.ctx_file = relative_ctx_path
@@ -493,31 +417,6 @@ def run(filename: str, param_node: Optional[Union[Node, AST]] = None, create_new
 
             console.print(f"[bright_red]✓[/bright_red] storage. context saved with exception info: [bright_red]{ctx_filename}[/bright_red]")
             console.print(f"[bright_red]✓[/bright_red] storage. trace file saved with exception info: [bright_red]{trc_filename}[/bright_red]")
-        else:
-            # Legacy Git mode or no node created
-            output_file = os.path.join(file_dir, ctx_filename)
-            trc_output_file = os.path.join(file_dir, trc_filename)
-
-            with open(output_file, 'w', encoding='utf-8') as f:
-                f.write(ctx_content)
-
-            with open(trc_output_file, 'w', encoding='utf-8') as f:
-                f.write(trc_content)
-
-            ctx_commit_hash = commit_changes(
-                base_dir,
-                "Exception caught: appended traceback",
-                [local_file_name, ctx_filename, trc_filename],
-                p_parent_filename,
-                p_parent_operation
-            )
-            trc_commit_hash = ctx_commit_hash  # Same commit hash as ctx
-
-            relative_ctx_path = get_relative_path(base_dir, output_file)
-            relative_trc_path = get_relative_path(base_dir, trc_output_file)
-
-            console.print(f"[bright_red]✓[/bright_red] git. context commited with exception info: [bright_red]{ctx_filename}[/bright_red]")
-            console.print(f"[bright_red]✓[/bright_red] git. trace file commited with exception info: [bright_red]{trc_filename}[/bright_red]")
 
         # Make sure new_node references updated ctx_file and trc_file data (only if it exists)
         if 'new_node' in locals():

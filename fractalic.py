@@ -22,7 +22,6 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict
 
-from core.git import commit_changes, ensure_git_repo
 from core.ast_md.parser import print_parsed_structure
 from core.utils import parse_file, load_settings
 from core.config import Config
@@ -351,53 +350,11 @@ def run_fractalic(input_file, task_file=None, param_input_user_request=None, par
                     )
                     call_tree_content = minimal_call_tree.to_json()
 
-                if execution_id:
-                    # Storage mode: Save call tree via storage API
-                    import json
-                    call_tree_dict = json.loads(call_tree_content)
-                    storage.save_call_tree(execution_id, call_tree_dict)
-                    print(f"[INFO] Call tree saved to storage: call_tree.json")
-                else:
-                    # Legacy Git mode: Write file and commit
-                    with open(call_tree_path, 'w', encoding='utf-8') as json_file:
-                        json_file.write(call_tree_content)
-
-                    # Check for any uncommitted ctx/trc files and include them in commit
-                    ctx_file_path = None
-                    trc_file_path = None
-                    if ctx_file:
-                        ctx_file_path = os.path.join('.', os.path.basename(ctx_file))
-                        if os.path.exists(ctx_file_path):
-                            files_to_commit.append(ctx_file_path)
-
-                    if trc_file:
-                        trc_file_path = os.path.join('.', os.path.basename(trc_file))
-                        if os.path.exists(trc_file_path):
-                            files_to_commit.append(trc_file_path)
-
-                    # Also check for ctx/trc files based on input filename
-                    base_name = os.path.splitext(input_file_basename)[0]
-                    potential_ctx = f"{base_name}.ctx"
-                    potential_trc = f"{base_name}.trc"
-
-                    if os.path.exists(potential_ctx) and potential_ctx not in files_to_commit:
-                        files_to_commit.append(potential_ctx)
-
-                    if os.path.exists(potential_trc) and potential_trc not in files_to_commit:
-                        files_to_commit.append(potential_trc)
-
-                    # Commit all relevant files
-                    try:
-                        md_commit_hash = commit_changes(
-                            '.',
-                            "Saving call_tree.json with execution state and any pending files",
-                            files_to_commit,
-                            None,
-                            None
-                        )
-                        print(f"[INFO] Call tree and files saved and committed: {', '.join(files_to_commit)}")
-                    except Exception as commit_e:
-                        print(f"[WARNING] Files saved but commit failed: {commit_e}")
+                # Save call tree via storage API
+                import json
+                call_tree_dict = json.loads(call_tree_content)
+                storage.save_call_tree(execution_id, call_tree_dict)
+                print(f"[INFO] Call tree saved to storage: call_tree.json")
 
             except Exception as save_e:
                 print(f"[ERROR] Failed to save call tree: {save_e}")
@@ -619,37 +576,6 @@ def main():
         # Check if this is a linting error and try to get context information
         if e.__class__.__name__ == 'FractalicLintError':
             print(f"[ERROR fractalic.py] Linting failed: {str(e)}")
-            
-            # Try to extract any context information that might have been generated
-            # Look for recently created branch and context files
-            try:
-                from core.git import get_current_git_branch, get_latest_commit_hash
-                import glob
-                
-                # Get current branch name (should be the test branch created for this run)
-                current_branch = get_current_git_branch()
-                
-                # Look for context files that were just created
-                ctx_files = glob.glob("*.ctx")
-                if ctx_files:
-                    # Get the most recent context file
-                    latest_ctx = max(ctx_files, key=os.path.getctime)
-                    ctx_hash = get_latest_commit_hash()
-                    
-                    print(f"[EventMessage: Root-Context-Saved] ID: {current_branch}, {ctx_hash}")
-                    print(f"[EventMessage: Execution-Mode] Linting validation failed")
-                    
-                    # Check if context file contains linting details
-                    if os.path.exists(latest_ctx):
-                        with open(latest_ctx, 'r', encoding='utf-8') as f:
-                            ctx_content = f.read()
-                            if "Linting Error Details" in ctx_content:
-                                print(f"[EventMessage: Linting-Errors] Details saved to {latest_ctx}")
-                
-            except Exception as ctx_e:
-                # If we can't get context info, just continue with basic error reporting
-                print(f"[DEBUG] Could not extract context information: {ctx_e}")
-            
             sys.exit(1)
         
         exc_type, exc_value, exc_traceback = sys.exc_info()

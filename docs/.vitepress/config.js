@@ -88,7 +88,7 @@ export default defineConfig({
             { text: 'Shell Integration Patterns', link: '/shell-integration-patterns' },
             { text: 'Agent & Modular Workflows', link: '/agent-modular-workflows' },
             { text: 'MCP Integration', link: '/mcp-integration' },
-            { text: 'Git-Backed Sessions', link: '/git-backed-sessions' }
+            { text: 'Session Storage & Versioning', link: '/session-storage' }
           ]
         },
         {
