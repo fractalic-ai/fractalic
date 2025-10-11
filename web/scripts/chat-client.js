@@ -5,7 +5,7 @@
 import { FileBrowser } from './file-browser.js?v=6';
 import { UIRenderer } from './ui-rendering.js?v=6';
 import { StreamClient } from './stream-client.js?v=6';
-import { formatTime } from './utils.js?v=6';
+import { createSVGIcon, formatTime } from './utils.js?v=6';
 
 export class FractalicChatClient {
     constructor() {
@@ -185,6 +185,426 @@ export class FractalicChatClient {
         if (useHistory) {
             this.uiRenderer.appendConversationEntry('user', text);
         }
+    }
+
+    handleStreamEvent(data, receivedAtIso) {
+        const receivedIso = receivedAtIso || new Date().toISOString();
+        const now = formatTime(receivedIso);
+        const sessionId = data.session_id || data.execution_id;
+
+        console.log('📥 Event:', data.type,
+            data.role ? `(role: ${data.role})` : '',
+            data.return_content ? '(has return_content)' : ''
+        );
+
+        switch (data.type) {
+            case 'chat_message': {
+                const isUserMessage = data.role === 'user';
+                const isAssistantMessage = data.role === 'assistant';
+                const execId = data.execution_id;
+
+                const isSystemMessage = data.content && (
+                    data.content.includes('Фракталик запущен') ||
+                    data.content.includes('Фракталик завершил') ||
+                    data.content.startsWith('⚙️') ||
+                    data.content.startsWith('✅') ||
+                    data.content.startsWith('❌')
+                );
+
+                const shouldStoreInHistory = (isUserMessage || isAssistantMessage) && !isSystemMessage;
+
+                if (isAssistantMessage) {
+                    console.log('🔍 Assistant message:',
+                        '\n  execId:', execId,
+                        '\n  hasExecBubble:', execId && this.executionBubbles.has(execId),
+                        '\n  isSystemMessage:', isSystemMessage,
+                        '\n  eventId:', data.event_id,
+                        '\n  contentPreview:', data.content ? data.content.substring(0, 100) : 'no content'
+                    );
+                }
+
+                if (isAssistantMessage && execId && this.executionBubbles.has(execId)) {
+                    const bubbleRefs = this.executionBubbles.get(execId);
+                    const placeholder = bubbleRefs.responseContent.querySelector('[data-placeholder="true"]');
+                    if (placeholder) {
+                        placeholder.remove();
+                    }
+
+                    const rendered = this.uiRenderer.renderMarkdownish(data.content);
+                    const messageDiv = document.createElement('div');
+                    messageDiv.className = 'message-content system-message';
+                    messageDiv.style.cssText = 'margin-bottom: 12px;';
+                    messageDiv.innerHTML = rendered;
+                    bubbleRefs.responseContent.appendChild(messageDiv);
+
+                    if (shouldStoreInHistory) {
+                        this.conversation.push({ role: 'assistant', content: data.content });
+                    }
+                } else {
+                    this.uiRenderer.addMessage(isUserMessage ? 'user' : 'assistant', data.content, now, {
+                        session_id: sessionId,
+                        storeHistory: shouldStoreInHistory,
+                        markdownish: isAssistantMessage
+                    });
+                }
+                break;
+            }
+
+            case 'workflow_start': {
+                const nestedExecId = data.nested_execution_id || data.execution_id;
+                const parentExecId = data.parent_execution_id;
+                const blockId = data.block_id;
+                const filePath = data.target || '';
+
+                if (!this.executionBubbles.has(nestedExecId)) {
+                    const bubbleRefs = this.uiRenderer.createExecutionBubble(
+                        nestedExecId,
+                        filePath,
+                        now,
+                        parentExecId,
+                        blockId
+                    );
+                    this.executionBubbles.set(nestedExecId, bubbleRefs);
+
+                    if (parentExecId && this.executionBubbles.has(parentExecId)) {
+                        const parentBubble = this.executionBubbles.get(parentExecId);
+                        const childMeta = {
+                            executionId: nestedExecId,
+                            blockId: blockId || null,
+                            currentLocation: 'response',
+                            savedParent: bubbleRefs.bubble.parentNode || parentBubble.responseContent,
+                            savedNextSibling: bubbleRefs.bubble.nextSibling || null,
+                            placeholderEl: null
+                        };
+                        parentBubble.childBubbles.push(childMeta);
+
+                        if (parentBubble.inspectPanel && parentBubble.inspectPanel.classList.contains('active')) {
+                            this.uiRenderer.moveChildBubblesToInspect(parentBubble, nestedExecId);
+                        }
+                    }
+                }
+                break;
+            }
+
+            case 'workflow_complete': {
+                const nestedExecId = data.nested_execution_id || data.execution_id;
+
+                if (nestedExecId && this.executionBubbles.has(nestedExecId)) {
+                    const bubbleRefs = this.executionBubbles.get(nestedExecId);
+                    const filePath = data.target || '';
+                    const fileName = filePath.split('/').pop() || filePath;
+
+                    const checkIcon = createSVGIcon('checkCircle', 16, '#83d69d');
+                    bubbleRefs.title.innerHTML = `
+                        ${checkIcon}
+                        <span>✓ Completed: ${fileName}</span>
+                        <span style="font-size: 11px; color: #83d69d; margin-left: 8px;">Done</span>
+                    `;
+                    bubbleRefs.bubble.style.borderColor = '#83d69d';
+
+                    if (data.return_content) {
+                        const existingReturnContent = bubbleRefs.responseContent.querySelector('.workflow-return-content');
+                        if (!existingReturnContent) {
+                            const returnBlock = document.createElement('div');
+                            returnBlock.className = 'workflow-return-content';
+                            returnBlock.style.cssText = `
+                                margin: 12px 0 0;
+                                font-size: 13px;
+                                color: inherit;
+                                line-height: 1.5;
+                            `;
+                            returnBlock.innerHTML = this.uiRenderer.renderMarkdownish(data.return_content);
+                            bubbleRefs.responseContent.appendChild(returnBlock);
+                        }
+                    }
+                }
+                break;
+            }
+
+            case 'workflow_error': {
+                const nestedExecId = data.nested_execution_id || data.execution_id;
+
+                if (nestedExecId && this.executionBubbles.has(nestedExecId)) {
+                    const bubbleRefs = this.executionBubbles.get(nestedExecId);
+                    const filePath = data.target || '';
+                    const fileName = filePath.split('/').pop() || filePath;
+                    const errorMessage = data.error_message || 'Unknown error';
+
+                    const errorIcon = createSVGIcon('x', 16, '#d33f3f');
+                    bubbleRefs.title.innerHTML = `
+                        ${errorIcon}
+                        <span>✗ Error: ${fileName}</span>
+                        <span style="font-size: 11px; color: #d33f3f; margin-left: 8px;">Failed</span>
+                    `;
+                    bubbleRefs.bubble.style.borderColor = '#d33f3f';
+
+                    const errorBlock = document.createElement('div');
+                    errorBlock.className = 'workflow-error-content';
+                    errorBlock.style.cssText = `
+                        margin: 8px 0;
+                        padding: 12px;
+                        background: rgba(211, 63, 63, 0.08);
+                        border: 1px solid rgba(211, 63, 63, 0.24);
+                        border-radius: 10px;
+                        font-size: 13px;
+                        color: #f28b8b;
+                    `;
+                    errorBlock.textContent = `Error: ${errorMessage}`;
+                    bubbleRefs.responseContent.appendChild(errorBlock);
+                }
+                break;
+            }
+
+            case 'execution_start': {
+                const execId = data.execution_id;
+                if (!this.executionBubbles.has(execId)) {
+                    const filePath = data.target || data.file_path || (this.selectedFile || '');
+                    const bubbleRefs = this.uiRenderer.createExecutionBubble(execId, filePath, now);
+                    this.executionBubbles.set(execId, bubbleRefs);
+                }
+                break;
+            }
+
+            case 'execution_complete': {
+                const execId = data.execution_id;
+                if (execId && this.executionBubbles.has(execId)) {
+                    const bubbleRefs = this.executionBubbles.get(execId);
+                    const checkIcon = createSVGIcon('checkCircle', 16, '#83d69d');
+                    const filePath = data.target || data.file_path || '';
+                    bubbleRefs.title.innerHTML = `
+                        ${checkIcon}
+                        <span>Completed: ${filePath}</span>
+                        <span style="font-size: 11px; color: #83d69d; margin-left: 8px;">✓ Done</span>
+                    `;
+                    bubbleRefs.bubble.style.borderColor = '#83d69d';
+                }
+                break;
+            }
+
+            case 'execution_error': {
+                const execId = data.execution_id;
+                if (execId && this.executionBubbles.has(execId)) {
+                    const bubbleRefs = this.executionBubbles.get(execId);
+                    const errorIcon = createSVGIcon('error', 16, '#d33f3f');
+                    const filePath = data.target || data.file_path || '';
+                    bubbleRefs.title.innerHTML = `
+                        ${errorIcon}
+                        <span>Error: ${filePath}</span>
+                        <span style="font-size: 11px; color: #d33f3f; margin-left: 8px;">✗ Failed</span>
+                    `;
+                    bubbleRefs.bubble.style.borderColor = '#d33f3f';
+                }
+                break;
+            }
+
+            case 'error':
+                this.uiRenderer.addMessage('error', data.message || 'Ошибка', now, { session_id: sessionId });
+                break;
+
+            case 'termination':
+            case 'stream_end':
+                this.uiRenderer.showTyping(false);
+                break;
+
+            case 'ast_update': {
+                const execId = data.execution_id;
+                if (execId && this.executionBubbles.has(execId)) {
+                    const bubbleRefs = this.executionBubbles.get(execId);
+                    this.uiRenderer.renderASTBlocks(data.blocks || [], data.operation, bubbleRefs.astContainer, bubbleRefs);
+                }
+                break;
+            }
+
+            case 'tool_call': {
+                const execId = data.execution_id;
+                if (execId && this.executionBubbles.has(execId)) {
+                    const toolIcon = createSVGIcon('tool', 14, '#4A54F5');
+                    const eventHtml = `
+                        <div style="font-weight: 500; margin-bottom: 6px; display: flex; align-items: center; gap: 6px;">
+                            ${toolIcon}
+                            <span>Tool: <strong style="color: #afcaf5;">${data.tool_name}</strong></span>
+                        </div>
+                        <div style="font-size: 11px; color: #a0a8b2; margin-bottom: 4px; font-family: monospace;">ID: ${data.tool_call_id}</div>
+                        <div style="font-family: 'Monaco', 'Menlo', monospace; font-size: 11px; white-space: pre-wrap; max-height: 150px; overflow-y: auto; background: #3c424a; padding: 8px; border-radius: 8px;">${data.arguments || '{}'}</div>
+                    `;
+                    const timestamp = data.timestamp ? data.timestamp * 1000 : Date.now();
+                    this.uiRenderer.addPendingBlockAfterActive(execId, eventHtml, timestamp);
+                }
+                break;
+            }
+
+            case 'tool_result': {
+                const execId = data.execution_id;
+                if (execId && this.executionBubbles.has(execId)) {
+                    const resultPreview = data.result && data.result.length > 200
+                        ? data.result.substring(0, 200) + '...'
+                        : data.result || '(empty)';
+                    const checkIcon = createSVGIcon('checkCircle', 14, '#83d69d');
+                    const eventHtml = `
+                        <div style="font-weight: 500; margin-bottom: 6px; display: flex; align-items: center; gap: 6px;">
+                            ${checkIcon}
+                            <span>Result: <strong style="color: #b8eec9;">${data.tool_name}</strong></span>
+                        </div>
+                        <div style="font-size: 11px; color: #a0a8b2; margin-bottom: 4px; font-family: monospace;">ID: ${data.tool_call_id}</div>
+                        <div style="font-family: 'Monaco', 'Menlo', monospace; font-size: 11px; white-space: pre-wrap; max-height: 150px; overflow-y: auto; background: #3c424a; padding: 8px; border-radius: 8px;">${resultPreview}</div>
+                    `;
+                    const timestamp = data.timestamp ? data.timestamp * 1000 : Date.now();
+                    this.uiRenderer.addPendingBlockAfterActive(execId, eventHtml, timestamp);
+                }
+                break;
+            }
+
+            case 'token_usage': {
+                const execId = data.execution_id;
+                const blockId = data.block_id;
+                const isSummary = data.is_summary === true;
+
+                if (execId && this.executionBubbles.has(execId)) {
+                    const bubbleRefs = this.executionBubbles.get(execId);
+                    const inputTokens = data.input_tokens || 0;
+                    const outputTokens = data.output_tokens || 0;
+
+                    const responseCost = data.response_cost || 0.0;
+                    const inputCost = data.input_cost || 0.0;
+                    const outputCost = data.output_cost || 0.0;
+                    const toolUsageCost = data.tool_usage_cost || 0.0;
+
+                    if (!bubbleRefs.totalTokens.cost) {
+                        bubbleRefs.totalTokens.cost = 0.0;
+                    }
+
+                    if (isSummary) {
+                        bubbleRefs.totalTokens.input = inputTokens;
+                        bubbleRefs.totalTokens.output = outputTokens;
+                        bubbleRefs.totalTokens.cost = responseCost;
+                    } else {
+                        bubbleRefs.totalTokens.input += inputTokens;
+                        bubbleRefs.totalTokens.output += outputTokens;
+                        bubbleRefs.totalTokens.cost += responseCost;
+                    }
+
+                    if (blockId) {
+                        bubbleRefs.blockTokens.set(blockId, {
+                            input: inputTokens,
+                            output: outputTokens,
+                            inputCost: inputCost,
+                            outputCost: outputCost,
+                            toolUsageCost: toolUsageCost,
+                            totalCost: responseCost
+                        });
+
+                        const chartIcon = createSVGIcon('chart', 14, isSummary ? '#6a9955' : '#d7a558');
+                        const inputStr = inputTokens.toLocaleString();
+                        const outputStr = outputTokens.toLocaleString();
+                        const totalStr = (inputTokens + outputTokens).toLocaleString();
+                        const modelName = data.model || 'unknown';
+                        const sourceFile = data.source_file || '';
+
+                        let costDisplay = '';
+                        if (responseCost > 0) {
+                            if (isSummary) {
+                                costDisplay = ` | Cost: $${responseCost.toFixed(6)}`;
+                            } else {
+                                const inputCostStr = inputCost > 0 ? `$${inputCost.toFixed(6)}` : '$0';
+                                const outputCostStr = outputCost > 0 ? `$${outputCost.toFixed(6)}` : '$0';
+                                costDisplay = ` | Cost: ${inputCostStr} / ${outputCostStr}`;
+                                if (toolUsageCost > 0) {
+                                    costDisplay += ` [tool: $${toolUsageCost.toFixed(6)}]`;
+                                }
+                                costDisplay += ` = $${responseCost.toFixed(6)}`;
+                            }
+                        }
+
+                        const tokenEventHtml = `
+                            <div style="font-weight: 500; margin-bottom: 4px; display: flex; align-items: center; gap: 6px;">
+                                ${chartIcon}
+                                <span style="color: ${isSummary ? '#6a9955' : '#d7a558'};">${isSummary ? 'File Summary' : 'Tokens'}</span>
+                            </div>
+                            <div style="font-size: 11px; color: #a0a8b2; font-family: monospace;">
+                                ${isSummary && sourceFile ? `File: ${sourceFile}<br/>` : ''}
+                                ${isSummary ? 'Total ' : ''}${!isSummary ? `Model: ${modelName} | ` : ''}Input: ${inputStr} | ${isSummary ? 'Total ' : ''}Output: ${outputStr} | Total: ${totalStr}${costDisplay}
+                            </div>
+                        `;
+
+                        const timestamp = data.timestamp ? data.timestamp * 1000 : Date.now();
+                        this.uiRenderer.addPendingBlockAfterActive(execId, tokenEventHtml, timestamp, isSummary);
+                    }
+
+                    this.uiRenderer.updateTokenCounter(bubbleRefs);
+
+                    if (bubbleRefs.parentExecutionId && this.executionBubbles.has(bubbleRefs.parentExecutionId)) {
+                        let currentParent = bubbleRefs.parentExecutionId;
+                        while (currentParent) {
+                            const parentBubble = this.executionBubbles.get(currentParent);
+                            if (parentBubble) {
+                                this.uiRenderer.updateTokenCounter(parentBubble);
+                                currentParent = parentBubble.parentExecutionId;
+                            } else {
+                                break;
+                            }
+                        }
+                    }
+                } else {
+                    this.uiRenderer.addTokenUsageMessage(data, now);
+                }
+                break;
+            }
+
+            case 'block_processing': {
+                const execId = data.execution_id;
+                if (execId && this.executionBubbles.has(execId)) {
+                    const bubbleRefs = this.executionBubbles.get(execId);
+                    bubbleRefs.activeBlockId = data.block_id;
+                    this.uiRenderer.highlightActiveBlock(data.block_id, execId);
+                }
+                break;
+            }
+
+            case 'keepalive':
+                break;
+
+            default:
+                console.log('Unknown event type:', data.type, data);
+                break;
+        }
+
+        if (data.return_content && data.type !== 'workflow_complete' && data.type !== 'workflow_error') {
+            console.log('[DEBUG] Received event with return_content field (unexpected!)');
+            const execId = data.execution_id;
+            if (execId && this.executionBubbles.has(execId)) {
+                const bubbleRefs = this.executionBubbles.get(execId);
+                const rendered = this.uiRenderer.renderMarkdownish(data.return_content);
+                const resultDiv = document.createElement('div');
+                resultDiv.className = 'message-content final-result';
+                resultDiv.style.cssText = 'margin-bottom: 12px;';
+                resultDiv.innerHTML = rendered;
+                bubbleRefs.responseContent.appendChild(resultDiv);
+            } else {
+                this.uiRenderer.addMessage('assistant', 'Ответ Fractalic:', now, {
+                    returnContent: data.return_content,
+                    returnVariant: data.return_variant,
+                    session_id: sessionId,
+                    storeHistory: false
+                });
+            }
+        }
+    }
+
+    onStreamError(message) {
+        const timestamp = formatTime(new Date().toISOString());
+        this.uiRenderer.addMessage('error', message || 'Ошибка запуска потока', timestamp);
+        this.uiRenderer.showTyping(false);
+    }
+
+    onStreamException(error) {
+        const timestamp = formatTime(new Date().toISOString());
+        const errorMessage = error?.message ? `Ошибка потока: ${error.message}` : 'Ошибка потока';
+        this.uiRenderer.addMessage('error', errorMessage, timestamp);
+        this.uiRenderer.showTyping(false);
+    }
+
+    onStreamFinished() {
+        this.uiRenderer.showTyping(false);
     }
 
     handleMessage(data) {
