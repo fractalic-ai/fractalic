@@ -502,6 +502,26 @@
             /* box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2); */
         }
 
+        /* Nested execution bubbles */
+        .execution-bubble.nested-bubble {
+            margin-left: 24px;
+            margin-top: 16px;
+            border-left: 3px solid var(--accent-primary);
+            background: var(--bg-tertiary);
+            opacity: 0.95;
+            border-radius: 12px;
+        }
+
+        .execution-bubble.nested-bubble .bubble-header {
+            background: rgba(74, 84, 245, 0.1);
+            border-bottom-color: var(--accent-primary);
+        }
+
+        .execution-bubble.nested-bubble .bubble-title {
+            font-size: 12px;
+            color: var(--text-secondary);
+        }
+
         .bubble-header {
             display: flex;
             justify-content: space-between;

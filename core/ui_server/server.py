@@ -1560,6 +1560,15 @@ async def receive_event(event: dict):
         raise HTTPException(status_code=400, detail='Missing execution_id')
 
     print(f"[DEBUG /api/events/receive] Received event: {event.get('type')} for {execution_id}")
+
+    # Log nested_execution_id if present
+    if 'nested_execution_id' in event:
+        print(f"[DEBUG /api/events/receive]   nested_execution_id: {event.get('nested_execution_id')}")
+    if 'target' in event:
+        print(f"[DEBUG /api/events/receive]   target: {event.get('target')}")
+    if 'node_id' in event:
+        print(f"[DEBUG /api/events/receive]   node_id: {event.get('node_id')}")
+
     if event.get('type') == 'chat_message':
         content_preview = event.get('content', '')[:100] if event.get('content') else 'no content'
         print(f"[DEBUG /api/events/receive] CHAT_MESSAGE content preview: {content_preview}")
@@ -1568,7 +1577,7 @@ async def receive_event(event: dict):
 
     with events_lock:
         events_queues[execution_id].append(event)
-    
+
     return {"status": "received"}
 
 async def start_fractalic_process(file_path: str, execution_id: str, user_request: str = ""):
@@ -1644,49 +1653,24 @@ async def stream_chat_events(request: Request):
                 return
             
             # Stream events from queue as they arrive
+            # Server is AGNOSTIC to event types and execution_id structure - just proxy everything
             completed = False
-            completion_event_seen = False
             timeout_count = 0
             max_timeouts = 120  # 60 seconds total (0.5s * 120)
 
             while not completed and timeout_count < max_timeouts:
                 try:
-                    # Check for events in the queue
+                    # Stream events from ALL queues without filtering
                     events_found = False
                     with events_lock:
-                        while events_queues[execution_id]:
-                            event = events_queues[execution_id].popleft()
-                            event_type = event.get('type')
-                            print(f"[DEBUG /api/chat/stream] Streaming event: {event_type} for {execution_id}")
-                            yield f"{json.dumps(event, ensure_ascii=False)}\n"
-                            events_found = True
-
-                            # EXECUTION_COMPLETE/ERROR are FINAL events (not WORKFLOW_COMPLETE)
-                            # WORKFLOW_COMPLETE means an agent/file finished, but process continues
-                            if event_type == 'execution_complete':
-                                print(f"[DEBUG /api/chat/stream] EXECUTION_COMPLETE detected - this is the final event for {execution_id}")
-                                completion_event_seen = True
-                            elif event_type == 'execution_error':
-                                print(f"[DEBUG /api/chat/stream] EXECUTION_ERROR detected for {execution_id}")
-                                completion_event_seen = True
-
-                    # After draining current queue, check if we saw execution completion
-                    if completion_event_seen and not completed:
-                        print(f"[DEBUG /api/chat/stream] EXECUTION complete seen, waiting for any trailing events for {execution_id}")
-                        await asyncio.sleep(2)  # Shorter wait since EXECUTION_COMPLETE is now truly last
-                        # Drain any trailing events (shouldn't be any, but just in case)
-                        final_count = 0
-                        with events_lock:
-                            while events_queues[execution_id]:
-                                event = events_queues[execution_id].popleft()
-                                print(f"[DEBUG /api/chat/stream] Streaming trailing event: {event.get('type')} for {execution_id}")
+                        # Iterate through ALL queues and stream all events
+                        for queue_id in list(events_queues.keys()):
+                            while events_queues[queue_id]:
+                                event = events_queues[queue_id].popleft()
+                                event_type = event.get('type')
+                                print(f"[DEBUG /api/chat/stream] Streaming event: {event_type} for {queue_id}")
                                 yield f"{json.dumps(event, ensure_ascii=False)}\n"
-                                final_count += 1
-                        if final_count > 0:
-                            print(f"[WARNING] Found {final_count} events after EXECUTION.complete - this shouldn't happen!")
-                        print(f"[DEBUG /api/chat/stream] Stream completed for {execution_id}")
-                        completed = True
-                        break
+                                events_found = True
 
                     if events_found:
                         timeout_count = 0  # Reset timeout when we get events
@@ -1694,23 +1678,25 @@ async def stream_chat_events(request: Request):
                         # No events available, wait a bit and increment timeout
                         await asyncio.sleep(0.5)
                         timeout_count += 1
-                        
-                        # Check if process is still running
+
+                        # Check if process is still running - if not, wait for final events and exit
                         if process and hasattr(process, 'returncode') and process.returncode is not None:
                             # Process finished, wait longer for final events to arrive via HTTP
-                            print(f"[DEBUG /api/chat/stream] Process finished, waiting for final events for {execution_id}")
+                            print(f"[DEBUG /api/chat/stream] Process finished, waiting for final events")
                             await asyncio.sleep(3)  # Wait 3 seconds for HTTP events to arrive
 
-                            # Drain all remaining events
+                            # Drain all remaining events from ALL queues
                             final_event_count = 0
                             with events_lock:
-                                while events_queues[execution_id]:
-                                    event = events_queues[execution_id].popleft()
-                                    print(f"[DEBUG /api/chat/stream] Streaming FINAL event: {event.get('type')} phase={event.get('phase')} for {execution_id}")
-                                    yield f"{json.dumps(event, ensure_ascii=False)}\n"
-                                    final_event_count += 1
+                                # Stream ALL remaining events from ALL queues
+                                for queue_id in list(events_queues.keys()):
+                                    while events_queues[queue_id]:
+                                        event = events_queues[queue_id].popleft()
+                                        print(f"[DEBUG /api/chat/stream] Streaming FINAL event: {event.get('type')} for {queue_id}")
+                                        yield f"{json.dumps(event, ensure_ascii=False)}\n"
+                                        final_event_count += 1
 
-                            print(f"[DEBUG /api/chat/stream] Streamed {final_event_count} final events for {execution_id}")
+                            print(f"[DEBUG /api/chat/stream] Streamed {final_event_count} final events")
                             completed = True
                             break
                         

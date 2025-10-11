@@ -90,10 +90,10 @@ export class StreamClient {
                     if (isAssistantMessage && execId && this.client.executionBubbles.has(execId)) {
                         const bubbleRefs = this.client.executionBubbles.get(execId);
 
-                        // Clear "Waiting for response..." placeholder on first message
-                        const currentContent = bubbleRefs.responseContent.textContent;
-                        if (currentContent.includes('Waiting for response')) {
-                            bubbleRefs.responseContent.innerHTML = '';
+                        // Remove placeholder ONLY from THIS bubble (by data-placeholder attribute)
+                        const placeholder = bubbleRefs.responseContent.querySelector('[data-placeholder="true"]');
+                        if (placeholder) {
+                            placeholder.remove();
                         }
 
                         // Show system messages (⚙️, ✅, ❌) directly
@@ -120,41 +120,65 @@ export class StreamClient {
                     break;
                 }
 
+                case 'workflow_start': {
+                    // Nested workflow execution starts (from @run operation)
+                    const nestedExecId = data.nested_execution_id || data.execution_id;
+                    const parentExecId = data.parent_execution_id;
+                    const blockId = data.block_id;
+                    const filePath = data.target || '';
+
+                    // Create nested execution bubble
+                    if (!this.client.executionBubbles.has(nestedExecId)) {
+                        const bubbleRefs = this.client.uiRenderer.createExecutionBubble(
+                            nestedExecId,
+                            filePath,
+                            now,
+                            parentExecId,  // Pass parent for nesting
+                            blockId        // Pass block ID for insertion point
+                        );
+                        this.client.executionBubbles.set(nestedExecId, bubbleRefs);
+
+                        // Track child bubble in parent
+                        if (parentExecId && this.client.executionBubbles.has(parentExecId)) {
+                            const parentBubble = this.client.executionBubbles.get(parentExecId);
+                            parentBubble.childBubbles.push(nestedExecId);
+                        }
+                    }
+                    break;
+                }
+
                 case 'workflow_complete': {
                     // Workflow completion event (from @run operation / agent execution)
-                    const execId = data.execution_id;
-                    if (execId && this.client.executionBubbles.has(execId)) {
-                        const bubbleRefs = this.client.executionBubbles.get(execId);
+                    const nestedExecId = data.nested_execution_id || data.execution_id;
+
+                    if (nestedExecId && this.client.executionBubbles.has(nestedExecId)) {
+                        const bubbleRefs = this.client.executionBubbles.get(nestedExecId);
                         const filePath = data.target || '';
                         const fileName = filePath.split('/').pop() || filePath;
 
-                        // Create a small notification in the response area
-                        const notification = document.createElement('div');
-                        notification.style.cssText = `
-                            padding: 6px 10px;
-                            margin: 4px 0;
-                            border-left: 3px solid #83d69d;
-                            background: rgba(131, 214, 157, 0.1);
-                            font-size: 12px;
-                            color: #83d69d;
-                            border-radius: 3px;
+                        // Update bubble title to show completion
+                        const checkIcon = createSVGIcon('checkCircle', 16, '#83d69d');
+                        bubbleRefs.title.innerHTML = `
+                            ${checkIcon}
+                            <span>✓ Completed: ${fileName}</span>
+                            <span style="font-size: 11px; color: #83d69d; margin-left: 8px;">Done</span>
                         `;
-                        notification.textContent = `✓ Agent completed: ${fileName}`;
-
-                        bubbleRefs.responseContent.appendChild(notification);
+                        bubbleRefs.bubble.style.borderColor = '#83d69d';
 
                         // If has return_content, show it
                         if (data.return_content) {
+                            const rendered = this.client.uiRenderer.renderMarkdownish(data.return_content);
                             const returnBlock = document.createElement('div');
+                            returnBlock.className = 'workflow-return-content';
                             returnBlock.style.cssText = `
                                 margin: 8px 0;
-                                padding: 8px;
-                                background: rgba(var(--accent-rgb), 0.05);
-                                border: 1px solid rgba(var(--accent-rgb), 0.2);
-                                border-radius: 4px;
+                                padding: 12px;
+                                background: rgba(131, 214, 157, 0.05);
+                                border: 1px solid rgba(131, 214, 157, 0.3);
+                                border-radius: 8px;
                                 font-size: 13px;
                             `;
-                            returnBlock.textContent = data.return_content;
+                            returnBlock.innerHTML = rendered;
                             bubbleRefs.responseContent.appendChild(returnBlock);
                         }
                     }
@@ -163,24 +187,37 @@ export class StreamClient {
 
                 case 'workflow_error': {
                     // Workflow error event
-                    const execId = data.execution_id;
-                    if (execId && this.client.executionBubbles.has(execId)) {
-                        const bubbleRefs = this.client.executionBubbles.get(execId);
+                    const nestedExecId = data.nested_execution_id || data.execution_id;
+
+                    if (nestedExecId && this.client.executionBubbles.has(nestedExecId)) {
+                        const bubbleRefs = this.client.executionBubbles.get(nestedExecId);
                         const filePath = data.target || '';
                         const fileName = filePath.split('/').pop() || filePath;
+                        const errorMessage = data.error_message || 'Unknown error';
 
-                        const notification = document.createElement('div');
-                        notification.style.cssText = `
-                            padding: 6px 10px;
-                            margin: 4px 0;
-                            border-left: 3px solid #d33f3f;
-                            background: rgba(211, 63, 63, 0.1);
-                            font-size: 12px;
-                            color: #d33f3f;
-                            border-radius: 3px;
+                        // Update bubble title to show error
+                        const errorIcon = createSVGIcon('x', 16, '#d33f3f');
+                        bubbleRefs.title.innerHTML = `
+                            ${errorIcon}
+                            <span>✗ Error: ${fileName}</span>
+                            <span style="font-size: 11px; color: #d33f3f; margin-left: 8px;">Failed</span>
                         `;
-                        notification.textContent = `✗ Agent failed: ${fileName}`;
-                        bubbleRefs.responseContent.appendChild(notification);
+                        bubbleRefs.bubble.style.borderColor = '#d33f3f';
+
+                        // Show error message
+                        const errorBlock = document.createElement('div');
+                        errorBlock.className = 'workflow-error-content';
+                        errorBlock.style.cssText = `
+                            margin: 8px 0;
+                            padding: 12px;
+                            background: rgba(211, 63, 63, 0.05);
+                            border: 1px solid rgba(211, 63, 63, 0.3);
+                            border-radius: 8px;
+                            font-size: 13px;
+                            color: #d33f3f;
+                        `;
+                        errorBlock.textContent = `Error: ${errorMessage}`;
+                        bubbleRefs.responseContent.appendChild(errorBlock);
                     }
                     break;
                 }
@@ -245,6 +282,7 @@ export class StreamClient {
 
                 case 'ast_update': {
                     // Handle AST structure update - route to execution bubble
+                    // For nested workflows, use execution_id directly (backend already sets it to nested_execution_id)
                     const execId = data.execution_id;
                     if (execId && this.client.executionBubbles.has(execId)) {
                         const bubbleRefs = this.client.executionBubbles.get(execId);
@@ -385,6 +423,20 @@ export class StreamClient {
 
                         // Update header token counter
                         this.client.uiRenderer.updateTokenCounter(bubbleRefs);
+
+                        // Propagate update to parent bubbles (for aggregation)
+                        if (bubbleRefs.parentExecutionId && this.client.executionBubbles.has(bubbleRefs.parentExecutionId)) {
+                            let currentParent = bubbleRefs.parentExecutionId;
+                            while (currentParent) {
+                                const parentBubble = this.client.executionBubbles.get(currentParent);
+                                if (parentBubble) {
+                                    this.client.uiRenderer.updateTokenCounter(parentBubble);
+                                    currentParent = parentBubble.parentExecutionId;
+                                } else {
+                                    break;
+                                }
+                            }
+                        }
                     } else {
                         // Fallback for events without execution bubble
                         this.client.uiRenderer.addTokenUsageMessage(data, now);

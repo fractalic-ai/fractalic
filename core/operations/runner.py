@@ -572,31 +572,107 @@ def process_run(ast: AST, current_node: Node, local_file_name, parent_operation,
             key=str(uuid.uuid4())[:8]
         )
 
+    # Get parent execution_id for nested workflow tracking
+    parent_execution_id = os.getenv('FRACTALIC_EXECUTION_ID')
+
+    # Generate UNIQUE node_id for THIS @run invocation
+    # NOTE: Each @run must have its own unique node_id for proper nested execution tracking
+    unique_node_id = str(uuid.uuid4())[:12]
+
+    # Generate unique execution_id for this nested workflow using the NEW node_id
+    nested_execution_id = f"{parent_execution_id}_{unique_node_id}"
+
+    # Set nested_execution_id in environment FIRST so WORKFLOW_START event gets routed correctly
+    # This is critical for proper event routing to nested execution bubbles
+    original_nested_id = os.environ.get('FRACTALIC_NESTED_EXECUTION_ID')
+    os.environ['FRACTALIC_NESTED_EXECUTION_ID'] = nested_execution_id
+
+    # Emit WORKFLOW_START event for nested agent execution (after setting env var)
+    try:
+        print(f"[DEBUG @run] Emitting WORKFLOW_START: nested_exec_id={nested_execution_id}, parent={parent_execution_id}, node={unique_node_id}, block={current_node.key or current_node.hash}")
+        emit_event(
+            EventType.WORKFLOW_START,
+            target=os.path.basename(source_path),
+            parent_execution_id=parent_execution_id,
+            nested_execution_id=nested_execution_id,
+            node_id=unique_node_id,
+            block_id=current_node.key or current_node.hash
+        )
+    except Exception as e:
+        # Don't fail execution if event emission fails
+        print(f"[WARNING] Failed to emit WORKFLOW_START event: {e}")
+
     # Execute run with updated return signature
-    if input_ast and input_ast.parser.nodes:
-        run_result, child_call_tree_node, ctx_file, ctx_file_hash, trc_file, trc_file_hash, branch_name, explicit_return = run(
-            source_path,
-            input_ast,  # Pass the complete input AST
-            False,
-            local_file_name,
-            parent_operation,
-            call_tree_node,
-            committed_files=committed_files,
-            file_commit_hashes=file_commit_hashes,
-            base_dir=base_dir
-        )
-    else:
-        run_result, child_call_tree_node, ctx_file, ctx_file_hash, trc_file, trc_file_hash, branch_name, explicit_return = run(
-            source_path,
-            None,
-            False,
-            local_file_name,
-            parent_operation,
-            call_tree_node,
-            committed_files=committed_files,
-            file_commit_hashes=file_commit_hashes,
-            base_dir=base_dir
-        )
+    workflow_error = None
+    workflow_return_content = None
+
+    try:
+        if input_ast and input_ast.parser.nodes:
+            run_result, child_call_tree_node, ctx_file, ctx_file_hash, trc_file, trc_file_hash, branch_name, explicit_return = run(
+                source_path,
+                input_ast,  # Pass the complete input AST
+                False,
+                local_file_name,
+                parent_operation,
+                call_tree_node,
+                committed_files=committed_files,
+                file_commit_hashes=file_commit_hashes,
+                base_dir=base_dir
+            )
+        else:
+            run_result, child_call_tree_node, ctx_file, ctx_file_hash, trc_file, trc_file_hash, branch_name, explicit_return = run(
+                source_path,
+                None,
+                False,
+                local_file_name,
+                parent_operation,
+                call_tree_node,
+                committed_files=committed_files,
+                file_commit_hashes=file_commit_hashes,
+                base_dir=base_dir
+            )
+
+        # Extract return content if available (after successful run)
+        if explicit_return and run_result:
+            from core.render.render_ast import render_ast_to_markdown_string
+            workflow_return_content = render_ast_to_markdown_string(run_result)
+
+    except Exception as workflow_err:
+        # Capture error for emission
+        workflow_error = str(workflow_err)
+        # Re-raise to preserve existing error handling
+        raise
+    finally:
+        # Restore original nested_execution_id (or remove if didn't exist)
+        if original_nested_id is not None:
+            os.environ['FRACTALIC_NESTED_EXECUTION_ID'] = original_nested_id
+        else:
+            os.environ.pop('FRACTALIC_NESTED_EXECUTION_ID', None)
+
+    # Emit WORKFLOW_COMPLETE or WORKFLOW_ERROR event
+    try:
+        if workflow_error:
+            emit_event(
+                EventType.WORKFLOW_ERROR,
+                target=os.path.basename(source_path),
+                parent_execution_id=parent_execution_id,
+                nested_execution_id=nested_execution_id,
+                node_id=unique_node_id,
+                error_message=workflow_error
+            )
+        else:
+            emit_event(
+                EventType.WORKFLOW_COMPLETE,
+                target=os.path.basename(source_path),
+                parent_execution_id=parent_execution_id,
+                nested_execution_id=nested_execution_id,
+                node_id=unique_node_id,
+                return_content=workflow_return_content,
+                explicit_return=explicit_return
+            )
+    except Exception as e:
+        # Don't fail execution if event emission fails
+        print(f"[WARNING] Failed to emit WORKFLOW completion event: {e}")
 
     # Handle results insertion
     # If child module didn't execute @return, create error block instead of returning full context

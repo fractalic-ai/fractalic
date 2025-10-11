@@ -2,10 +2,10 @@
  * Fractalic Chat Client - Main class that coordinates all modules
  */
 
-import { FileBrowser } from './file-browser.js';
-import { UIRenderer } from './ui-rendering.js';
-import { StreamClient } from './stream-client.js';
-import { formatTime } from './utils.js';
+import { FileBrowser } from './file-browser.js?v=6';
+import { UIRenderer } from './ui-rendering.js?v=6';
+import { StreamClient } from './stream-client.js?v=6';
+import { formatTime } from './utils.js?v=6';
 
 export class FractalicChatClient {
     constructor() {

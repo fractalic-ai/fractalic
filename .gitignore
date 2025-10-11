@@ -248,3 +248,4 @@ DBG_TOOLS.json
 .vscode/
 tutorials/mcp-integration-tests/
 CLAUDE.md
+.github/copilot-instructions.md

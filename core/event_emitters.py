@@ -29,13 +29,28 @@ def emit_event(event_type: EventType, **data):
         # Events without execution_id are local-only (not sent to server)
         return
 
-    event = {
-        'type': event_type.value if isinstance(event_type, EventType) else event_type,
-        'execution_id': execution_id,
-        'session_id': _session_id(),
-        'timestamp': time.time(),
-        **data
-    }
+    # Check if we're in a nested execution context
+    nested_execution_id = os.getenv('FRACTALIC_NESTED_EXECUTION_ID')
+
+    # If nested_execution_id is set, use it as the primary execution_id for routing
+    # But keep the original execution_id as well for reference
+    if nested_execution_id:
+        event = {
+            'type': event_type.value if isinstance(event_type, EventType) else event_type,
+            'execution_id': nested_execution_id,  # Route to nested bubble
+            'parent_execution_id': execution_id,   # Keep reference to parent
+            'session_id': _session_id(),
+            'timestamp': time.time(),
+            **data
+        }
+    else:
+        event = {
+            'type': event_type.value if isinstance(event_type, EventType) else event_type,
+            'execution_id': execution_id,
+            'session_id': _session_id(),
+            'timestamp': time.time(),
+            **data
+        }
 
     _stream_event_to_server(event)
 

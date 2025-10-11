@@ -12,6 +12,11 @@ export class UIRenderer {
         this.astBlocks = new Map();
         this.isFirstASTSnapshot = true;
         this.markedConfigured = false;
+        // Track pending nested bubbles waiting for AST blocks to be created
+        this.pendingNestedBubbles = new Map(); // blockId -> Array of {bubble, executionId}
+        // Track nested bubbles that need to be preserved across AST re-renders (per execution)
+        // Map: executionId -> Map(blockId -> Array of bubble elements)
+        this.savedNestedBubbles = new Map();
     }
 
     // ========== MARKDOWN RENDERING ==========
@@ -312,11 +317,20 @@ export class UIRenderer {
 
     // ========== EXECUTION BUBBLE RENDERING ==========
 
-    createExecutionBubble(executionId, filePath, time) {
+    createExecutionBubble(executionId, filePath, time, parentExecutionId = null, blockId = null) {
         // Create main bubble container
         const bubble = document.createElement('div');
         bubble.className = 'execution-bubble';
         bubble.setAttribute('data-execution-id', executionId);
+
+        // Mark as nested if has parent
+        if (parentExecutionId) {
+            bubble.classList.add('nested-bubble');
+            bubble.setAttribute('data-parent-execution-id', parentExecutionId);
+            if (blockId) {
+                bubble.setAttribute('data-parent-block-id', blockId);
+            }
+        }
 
         // Create header
         const header = document.createElement('div');
@@ -407,7 +421,7 @@ export class UIRenderer {
         // Create response content area
         const responseContent = document.createElement('div');
         responseContent.className = 'bubble-response-content';
-        responseContent.innerHTML = '<div style="color: #a0a8b2; font-size: 13px;">Waiting for response...</div>';
+        responseContent.innerHTML = '<div data-placeholder="true" style="color: #a0a8b2; font-size: 13px;">Waiting for response...</div>';
 
         // Create inspect panel
         const inspectPanel = document.createElement('div');
@@ -445,8 +459,20 @@ export class UIRenderer {
         bubble.appendChild(responseContent);
         bubble.appendChild(inspectPanel);
 
-        // Add to messages container
-        this.messagesContainer.appendChild(bubble);
+        // Add to DOM (nested or top-level)
+        if (parentExecutionId && this.client.executionBubbles.has(parentExecutionId)) {
+            const parentBubble = this.client.executionBubbles.get(parentExecutionId);
+
+            // IMPORTANT: Nested bubbles appear in Response mode (as child execution)
+            // They are full execution bubbles with their own Response/Inspect tabs
+            // So we ALWAYS add them to parent's responseContent (not AST container)
+            parentBubble.responseContent.appendChild(bubble);
+            console.log(`[Nested Bubble] Added to parent response content (parent: ${parentExecutionId.substring(0, 8)}, blockId: ${blockId ? blockId.substring(0, 8) : 'none'})`);
+        } else {
+            // Top-level bubble: add to messages container
+            this.messagesContainer.appendChild(bubble);
+        }
+
         this.scrollToBottom();
 
         // Return references for later updates
@@ -460,15 +486,23 @@ export class UIRenderer {
             tokenCounter,  // Reference to token counter badge
             activeBlockId: null,  // Track currently processing block
             blockTokens: new Map(),  // blockId -> {input, output} token stats
-            totalTokens: {input: 0, output: 0}  // Execution-level accumulator
+            totalTokens: {input: 0, output: 0},  // Execution-level accumulator
+            parentExecutionId,  // Track parent for hierarchical token aggregation
+            childBubbles: []  // Track child bubbles for aggregation
         };
     }
 
     // ========== AST RENDERING ==========
 
     renderASTBlocks(blocks, operationType, container, bubbleRefs = null) {
+        const executionId = bubbleRefs?.bubble?.getAttribute('data-execution-id') || 'unknown';
+        console.log(`[AST] renderASTBlocks called for execution: ${executionId.substring(0, 8)}`);
+        console.log(`[AST] Blocks to render: [${blocks.map(b => b.id.substring(0, 8)).join(', ')}]`);
+
         // SAVE pending blocks before clearing - map them by parent block ID
         const pendingBlocksMap = new Map();
+
+        // Save pending event blocks (token usage, etc.)
         const pendingBlocks = container.querySelectorAll('.pending-event-inline');
         console.log(`[AST] Found ${pendingBlocks.length} pending blocks to save`);
         pendingBlocks.forEach(block => {
@@ -488,6 +522,22 @@ export class UIRenderer {
                 }
                 // Skip over other pending blocks to find the AST block
                 parent = parent.previousElementSibling;
+            }
+        });
+
+        // SAVE nested bubbles before clearing - map them by parent block ID
+        const nestedBubblesMap = new Map();
+        const nestedBubbles = container.querySelectorAll('.execution-bubble.nested-bubble');
+        console.log(`[AST] Found ${nestedBubbles.length} nested bubbles to save`);
+        nestedBubbles.forEach(bubble => {
+            const parentBlockId = bubble.getAttribute('data-parent-block-id');
+            if (parentBlockId) {
+                if (!nestedBubblesMap.has(parentBlockId)) {
+                    nestedBubblesMap.set(parentBlockId, []);
+                }
+                // Remove from DOM but keep reference (we'll re-insert it after rebuild)
+                nestedBubblesMap.get(parentBlockId).push(bubble);
+                console.log(`[AST] Saved nested bubble for parent block: ${parentBlockId.substring(0, 8)} (exec: ${bubble.getAttribute('data-execution-id')?.substring(0, 8)})`);
             }
         });
 
@@ -532,6 +582,38 @@ export class UIRenderer {
     // Append in order
     container.appendChild(blockEl);
     newBlocksMap.set(blockId, blockEl);
+
+    // CHECK if any nested bubbles are waiting for this AST block (deferred insertion)
+    if (this.pendingNestedBubbles.has(blockId)) {
+        const pendingBubbles = this.pendingNestedBubbles.get(blockId);
+        console.log(`[AST] Moving ${pendingBubbles.length} pending nested bubbles to correct position after block ${blockId.substring(0, 8)}`);
+
+        pendingBubbles.forEach(({bubble, executionId}) => {
+            // Remove from temporary location and insert after AST block
+            if (bubble.parentNode) {
+                bubble.parentNode.removeChild(bubble);
+            }
+            blockEl.insertAdjacentElement('afterend', bubble);
+            console.log(`[Nested Bubble] Moved bubble ${executionId.substring(0, 8)} to correct position`);
+        });
+
+        // Clear pending list for this block
+        this.pendingNestedBubbles.delete(blockId);
+    }
+
+    // RESTORE nested bubbles that were saved before clearing (from previous render)
+    if (nestedBubblesMap.has(blockId)) {
+        const savedBubbles = nestedBubblesMap.get(blockId);
+        console.log(`[AST] Restoring ${savedBubbles.length} nested bubbles for: ${blockId.substring(0, 8)}`);
+        savedBubbles.forEach(bubble => {
+            blockEl.insertAdjacentElement('afterend', bubble);
+            // Update blockEl reference to keep inserting after the last bubble
+            blockEl = bubble;
+        });
+    } else if (blocks.length > 0 && blocks.findIndex(b => b.id === blockId) === 0) {
+        // Only log once per render cycle (on first block)
+        console.log(`[AST] nestedBubblesMap has ${nestedBubblesMap.size} entries: [${Array.from(nestedBubblesMap.keys()).map(k => k.substring(0, 8)).join(', ')}]`);
+    }
 
     // RESTORE pending blocks for this AST block in chronological order
     if (pendingBlocksMap.has(blockId)) {
@@ -747,39 +829,110 @@ export class UIRenderer {
         // Update token counter badge in bubble header
         if (!bubbleRefs || !bubbleRefs.tokenCounter) return;
 
-        const totalInput = bubbleRefs.totalTokens.input;
-        const totalOutput = bubbleRefs.totalTokens.output;
-        const totalCost = bubbleRefs.totalTokens.cost || 0;
+        // Calculate own tokens (not including children)
+        const ownInput = bubbleRefs.totalTokens.input;
+        const ownOutput = bubbleRefs.totalTokens.output;
+        const ownCost = bubbleRefs.totalTokens.cost || 0;
 
-        if (totalInput === 0 && totalOutput === 0) {
-    // No tokens yet, keep hidden
-    bubbleRefs.tokenCounter.style.display = 'none';
-    return;
+        // Calculate aggregated tokens (own + all children recursively)
+        let aggregatedInput = ownInput;
+        let aggregatedOutput = ownOutput;
+        let aggregatedCost = ownCost;
+
+        // Recursively sum child bubble tokens
+        if (bubbleRefs.childBubbles && bubbleRefs.childBubbles.length > 0) {
+            bubbleRefs.childBubbles.forEach(childExecId => {
+                if (this.client.executionBubbles.has(childExecId)) {
+                    const childBubble = this.client.executionBubbles.get(childExecId);
+                    aggregatedInput += childBubble.totalTokens.input || 0;
+                    aggregatedOutput += childBubble.totalTokens.output || 0;
+                    aggregatedCost += childBubble.totalTokens.cost || 0;
+
+                    // Recursively add grandchildren
+                    if (childBubble.childBubbles && childBubble.childBubbles.length > 0) {
+                        const grandchildStats = this.aggregateChildTokens(childBubble);
+                        aggregatedInput += grandchildStats.input;
+                        aggregatedOutput += grandchildStats.output;
+                        aggregatedCost += grandchildStats.cost;
+                    }
+                }
+            });
+        }
+
+        // If no tokens at all, keep hidden
+        if (aggregatedInput === 0 && aggregatedOutput === 0) {
+            bubbleRefs.tokenCounter.style.display = 'none';
+            return;
         }
 
         // Format numbers (K for thousands)
         const formatNum = (num) => {
-    if (num >= 1000) {
-        return (num / 1000).toFixed(1) + 'K';
-    }
-    return num.toString();
+            if (num >= 1000) {
+                return (num / 1000).toFixed(1) + 'K';
+            }
+            return num.toString();
         };
 
-        const inputStr = formatNum(totalInput);
-        const outputStr = formatNum(totalOutput);
+        const aggInputStr = formatNum(aggregatedInput);
+        const aggOutputStr = formatNum(aggregatedOutput);
 
-        // Add cost to display if available
-        let displayText = `🎯 ${inputStr}/${outputStr}`;
-        let tooltipText = `Token usage - Input: ${totalInput.toLocaleString()} / Output: ${totalOutput.toLocaleString()}`;
+        // Build display text with aggregation info
+        let displayText = `🎯 ${aggInputStr}/${aggOutputStr}`;
+        let tooltipText = `Total Token usage - Input: ${aggregatedInput.toLocaleString()} / Output: ${aggregatedOutput.toLocaleString()}`;
 
-        if (totalCost > 0) {
-            displayText += ` 💰$${totalCost.toFixed(6)}`;
-            tooltipText += ` | Cost: $${totalCost.toFixed(6)}`;
+        // Show breakdown if there are children
+        if (bubbleRefs.childBubbles && bubbleRefs.childBubbles.length > 0) {
+            const ownInputStr = formatNum(ownInput);
+            const ownOutputStr = formatNum(ownOutput);
+            const childInput = aggregatedInput - ownInput;
+            const childOutput = aggregatedOutput - ownOutput;
+            const childInputStr = formatNum(childInput);
+            const childOutputStr = formatNum(childOutput);
+
+            tooltipText += `\n\nOwn: ${ownInput.toLocaleString()}/${ownOutput.toLocaleString()}`;
+            tooltipText += `\nChildren: ${childInput.toLocaleString()}/${childOutput.toLocaleString()}`;
+        }
+
+        if (aggregatedCost > 0) {
+            displayText += ` 💰$${aggregatedCost.toFixed(6)}`;
+            tooltipText += `\n\nTotal Cost: $${aggregatedCost.toFixed(6)}`;
+
+            if (bubbleRefs.childBubbles && bubbleRefs.childBubbles.length > 0) {
+                const childCost = aggregatedCost - ownCost;
+                tooltipText += `\nOwn Cost: $${ownCost.toFixed(6)}`;
+                tooltipText += `\nChildren Cost: $${childCost.toFixed(6)}`;
+            }
         }
 
         bubbleRefs.tokenCounter.textContent = displayText;
         bubbleRefs.tokenCounter.style.display = 'block';
         bubbleRefs.tokenCounter.title = tooltipText;
+    }
+
+    aggregateChildTokens(bubbleRefs) {
+        // Helper to recursively aggregate tokens from all descendants
+        let input = 0;
+        let output = 0;
+        let cost = 0;
+
+        if (bubbleRefs.childBubbles && bubbleRefs.childBubbles.length > 0) {
+            bubbleRefs.childBubbles.forEach(childExecId => {
+                if (this.client.executionBubbles.has(childExecId)) {
+                    const childBubble = this.client.executionBubbles.get(childExecId);
+                    input += childBubble.totalTokens.input || 0;
+                    output += childBubble.totalTokens.output || 0;
+                    cost += childBubble.totalTokens.cost || 0;
+
+                    // Recursively add descendants
+                    const descendantStats = this.aggregateChildTokens(childBubble);
+                    input += descendantStats.input;
+                    output += descendantStats.output;
+                    cost += descendantStats.cost;
+                }
+            });
+        }
+
+        return { input, output, cost };
     }
 
     // ========== EXECUTION MESSAGE HANDLING ==========

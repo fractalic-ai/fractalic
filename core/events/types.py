@@ -35,7 +35,10 @@ class EventType(str, Enum):
     EXECUTION_ERROR = "execution_error"
 
     # ===== Workflow lifecycle (@run operation / agent execution) =====
-    # Payload: target (Optional[str]), return_content (Optional[str])
+    # Payload: target (str), parent_execution_id (Optional[str]),
+    #          nested_execution_id (str), node_id (Optional[str]),
+    #          block_id (Optional[str]), return_content (Optional[str]),
+    #          explicit_return (Optional[bool]), error_message (Optional[str])
     WORKFLOW_START = "workflow_start"
     WORKFLOW_COMPLETE = "workflow_complete"
     WORKFLOW_ERROR = "workflow_error"
