@@ -155,26 +155,80 @@ export class FileBrowser {
 
             this.client.terminalFileName.textContent = filePath;
             const cachedRaw = logEntry.raw || '';
-            const targetEnd = typeof endOffsetRaw === 'number' ? endOffsetRaw : null;
-            let effectiveStart = startOffsetRaw;
-            if (executionId !== streamExecutionId && effectiveStart === 0) {
-                const marker = `nested_exec_id=${executionId}`;
-                const markerIndex = cachedRaw.indexOf(marker);
-                if (markerIndex >= 0) {
-                    effectiveStart = markerIndex;
-                    const bubbleRefs = this.client.executionBubbles?.get(executionId);
-                    if (bubbleRefs) {
-                        bubbleRefs.terminalStartOffset = markerIndex;
-                    }
-                }
+            const bubbleRefs = this.client.executionBubbles?.get(executionId);
+
+            let startOffset = typeof startOffsetRaw === 'number' ? startOffsetRaw : 0;
+            if (bubbleRefs && typeof bubbleRefs.terminalStartOffset === 'number') {
+                startOffset = bubbleRefs.terminalStartOffset;
             }
 
-            const baseSliceEnd = targetEnd !== null ? Math.min(targetEnd, cachedRaw.length) : undefined;
-            const baseRaw = cachedRaw.slice(effectiveStart, baseSliceEnd);
+            let endOffset = typeof endOffsetRaw === 'number' ? endOffsetRaw : null;
+            if (bubbleRefs && typeof bubbleRefs.terminalEndOffset === 'number' && bubbleRefs.terminalEndOffset > 0) {
+                endOffset = bubbleRefs.terminalEndOffset;
+            }
+
+            const marker = executionId !== streamExecutionId ? `nested_exec_id=${executionId}` : null;
+
+            const updateOffsetsAfterData = () => {
+                const logRaw = logEntry.raw || '';
+                const previousStart = startOffset;
+
+                if (marker) {
+                    if (startOffset <= 0 || startOffset > logRaw.length) {
+                        const markerIndex = logRaw.indexOf(marker);
+                        if (markerIndex !== -1) {
+                            startOffset = markerIndex;
+                            if (bubbleRefs) {
+                                bubbleRefs.terminalStartOffset = markerIndex;
+                            }
+                        }
+                    }
+                } else {
+                    startOffset = 0;
+                    if (bubbleRefs) {
+                        bubbleRefs.terminalStartOffset = 0;
+                    }
+                }
+
+                if (startOffset < 0) startOffset = 0;
+                if (startOffset > logRaw.length) startOffset = logRaw.length;
+
+                let resolvedEnd = endOffset;
+                if (bubbleRefs && typeof bubbleRefs.terminalEndOffset === 'number' && bubbleRefs.terminalEndOffset > startOffset) {
+                    resolvedEnd = bubbleRefs.terminalEndOffset;
+                } else if (typeof endOffsetRaw === 'number' && endOffsetRaw > startOffset) {
+                    resolvedEnd = endOffsetRaw;
+                } else if (bubbleRefs?.isCompleted) {
+                    resolvedEnd = logRaw.length;
+                    if (bubbleRefs) {
+                        bubbleRefs.terminalEndOffset = resolvedEnd;
+                    }
+                } else {
+                    resolvedEnd = null;
+                }
+
+                if (resolvedEnd !== null && resolvedEnd < startOffset) {
+                    resolvedEnd = null;
+                }
+
+                endOffset = resolvedEnd;
+                return { startChanged: startOffset !== previousStart };
+            };
+
+            const initialOffsets = updateOffsetsAfterData();
+
+            const baseSliceEnd = endOffset !== null ? Math.min(endOffset, cachedRaw.length) : undefined;
+            let baseRaw = cachedRaw.slice(startOffset, baseSliceEnd);
             this.client.terminalContent.innerHTML = parseAnsiToHtml(baseRaw);
             this.client.terminalViewerModal.style.display = 'block';
 
-            const hasFullData = targetEnd !== null && cachedRaw.length >= targetEnd;
+            if (initialOffsets.startChanged) {
+                // start offset adjusted by marker; refresh base view
+                baseRaw = cachedRaw.slice(startOffset, baseSliceEnd);
+                this.client.terminalContent.innerHTML = parseAnsiToHtml(baseRaw);
+            }
+
+            const hasFullData = endOffset !== null && cachedRaw.length >= endOffset;
             if (hasFullData) {
                 this.client.terminalStatus.textContent = `Завершено: ${filePath}`;
                 this.client.terminalStatus.className = 'terminal-status completed';
@@ -218,8 +272,24 @@ export class FileBrowser {
                 logEntry.raw += chunk;
                 this.client.terminalLogs.set(streamExecutionId, logEntry);
 
-                const currentSliceEnd = targetEnd !== null ? Math.min(targetEnd, logEntry.raw.length) : undefined;
-                const viewRaw = logEntry.raw.slice(effectiveStart, currentSliceEnd);
+                const { startChanged } = updateOffsetsAfterData();
+
+                const currentSliceEnd = endOffset !== null ? Math.min(endOffset, logEntry.raw.length) : undefined;
+                const viewRaw = logEntry.raw.slice(startOffset, currentSliceEnd);
+
+                if (startChanged) {
+                    this.client.terminalContent.innerHTML = parseAnsiToHtml(viewRaw);
+                    displayedLength = viewRaw.length;
+                    this.client.terminalContent.scrollTop = this.client.terminalContent.scrollHeight;
+                    if (endOffset !== null && logEntry.raw.length >= endOffset) {
+                        this.client.terminalStatus.textContent = `Завершено: ${filePath}`;
+                        this.client.terminalStatus.className = 'terminal-status completed';
+                        this.client.terminalLogs.set(streamExecutionId, logEntry);
+                        break;
+                    }
+                    continue;
+                }
+
                 const newPortion = viewRaw.slice(displayedLength);
                 if (newPortion.length > 0) {
                     const htmlChunk = parseAnsiToHtml(newPortion);
@@ -229,7 +299,7 @@ export class FileBrowser {
                     this.client.terminalContent.scrollTop = this.client.terminalContent.scrollHeight;
                 }
 
-                if (targetEnd !== null && logEntry.raw.length >= targetEnd) {
+                if (endOffset !== null && logEntry.raw.length >= endOffset) {
                     this.client.terminalStatus.textContent = `Завершено: ${filePath}`;
                     this.client.terminalStatus.className = 'terminal-status completed';
                     this.client.terminalLogs.set(streamExecutionId, logEntry);
