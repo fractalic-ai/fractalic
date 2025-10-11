@@ -440,11 +440,15 @@ export class UIRenderer {
         inspectPanel.appendChild(pendingOutput);
 
         // Add tab click handlers
+        let bubbleRefsRef = null;
         responseTab.onclick = () => {
             responseTab.classList.add('active');
             inspectTab.classList.remove('active');
             responseContent.classList.remove('hidden');
             inspectPanel.classList.remove('active');
+            if (bubbleRefsRef) {
+                this.moveChildBubblesToResponse(bubbleRefsRef);
+            }
         };
 
         inspectTab.onclick = () => {
@@ -452,6 +456,9 @@ export class UIRenderer {
             responseTab.classList.remove('active');
             responseContent.classList.add('hidden');
             inspectPanel.classList.add('active');
+            if (bubbleRefsRef) {
+                this.moveChildBubblesToInspect(bubbleRefsRef);
+            }
         };
 
         // Assemble bubble
@@ -476,11 +483,12 @@ export class UIRenderer {
         this.scrollToBottom();
 
         // Return references for later updates
-        return {
+        const bubbleRefs = {
             bubble,
             title,
             responseContent,
             astContainer,
+            inspectPanel,
             pendingOutput,
             header,
             tokenCounter,  // Reference to token counter badge
@@ -488,8 +496,132 @@ export class UIRenderer {
             blockTokens: new Map(),  // blockId -> {input, output} token stats
             totalTokens: {input: 0, output: 0},  // Execution-level accumulator
             parentExecutionId,  // Track parent for hierarchical token aggregation
-            childBubbles: []  // Track child bubbles for aggregation
+            childBubbles: [],  // Track child bubbles for aggregation and placement
+            responseTab,
+            inspectTab
         };
+        bubbleRefsRef = bubbleRefs;
+        return bubbleRefs;
+    }
+
+    removePendingNestedBubble(executionId) {
+        if (!executionId) return;
+        this.pendingNestedBubbles.forEach((entries, blockId) => {
+            const filtered = entries.filter(entry => entry.executionId !== executionId);
+            if (filtered.length === 0) {
+                this.pendingNestedBubbles.delete(blockId);
+            } else if (filtered.length !== entries.length) {
+                this.pendingNestedBubbles.set(blockId, filtered);
+            }
+        });
+    }
+
+    moveChildBubblesToInspect(bubbleRefs, targetExecutionId = null) {
+        if (!bubbleRefs?.childBubbles || bubbleRefs.childBubbles.length === 0) return;
+
+        bubbleRefs.childBubbles.forEach(child => {
+            if (!child || !child.executionId) return;
+            if (targetExecutionId && child.executionId !== targetExecutionId) return;
+            if (child.currentLocation === 'inspect') return;
+
+            const childRefs = this.client.executionBubbles.get(child.executionId);
+            if (!childRefs) return;
+            const bubbleEl = childRefs.bubble;
+            if (!bubbleEl) return;
+
+            const currentParent = bubbleEl.parentNode || child.savedParent || bubbleRefs.responseContent;
+
+            // Ensure we have a placeholder to preserve original position
+            if (!child.placeholderEl || !child.placeholderEl.isConnected) {
+                const placeholder = document.createElement('div');
+                placeholder.className = 'execution-bubble-placeholder';
+                placeholder.dataset.placeholderFor = child.executionId;
+                placeholder.style.display = 'none';
+                if (currentParent) {
+                    currentParent.insertBefore(placeholder, bubbleEl.nextSibling);
+                }
+                child.placeholderEl = placeholder;
+            } else if (child.placeholderEl.parentNode !== currentParent && currentParent) {
+                currentParent.insertBefore(child.placeholderEl, bubbleEl.nextSibling);
+            }
+
+            child.savedParent = currentParent;
+            child.savedNextSibling = bubbleEl.nextSibling || null;
+
+            if (bubbleEl.parentNode) {
+                bubbleEl.parentNode.removeChild(bubbleEl);
+            }
+
+            if (child.blockId) {
+                const blockEl = bubbleRefs.astContainer.querySelector(`.ast-block[data-block-id="${child.blockId}"]`);
+                if (blockEl) {
+                    blockEl.insertAdjacentElement('afterend', bubbleEl);
+                } else {
+                    const pendingList = this.pendingNestedBubbles.get(child.blockId) || [];
+                    if (!pendingList.some(entry => entry.executionId === child.executionId)) {
+                        pendingList.push({ bubble: bubbleEl, executionId: child.executionId });
+                    }
+                    this.pendingNestedBubbles.set(child.blockId, pendingList);
+                    bubbleRefs.pendingOutput.appendChild(bubbleEl);
+                }
+            } else {
+                bubbleRefs.astContainer.appendChild(bubbleEl);
+            }
+
+            child.currentLocation = 'inspect';
+        });
+    }
+
+    moveChildBubblesToResponse(bubbleRefs, targetExecutionId = null) {
+        if (!bubbleRefs?.childBubbles || bubbleRefs.childBubbles.length === 0) return;
+
+        bubbleRefs.childBubbles.forEach(child => {
+            if (!child || !child.executionId) return;
+            if (targetExecutionId && child.executionId !== targetExecutionId) return;
+            if (child.currentLocation === 'response') return;
+
+            const childRefs = this.client.executionBubbles.get(child.executionId);
+            if (!childRefs) return;
+            const bubbleEl = childRefs.bubble;
+            if (!bubbleEl) return;
+
+            if (bubbleEl.parentNode) {
+                bubbleEl.parentNode.removeChild(bubbleEl);
+            }
+
+            this.removePendingNestedBubble(child.executionId);
+
+            let inserted = false;
+            const placeholder = child.placeholderEl;
+            if (placeholder && placeholder.parentNode) {
+                placeholder.parentNode.insertBefore(bubbleEl, placeholder);
+                placeholder.remove();
+                child.placeholderEl = null;
+                inserted = true;
+            }
+
+            if (!inserted) {
+                let targetParent = child.savedParent && child.savedParent.isConnected ? child.savedParent : bubbleRefs.responseContent;
+                let nextSibling = child.savedNextSibling;
+                if (nextSibling && nextSibling.parentNode !== targetParent) {
+                    nextSibling = null;
+                }
+
+                if (targetParent) {
+                    if (nextSibling) {
+                        targetParent.insertBefore(bubbleEl, nextSibling);
+                    } else {
+                        targetParent.appendChild(bubbleEl);
+                    }
+                } else {
+                    bubbleRefs.responseContent.appendChild(bubbleEl);
+                }
+            }
+
+            child.currentLocation = 'response';
+            child.savedParent = bubbleEl.parentNode;
+            child.savedNextSibling = bubbleEl.nextSibling;
+        });
     }
 
     // ========== AST RENDERING ==========
@@ -841,7 +973,9 @@ export class UIRenderer {
 
         // Recursively sum child bubble tokens
         if (bubbleRefs.childBubbles && bubbleRefs.childBubbles.length > 0) {
-            bubbleRefs.childBubbles.forEach(childExecId => {
+            bubbleRefs.childBubbles.forEach(childMeta => {
+                const childExecId = childMeta?.executionId;
+                if (!childExecId) return;
                 if (this.client.executionBubbles.has(childExecId)) {
                     const childBubble = this.client.executionBubbles.get(childExecId);
                     aggregatedInput += childBubble.totalTokens.input || 0;
@@ -916,7 +1050,9 @@ export class UIRenderer {
         let cost = 0;
 
         if (bubbleRefs.childBubbles && bubbleRefs.childBubbles.length > 0) {
-            bubbleRefs.childBubbles.forEach(childExecId => {
+            bubbleRefs.childBubbles.forEach(childMeta => {
+                const childExecId = childMeta?.executionId;
+                if (!childExecId) return;
                 if (this.client.executionBubbles.has(childExecId)) {
                     const childBubble = this.client.executionBubbles.get(childExecId);
                     input += childBubble.totalTokens.input || 0;

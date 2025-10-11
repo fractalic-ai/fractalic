@@ -141,7 +141,20 @@ export class StreamClient {
                         // Track child bubble in parent
                         if (parentExecId && this.client.executionBubbles.has(parentExecId)) {
                             const parentBubble = this.client.executionBubbles.get(parentExecId);
-                            parentBubble.childBubbles.push(nestedExecId);
+                            const childMeta = {
+                                executionId: nestedExecId,
+                                blockId: blockId || null,
+                                currentLocation: 'response',
+                                savedParent: bubbleRefs.bubble.parentNode || parentBubble.responseContent,
+                                savedNextSibling: bubbleRefs.bubble.nextSibling || null,
+                                placeholderEl: null
+                            };
+                            parentBubble.childBubbles.push(childMeta);
+
+                            // If parent bubble is already in Inspect mode, immediately relocate the child bubble
+                            if (parentBubble.inspectPanel && parentBubble.inspectPanel.classList.contains('active')) {
+                                this.client.uiRenderer.moveChildBubblesToInspect(parentBubble, nestedExecId);
+                            }
                         }
                     }
                     break;
@@ -167,19 +180,19 @@ export class StreamClient {
 
                         // If has return_content, show it
                         if (data.return_content) {
-                            const rendered = this.client.uiRenderer.renderMarkdownish(data.return_content);
-                            const returnBlock = document.createElement('div');
-                            returnBlock.className = 'workflow-return-content';
-                            returnBlock.style.cssText = `
-                                margin: 8px 0;
-                                padding: 12px;
-                                background: rgba(131, 214, 157, 0.05);
-                                border: 1px solid rgba(131, 214, 157, 0.3);
-                                border-radius: 8px;
-                                font-size: 13px;
-                            `;
-                            returnBlock.innerHTML = rendered;
-                            bubbleRefs.responseContent.appendChild(returnBlock);
+                            const existingReturnContent = bubbleRefs.responseContent.querySelector('.workflow-return-content');
+                            if (!existingReturnContent) {
+                                const returnBlock = document.createElement('div');
+                                returnBlock.className = 'workflow-return-content';
+                                returnBlock.style.cssText = `
+                                    margin: 12px 0 0;
+                                    font-size: 13px;
+                                    color: inherit;
+                                    line-height: 1.5;
+                                `;
+                                returnBlock.innerHTML = this.client.uiRenderer.renderMarkdownish(data.return_content);
+                                bubbleRefs.responseContent.appendChild(returnBlock);
+                            }
                         }
                     }
                     break;
@@ -210,11 +223,11 @@ export class StreamClient {
                         errorBlock.style.cssText = `
                             margin: 8px 0;
                             padding: 12px;
-                            background: rgba(211, 63, 63, 0.05);
-                            border: 1px solid rgba(211, 63, 63, 0.3);
-                            border-radius: 8px;
+                            background: rgba(211, 63, 63, 0.08);
+                            border: 1px solid rgba(211, 63, 63, 0.24);
+                            border-radius: 10px;
                             font-size: 13px;
-                            color: #d33f3f;
+                            color: #f28b8b;
                         `;
                         errorBlock.textContent = `Error: ${errorMessage}`;
                         bubbleRefs.responseContent.appendChild(errorBlock);
