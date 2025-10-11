@@ -42,6 +42,7 @@ export class FractalicChatClient {
         this.executionBubbles = new Map();
         this.activeStreams = new Map();
         this.tokenStats = null;
+        this.terminalLogs = new Map();
 
         // Initialize modules
         this.fileBrowser = new FileBrowser(this);
@@ -230,17 +231,14 @@ export class FractalicChatClient {
                         placeholder.remove();
                     }
 
-                    if (data.return_content) {
-                        // Final result will be rendered via return_content handler below to avoid duplicates
-                        break;
+                    if (!data.return_content) {
+                        const rendered = this.uiRenderer.renderMarkdownish(data.content);
+                        const messageDiv = document.createElement('div');
+                        messageDiv.className = 'message-content system-message';
+                        messageDiv.style.cssText = 'margin-bottom: 12px;';
+                        messageDiv.innerHTML = rendered;
+                        bubbleRefs.responseContent.appendChild(messageDiv);
                     }
-
-                    const rendered = this.uiRenderer.renderMarkdownish(data.content);
-                    const messageDiv = document.createElement('div');
-                    messageDiv.className = 'message-content system-message';
-                    messageDiv.style.cssText = 'margin-bottom: 12px;';
-                    messageDiv.innerHTML = rendered;
-                    bubbleRefs.responseContent.appendChild(messageDiv);
 
                     if (shouldStoreInHistory) {
                         this.conversation.push({ role: 'assistant', content: data.content });
@@ -273,15 +271,31 @@ export class FractalicChatClient {
 
                     if (parentExecId && this.executionBubbles.has(parentExecId)) {
                         const parentBubble = this.executionBubbles.get(parentExecId);
+                        const streamExecutionId = parentBubble.rootExecutionId || parentExecId || nestedExecId;
+                        let streamLog = this.terminalLogs.get(streamExecutionId);
+                        if (!streamLog || typeof streamLog !== 'object' || typeof streamLog.raw !== 'string') {
+                            const raw = typeof streamLog === 'string' ? streamLog : '';
+                            streamLog = { raw };
+                            this.terminalLogs.set(streamExecutionId, streamLog);
+                        }
+                        const logEntry = streamLog;
+                        const terminalOffset = logEntry?.raw?.length || 0;
                         const childMeta = {
                             executionId: nestedExecId,
                             blockId: blockId || null,
                             currentLocation: 'response',
                             savedParent: bubbleRefs.bubble.parentNode || parentBubble.responseContent,
                             savedNextSibling: bubbleRefs.bubble.nextSibling || null,
-                            placeholderEl: null
+                            placeholderEl: null,
+                            streamExecutionId,
+                            terminalOffset
                         };
                         parentBubble.childBubbles.push(childMeta);
+
+                        bubbleRefs.terminalStreamId = streamExecutionId;
+                        bubbleRefs.terminalStartOffset = terminalOffset;
+                        bubbleRefs.terminalEndOffset = null;
+                        bubbleRefs.isCompleted = false;
 
                         if (parentBubble.inspectPanel && parentBubble.inspectPanel.classList.contains('active')) {
                             this.uiRenderer.moveChildBubblesToInspect(parentBubble, nestedExecId);
@@ -306,23 +320,28 @@ export class FractalicChatClient {
                         <span style="font-size: 11px; color: #83d69d; margin-left: 8px;">Done</span>
                     `;
                     bubbleRefs.bubble.style.borderColor = '#83d69d';
+                    bubbleRefs.isCompleted = true;
+
+                    const streamExecutionId = bubbleRefs.terminalStreamId || bubbleRefs.rootExecutionId || nestedExecId;
+                    const streamLog = this.terminalLogs.get(streamExecutionId);
+                    if (streamLog && typeof streamLog.raw === 'string') {
+                        const len = streamLog.raw.length;
+                        bubbleRefs.terminalEndOffset = len > bubbleRefs.terminalStartOffset ? len : bubbleRefs.terminalEndOffset;
+                    }
 
                     if (data.return_content) {
-                        const existingReturnContent = bubbleRefs.responseContent.querySelector('.workflow-return-content');
-                        if (!existingReturnContent) {
-                            const returnBlock = document.createElement('div');
-                            returnBlock.className = 'workflow-return-content';
-                            returnBlock.style.cssText = `
-                                margin: 12px 0 0;
-                                font-size: 13px;
-                                color: inherit;
-                                line-height: 1.5;
-                            `;
-                            returnBlock.innerHTML = this.uiRenderer.renderMarkdownish(data.return_content);
-                            bubbleRefs.responseContent.appendChild(returnBlock);
+                        const placeholder = bubbleRefs.responseContent.querySelector('[data-placeholder="true"]');
+                        if (placeholder) {
+                            placeholder.remove();
                         }
+                        const finalDiv = document.createElement('div');
+                        finalDiv.className = 'message-content final-result';
+                        finalDiv.style.cssText = 'margin-bottom: 12px;';
+                        finalDiv.innerHTML = this.uiRenderer.renderMarkdownish(data.return_content);
+                        bubbleRefs.responseContent.appendChild(finalDiv);
                     }
                 }
+
                 break;
             }
 
@@ -356,17 +375,46 @@ export class FractalicChatClient {
                     `;
                     errorBlock.textContent = `Error: ${errorMessage}`;
                     bubbleRefs.responseContent.appendChild(errorBlock);
+                    bubbleRefs.isCompleted = true;
+
+                    const streamExecutionId = bubbleRefs.terminalStreamId || bubbleRefs.rootExecutionId || nestedExecId;
+                    const streamLog = this.terminalLogs.get(streamExecutionId);
+                    if (streamLog && typeof streamLog.raw === 'string') {
+                        const len = streamLog.raw.length;
+                        bubbleRefs.terminalEndOffset = len > bubbleRefs.terminalStartOffset ? len : bubbleRefs.terminalEndOffset;
+                    }
                 }
+
                 break;
             }
 
             case 'execution_start': {
                 const execId = data.execution_id;
+                let logEntry = this.terminalLogs.get(execId);
+                if (!logEntry || typeof logEntry !== 'object' || typeof logEntry.raw !== 'string') {
+                    const raw = typeof logEntry === 'string' ? logEntry : '';
+                    logEntry = { raw };
+                    this.terminalLogs.set(execId, logEntry);
+                }
+
+                const startLength = logEntry && typeof logEntry.raw === 'string' ? logEntry.raw.length : 0;
+
                 if (!this.executionBubbles.has(execId)) {
                     const filePath = data.target || data.file_path || (this.selectedFile || '');
                     const bubbleRefs = this.uiRenderer.createExecutionBubble(execId, filePath, now);
                     this.executionBubbles.set(execId, bubbleRefs);
+                    bubbleRefs.isCompleted = false;
+                    bubbleRefs.terminalStreamId = bubbleRefs.rootExecutionId || execId;
+                    bubbleRefs.terminalStartOffset = startLength;
+                    bubbleRefs.terminalEndOffset = null;
+                } else {
+                    const bubbleRefs = this.executionBubbles.get(execId);
+                    bubbleRefs.isCompleted = false;
+                    bubbleRefs.terminalStreamId = bubbleRefs.rootExecutionId || execId;
+                    bubbleRefs.terminalStartOffset = startLength;
+                    bubbleRefs.terminalEndOffset = null;
                 }
+
                 break;
             }
 
@@ -382,7 +430,16 @@ export class FractalicChatClient {
                         <span style="font-size: 11px; color: #83d69d; margin-left: 8px;">✓ Done</span>
                     `;
                     bubbleRefs.bubble.style.borderColor = '#83d69d';
+                    bubbleRefs.isCompleted = true;
+
+                    const streamExecutionId = bubbleRefs.terminalStreamId || bubbleRefs.rootExecutionId || execId;
+                    const streamLog = this.terminalLogs.get(streamExecutionId);
+                    if (streamLog && typeof streamLog.raw === 'string') {
+                        const len = streamLog.raw.length;
+                        bubbleRefs.terminalEndOffset = len > bubbleRefs.terminalStartOffset ? len : bubbleRefs.terminalEndOffset;
+                    }
                 }
+
                 break;
             }
 
@@ -398,7 +455,16 @@ export class FractalicChatClient {
                         <span style="font-size: 11px; color: #d33f3f; margin-left: 8px;">✗ Failed</span>
                     `;
                     bubbleRefs.bubble.style.borderColor = '#d33f3f';
+                    bubbleRefs.isCompleted = true;
+
+                    const streamExecutionId = bubbleRefs.terminalStreamId || bubbleRefs.rootExecutionId || execId;
+                    const streamLog = this.terminalLogs.get(streamExecutionId);
+                    if (streamLog && typeof streamLog.raw === 'string') {
+                        const len = streamLog.raw.length;
+                        bubbleRefs.terminalEndOffset = len > bubbleRefs.terminalStartOffset ? len : bubbleRefs.terminalEndOffset;
+                    }
                 }
+
                 break;
             }
 

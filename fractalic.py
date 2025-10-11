@@ -542,13 +542,6 @@ def main():
             print(f"[DEBUG] return_content length: {len(result['return_content'])}")
             print(f"[DEBUG] return_content preview: {result['return_content'][:200]}")
 
-        # Emit return_content FIRST (before completion message)
-        if result.get('return_content'):
-            print(f"[DEBUG] Emitting return_content CHAT_MESSAGE, execution_id: {os.getenv('FRACTALIC_EXECUTION_ID')}")
-            # Emit the actual returned content as a chat message for the new architecture
-            emit_event(EventType.CHAT_MESSAGE, role='assistant', content=result['return_content'])
-            print(f"[DEBUG] return_content CHAT_MESSAGE emitted successfully")
-
         # Then emit completion message
         completion_message = f"✅ Фракталик завершил выполнение файла: {display_name}"
         if result.get('branch_name'):

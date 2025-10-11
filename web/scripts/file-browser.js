@@ -137,13 +137,52 @@ export class FileBrowser {
         this.client.activeStreams.clear();
     }
 
-    async showTerminalViewer(filePath, executionId, streamExecutionId = executionId) {
+    async showTerminalViewer(filePath, executionId, streamExecutionId = executionId, isExecutionCompleted = false, startOffsetRaw = 0, endOffsetRaw = null) {
+        let parseAnsiToHtml;
+        let escapeHtml;
         try {
+            if (!this.client.terminalLogs) {
+                this.client.terminalLogs = new Map();
+            }
+            let logEntry = this.client.terminalLogs.get(streamExecutionId);
+            if (!logEntry || typeof logEntry !== 'object' || typeof logEntry.raw !== 'string') {
+                const raw = typeof logEntry === 'string' ? logEntry : '';
+                logEntry = { raw };
+                this.client.terminalLogs.set(streamExecutionId, logEntry);
+            }
+
+            ({ parseAnsiToHtml, escapeHtml } = await import('./utils.js'));
+
             this.client.terminalFileName.textContent = filePath;
-            this.client.terminalContent.innerHTML = '';
+            const cachedRaw = logEntry.raw || '';
+            const targetEnd = typeof endOffsetRaw === 'number' ? endOffsetRaw : null;
+            let effectiveStart = startOffsetRaw;
+            if (executionId !== streamExecutionId && effectiveStart === 0) {
+                const marker = `nested_exec_id=${executionId}`;
+                const markerIndex = cachedRaw.indexOf(marker);
+                if (markerIndex >= 0) {
+                    effectiveStart = markerIndex;
+                    const bubbleRefs = this.client.executionBubbles?.get(executionId);
+                    if (bubbleRefs) {
+                        bubbleRefs.terminalStartOffset = markerIndex;
+                    }
+                }
+            }
+
+            const baseSliceEnd = targetEnd !== null ? Math.min(targetEnd, cachedRaw.length) : undefined;
+            const baseRaw = cachedRaw.slice(effectiveStart, baseSliceEnd);
+            this.client.terminalContent.innerHTML = parseAnsiToHtml(baseRaw);
+            this.client.terminalViewerModal.style.display = 'block';
+
+            const hasFullData = targetEnd !== null && cachedRaw.length >= targetEnd;
+            if (hasFullData) {
+                this.client.terminalStatus.textContent = `Завершено: ${filePath}`;
+                this.client.terminalStatus.className = 'terminal-status completed';
+                return;
+            }
+
             this.client.terminalStatus.textContent = 'Подключение к терминалу...';
             this.client.terminalStatus.className = 'terminal-status running';
-            this.client.terminalViewerModal.style.display = 'block';
 
             // Создаем AbortController для этого стрима
             const controller = new AbortController();
@@ -159,6 +198,7 @@ export class FileBrowser {
 
             const reader = response.body.getReader();
             const decoder = new TextDecoder();
+            let displayedLength = baseRaw.length;
 
             this.client.terminalStatus.textContent = `Выполняется: ${filePath}`;
 
@@ -168,18 +208,33 @@ export class FileBrowser {
                 if (done) {
                     this.client.terminalStatus.textContent = `Завершено: ${filePath}`;
                     this.client.terminalStatus.className = 'terminal-status completed';
+                    this.client.terminalLogs.set(streamExecutionId, logEntry);
                     break;
                 }
 
                 const chunk = decoder.decode(value, { stream: true });
+                if (!chunk) continue;
 
-                // Парсим ANSI коды для цветного вывода
-                const { parseAnsiToHtml } = await import('./utils.js');
-                const htmlChunk = parseAnsiToHtml(chunk);
-                this.client.terminalContent.innerHTML += htmlChunk;
+                logEntry.raw += chunk;
+                this.client.terminalLogs.set(streamExecutionId, logEntry);
 
-                // Автоскролл к концу
-                this.client.terminalContent.scrollTop = this.client.terminalContent.scrollHeight;
+                const currentSliceEnd = targetEnd !== null ? Math.min(targetEnd, logEntry.raw.length) : undefined;
+                const viewRaw = logEntry.raw.slice(effectiveStart, currentSliceEnd);
+                const newPortion = viewRaw.slice(displayedLength);
+                if (newPortion.length > 0) {
+                    const htmlChunk = parseAnsiToHtml(newPortion);
+                    this.client.terminalContent.innerHTML += htmlChunk;
+                    displayedLength += newPortion.length;
+
+                    this.client.terminalContent.scrollTop = this.client.terminalContent.scrollHeight;
+                }
+
+                if (targetEnd !== null && logEntry.raw.length >= targetEnd) {
+                    this.client.terminalStatus.textContent = `Завершено: ${filePath}`;
+                    this.client.terminalStatus.className = 'terminal-status completed';
+                    this.client.terminalLogs.set(streamExecutionId, logEntry);
+                    break;
+                }
             }
 
         } catch (error) {
@@ -187,10 +242,13 @@ export class FileBrowser {
                 console.log('Terminal stream aborted');
             } else {
                 console.error('Error fetching terminal stream:', error);
-                const { escapeHtml } = await import('./utils.js');
-                this.client.terminalContent.innerHTML += `\n<span class="ansi-red">[Ошибка соединения: ${escapeHtml(error.message)}]</span>`;
+                const safeEscape = escapeHtml || (await import('./utils.js')).escapeHtml;
+                this.client.terminalContent.innerHTML += `\n<span class="ansi-red">[Ошибка соединения: ${safeEscape(error.message)}]</span>`;
                 this.client.terminalStatus.textContent = 'Ошибка соединения';
                 this.client.terminalStatus.className = 'terminal-status completed';
+                const existingLog = this.client.terminalLogs.get(streamExecutionId) || { raw: '' };
+                existingLog.raw += `\n[Ошибка соединения: ${error.message}]`;
+                this.client.terminalLogs.set(streamExecutionId, existingLog);
             }
         } finally {
             // Убираем из активных стримов

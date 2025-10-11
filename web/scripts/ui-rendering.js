@@ -9,7 +9,7 @@ export class UIRenderer {
         this.client = client;
         this.messagesContainer = client.messagesContainer;
         this.messageKeys = new Set();
-        this.astBlocks = new Map();
+        this.globalAstBlocks = new Map();  // Legacy fallback
         this.isFirstASTSnapshot = true;
         this.markedConfigured = false;
         // Track pending nested bubbles waiting for AST blocks to be created
@@ -391,8 +391,11 @@ export class UIRenderer {
         };
         terminalButton.onclick = (e) => {
             e.stopPropagation();
-            const targetExecutionId = bubbleRefsRef?.rootExecutionId || executionId;
-            this.client.fileBrowser.showTerminalViewer(filePath, executionId, targetExecutionId);
+            const targetExecutionId = bubbleRefsRef?.terminalStreamId || bubbleRefsRef?.rootExecutionId || executionId;
+            const isCompleted = !!bubbleRefsRef?.isCompleted;
+            const startOffset = bubbleRefsRef?.terminalStartOffset || 0;
+            const endOffset = bubbleRefsRef?.terminalEndOffset ?? null;
+            this.client.fileBrowser.showTerminalViewer(filePath, executionId, targetExecutionId, isCompleted, startOffset, endOffset);
         };
 
         // Create tab switcher
@@ -501,13 +504,18 @@ export class UIRenderer {
             tokenCounter,  // Reference to token counter badge
             activeBlockId: null,  // Track currently processing block
             blockTokens: new Map(),  // blockId -> {input, output} token stats
+            astBlocks: new Map(),  // blockId -> element (per-execution)
             totalTokens: {input: 0, output: 0},  // Execution-level accumulator
             parentExecutionId,  // Track parent for hierarchical token aggregation
             childBubbles: [],  // Track child bubbles for aggregation and placement
             responseTab,
             inspectTab,
             rootExecutionId,
-            executionId
+            executionId,
+            isCompleted: false,
+            terminalStreamId: rootExecutionId,
+            terminalStartOffset: 0,
+            terminalEndOffset: null
         };
         bubbleRefsRef = bubbleRefs;
         return bubbleRefs;
@@ -640,6 +648,8 @@ export class UIRenderer {
         console.log(`[AST] renderASTBlocks called for execution: ${executionId.substring(0, 8)}`);
         console.log(`[AST] Blocks to render: [${blocks.map(b => b.id.substring(0, 8)).join(', ')}]`);
 
+        const astBlocksMap = bubbleRefs && bubbleRefs.astBlocks ? bubbleRefs.astBlocks : this.globalAstBlocks;
+
         // SAVE pending blocks before clearing - map them by parent block ID
         const pendingBlocksMap = new Map();
 
@@ -685,7 +695,7 @@ export class UIRenderer {
         // Clear container if no blocks
         if (!blocks || blocks.length === 0) {
     container.innerHTML = '<div style="text-align: center; color: #a0a8b2; padding: 20px;">No AST blocks yet</div>';
-    this.astBlocks.clear();
+    astBlocksMap.clear();
     return;
         }
 
@@ -693,7 +703,7 @@ export class UIRenderer {
         container.innerHTML = '';
 
         // Track which blocks already exist to mark as new or existing
-        const existingBlockIds = new Set(this.astBlocks.keys());
+        const existingBlockIds = new Set(astBlocksMap.keys());
 
         // Don't highlight anything on first snapshot (initial parse)
         const shouldHighlightNew = !this.isFirstASTSnapshot;
@@ -710,7 +720,7 @@ export class UIRenderer {
     }
 
     // Create or reuse block element
-    let blockEl = this.astBlocks.get(blockId);
+    let blockEl = astBlocksMap.get(blockId);
     if (!blockEl) {
         blockEl = document.createElement('div');
         blockEl.className = 'ast-block';
@@ -792,7 +802,11 @@ export class UIRenderer {
         });
 
         // Replace old map with new one
-        this.astBlocks = newBlocksMap;
+    if (bubbleRefs) {
+        bubbleRefs.astBlocks = newBlocksMap;
+    } else {
+        this.globalAstBlocks = newBlocksMap;
+    }
 
         // Mark that we've received the first snapshot
         this.isFirstASTSnapshot = false;
@@ -897,12 +911,13 @@ export class UIRenderer {
         if (!blockId) return;
 
         // Remove 'active' class from all blocks in all bubbles
-        this.astBlocks.forEach((blockEl) => {
-    blockEl.classList.remove('active');
+        const currentAstMap = bubbleRefs?.astBlocks || this.globalAstBlocks;
+        currentAstMap.forEach((blockEl) => {
+            blockEl.classList.remove('active');
         });
 
         // Add 'active' class to the target block
-        const targetBlock = this.astBlocks.get(blockId);
+        const targetBlock = currentAstMap.get(blockId);
         if (targetBlock) {
     targetBlock.classList.add('active');
 
@@ -936,7 +951,8 @@ export class UIRenderer {
         }
 
         // Find the active block element
-        const activeBlockEl = this.astBlocks.get(activeBlockId);
+        const astBlocksMap = bubbleRefs?.astBlocks || this.globalAstBlocks;
+        const activeBlockEl = astBlocksMap.get(activeBlockId);
         if (!activeBlockEl) {
     bubbleRefs.pendingOutput.innerHTML += content;
     return;
@@ -1152,7 +1168,12 @@ export class UIRenderer {
         terminalIcon.onmouseout = () => terminalIcon.style.opacity = '0.7';
         terminalIcon.onclick = (e) => {
     e.stopPropagation(); // Prevent collapse/expand
-    this.client.fileBrowser.showTerminalViewer(filePath, executionId);
+    const bubbleRefs = this.client.executionBubbles.get(executionId);
+    const targetExecutionId = bubbleRefs?.terminalStreamId || bubbleRefs?.rootExecutionId || executionId;
+    const isCompleted = !!bubbleRefs?.isCompleted;
+    const startOffset = bubbleRefs?.terminalStartOffset || 0;
+    const endOffset = bubbleRefs?.terminalEndOffset ?? null;
+    this.client.fileBrowser.showTerminalViewer(filePath, executionId, targetExecutionId, isCompleted, startOffset, endOffset);
         };
 
         leftSection.appendChild(statusIcon);
