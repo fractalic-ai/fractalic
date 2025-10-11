@@ -137,7 +137,7 @@ export class FileBrowser {
         this.client.activeStreams.clear();
     }
 
-    async showTerminalViewer(filePath, executionId) {
+    async showTerminalViewer(filePath, executionId, streamExecutionId = executionId) {
         try {
             this.client.terminalFileName.textContent = filePath;
             this.client.terminalContent.innerHTML = '';
@@ -149,7 +149,7 @@ export class FileBrowser {
             const controller = new AbortController();
             this.client.activeStreams.set(executionId, controller);
 
-            const response = await fetch(`/api/chat/terminal-stream/${encodeURIComponent(executionId)}`, {
+            const response = await fetch(`/api/chat/terminal-stream/${encodeURIComponent(streamExecutionId)}`, {
                 signal: controller.signal
             });
 

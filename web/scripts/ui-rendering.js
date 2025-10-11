@@ -391,7 +391,8 @@ export class UIRenderer {
         };
         terminalButton.onclick = (e) => {
             e.stopPropagation();
-            this.client.fileBrowser.showTerminalViewer(filePath, executionId);
+            const targetExecutionId = bubbleRefsRef?.rootExecutionId || executionId;
+            this.client.fileBrowser.showTerminalViewer(filePath, executionId, targetExecutionId);
         };
 
         // Create tab switcher
@@ -483,6 +484,12 @@ export class UIRenderer {
         this.scrollToBottom();
 
         // Return references for later updates
+        const parentBubbleRefs = parentExecutionId && this.client.executionBubbles.has(parentExecutionId)
+            ? this.client.executionBubbles.get(parentExecutionId)
+            : null;
+
+        const rootExecutionId = parentBubbleRefs?.rootExecutionId || parentExecutionId || executionId;
+
         const bubbleRefs = {
             bubble,
             title,
@@ -498,7 +505,9 @@ export class UIRenderer {
             parentExecutionId,  // Track parent for hierarchical token aggregation
             childBubbles: [],  // Track child bubbles for aggregation and placement
             responseTab,
-            inspectTab
+            inspectTab,
+            rootExecutionId,
+            executionId
         };
         bubbleRefsRef = bubbleRefs;
         return bubbleRefs;

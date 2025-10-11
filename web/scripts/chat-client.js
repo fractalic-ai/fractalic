@@ -230,6 +230,11 @@ export class FractalicChatClient {
                         placeholder.remove();
                     }
 
+                    if (data.return_content) {
+                        // Final result will be rendered via return_content handler below to avoid duplicates
+                        break;
+                    }
+
                     const rendered = this.uiRenderer.renderMarkdownish(data.content);
                     const messageDiv = document.createElement('div');
                     messageDiv.className = 'message-content system-message';
@@ -573,12 +578,19 @@ export class FractalicChatClient {
             const execId = data.execution_id;
             if (execId && this.executionBubbles.has(execId)) {
                 const bubbleRefs = this.executionBubbles.get(execId);
+                const placeholder = bubbleRefs.responseContent.querySelector('[data-placeholder="true"]');
+                if (placeholder) {
+                    placeholder.remove();
+                }
                 const rendered = this.uiRenderer.renderMarkdownish(data.return_content);
                 const resultDiv = document.createElement('div');
                 resultDiv.className = 'message-content final-result';
                 resultDiv.style.cssText = 'margin-bottom: 12px;';
                 resultDiv.innerHTML = rendered;
                 bubbleRefs.responseContent.appendChild(resultDiv);
+                if (data.role === 'assistant') {
+                    this.uiRenderer.appendConversationEntry('assistant', data.return_content);
+                }
             } else {
                 this.uiRenderer.addMessage('assistant', 'Ответ Fractalic:', now, {
                     returnContent: data.return_content,
