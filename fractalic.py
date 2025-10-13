@@ -406,6 +406,32 @@ def run_fractalic(input_file, task_file=None, param_input_user_request=None, par
         if execution_successful:
             # Build success output
             output = f"Execution completed. Branch: {branch_name}, Context: {ctx_hash}"
+
+            # Emit file-level token usage summary AFTER all operations completed
+            try:
+                from core.simple_token_tracker import token_tracker
+                source_file = input_file_basename
+                file_stats = token_tracker.get_file_stats(source_file)
+                global_stats = token_tracker.get_global_stats()
+
+                if file_stats and (file_stats['file_input_tokens'] > 0 or file_stats['file_output_tokens'] > 0):
+                    # Get the model used (from provider settings)
+                    actual_model = provider_settings.get('model', provider)
+
+                    emit_event(EventType.TOKEN_USAGE_SUMMARY,
+                             nested_execution_id=None,  # Top-level file execution
+                             block_id=None,  # File-level summary, not tied to specific block
+                             model=actual_model,
+                             input_tokens=file_stats['file_input_tokens'],
+                             output_tokens=file_stats['file_output_tokens'],
+                             total_input=global_stats['global_input_tokens'],
+                             total_output=global_stats['global_output_tokens'],
+                             source_file=source_file,
+                             response_cost=file_stats.get('file_cost', 0.0))
+            except Exception as token_e:
+                # Don't fail workflow completion if token summary fails
+                print(f"[WARNING] Failed to emit token usage summary: {token_e}")
+
             # Emit workflow completion (agent/file execution finished)
             # This is different from EXECUTION_COMPLETE which signals the entire process end
             try:

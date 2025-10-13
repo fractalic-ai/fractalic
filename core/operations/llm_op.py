@@ -219,8 +219,12 @@ def insert_direct_context(ast: AST, tool_loop_ast: AST, current_node: Node):
         current_node.response_content = current_response
 
 
-def process_llm(ast: AST, current_node: Node, call_tree_node=None, committed_files=None, file_commit_hashes=None, base_dir=None) -> Optional[Node]:
-    """Process @llm operation with updated schema support"""
+def process_llm(ast: AST, current_node: Node, call_tree_node=None, committed_files=None, file_commit_hashes=None, base_dir=None, nested_execution_id: str = None) -> Optional[Node]:
+    """Process @llm operation with updated schema support
+
+    Args:
+        nested_execution_id: Optional nested execution ID when this LLM operation is within a nested workflow
+    """
     console = Console(force_terminal=True)
     
     # Extract system prompts first (always available)
@@ -523,9 +527,10 @@ def process_llm(ast: AST, current_node: Node, call_tree_node=None, committed_fil
         'start_time': start_time
     }
     
-    # Add source file and block_id to params so LLM client can use it for token tracking
+    # Add source file, block_id, and nested_execution_id to params so LLM client can use them for token tracking and event emission
     params['_source_file'] = operation_context['source_file']
     params['_block_id'] = current_node.key or current_node.hash
+    params['_nested_execution_id'] = nested_execution_id
 
     try:
         response = llm_client.llm_call(prompt_text, messages, params)
@@ -642,28 +647,8 @@ def process_llm(ast: AST, current_node: Node, call_tree_node=None, committed_fil
             f" completed ({duration_str})[/green]{usage_text}"
         )
 
-        # Emit file-level cumulative token usage statistics
-        source_file = getattr(ast, 'source_file', None) or getattr(ast, 'filename', None) or 'unknown'
-        file_stats = token_tracker.get_file_stats(source_file)
-        global_stats = token_tracker.get_global_stats()
-
-        if file_stats and (file_stats['file_input_tokens'] > 0 or file_stats['file_output_tokens'] > 0):
-            emit_event(EventType.TOKEN_USAGE,
-                     block_id=current_node.key or current_node.hash,  # Link to @llm block
-                     model=actual_model,
-                     input_tokens=file_stats['file_input_tokens'],
-                     output_tokens=file_stats['file_output_tokens'],
-                     total_input=global_stats['global_input_tokens'],
-                     total_output=global_stats['global_output_tokens'],
-                     source_file=source_file,
-                     is_summary=True,
-                     # Add cost information for summary
-                     response_cost=file_stats.get('file_cost', 0.0),
-                     # Note: For summary, we don't have per-call breakdown, so we pass file total as response_cost
-                     # Frontend can display it as total cost for the file
-                     input_cost=0.0,
-                     output_cost=0.0,
-                     tool_usage_cost=0.0)
+        # NOTE: TOKEN_USAGE_SUMMARY is now emitted in fractalic.py after workflow completion
+        # This ensures it appears after all operations including @return
 
     except Exception as e:
         # Restore original API key on error

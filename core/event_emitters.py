@@ -17,11 +17,12 @@ def _session_id():
     return os.getenv('FRACTALIC_EXECUTION_ID')
 
 
-def emit_event(event_type: EventType, **data):
+def emit_event(event_type: EventType, nested_execution_id: str = None, **data):
     """Universal event emission function.
 
     Args:
         event_type: Type of event (EventType enum value)
+        nested_execution_id: Optional nested execution ID for routing events to child bubbles (explicitly passed, not from env)
         **data: Event-specific data fields
     """
     execution_id = os.getenv('FRACTALIC_EXECUTION_ID')
@@ -29,11 +30,8 @@ def emit_event(event_type: EventType, **data):
         # Events without execution_id are local-only (not sent to server)
         return
 
-    # Check if we're in a nested execution context
-    nested_execution_id = os.getenv('FRACTALIC_NESTED_EXECUTION_ID')
-
-    # If nested_execution_id is set, use it as the primary execution_id for routing
-    # But keep the original execution_id as well for reference
+    # Use explicitly passed nested_execution_id instead of reading from environment
+    # This prevents race conditions with finally blocks that cleanup env vars
     if nested_execution_id:
         event = {
             'type': event_type.value if isinstance(event_type, EventType) else event_type,
@@ -55,13 +53,14 @@ def emit_event(event_type: EventType, **data):
     _stream_event_to_server(event)
 
 
-def emit_ast_snapshot(ast, operation_type: str = "unknown", changed_blocks: list = None):
+def emit_ast_snapshot(ast, operation_type: str = "unknown", changed_blocks: list = None, nested_execution_id: str = None):
     """Send AST structure snapshot to UI for visualization.
 
     Args:
         ast: AST object to extract blocks from
         operation_type: Type of operation that modified AST (llm, shell, import, return, parse)
         changed_blocks: List of block IDs that were added/modified
+        nested_execution_id: Optional nested execution ID for routing to child bubbles
     """
     execution_id = os.getenv('FRACTALIC_EXECUTION_ID')
     if not execution_id:
@@ -130,7 +129,7 @@ def emit_ast_snapshot(ast, operation_type: str = "unknown", changed_blocks: list
         return  # Don't send partial data
 
     print(f"[DEBUG emit_ast_snapshot] Emitting {len(blocks)} AST blocks for operation '{operation_type}'")
-    emit_event(EventType.AST_UPDATE, operation=operation_type, blocks=blocks)
+    emit_event(EventType.AST_UPDATE, nested_execution_id=nested_execution_id, operation=operation_type, blocks=blocks)
 
 
 def _stream_event_to_server(event):

@@ -2,10 +2,12 @@
  * Fractalic Chat Client - Main class that coordinates all modules
  */
 
-import { FileBrowser } from './file-browser.js?v=6';
-import { UIRenderer } from './ui-rendering.js?v=6';
-import { StreamClient } from './stream-client.js?v=6';
-import { createSVGIcon, formatTime } from './utils.js?v=6';
+import { FileBrowser } from './file-browser.js?v=7';
+import { UIRenderer } from './ui-rendering.js?v=7';
+import { StreamClient } from './stream-client.js?v=7';
+import { TerminalViewer } from './terminal-viewer.js?v=7';
+import { DiffViewer } from './diff-viewer.js?v=7';
+import { createSVGIcon, formatTime } from './utils.js?v=7';
 
 export class FractalicChatClient {
     constructor() {
@@ -42,12 +44,23 @@ export class FractalicChatClient {
         this.executionBubbles = new Map();
         this.activeStreams = new Map();
         this.tokenStats = null;
-        this.terminalLogs = new Map();
+        this.executionSeq = new Map();
+        this.executionSeqSeen = new Map();
 
         // Initialize modules
         this.fileBrowser = new FileBrowser(this);
         this.uiRenderer = new UIRenderer(this);
         this.streamClient = new StreamClient(this);
+        this.terminalViewer = new TerminalViewer({
+            modal: this.terminalViewerModal,
+            content: this.terminalContent,
+            fileName: this.terminalFileName,
+            status: this.terminalStatus
+        });
+        this.diffViewer = new DiffViewer({
+            modal: this.diffViewerModal,
+            content: this.diffContent
+        });
 
         // Setup event listeners
         this.initializeEventListeners();
@@ -87,12 +100,12 @@ export class FractalicChatClient {
         this.cancelButton.addEventListener('click', () => this.fileBrowser.closeFileBrowser());
         
         // Diff viewer events
-        this.diffModalCloseButton.addEventListener('click', () => this.fileBrowser.closeDiffViewer());
-        this.closeDiffButton.addEventListener('click', () => this.fileBrowser.closeDiffViewer());
-        
+        this.diffModalCloseButton.addEventListener('click', () => this.diffViewer.close());
+        this.closeDiffButton.addEventListener('click', () => this.diffViewer.close());
+
         // Terminal viewer events
-        this.terminalModalCloseButton.addEventListener('click', () => this.fileBrowser.closeTerminalViewer());
-        this.closeTerminalButton.addEventListener('click', () => this.fileBrowser.closeTerminalViewer());
+        this.terminalModalCloseButton.addEventListener('click', () => this.terminalViewer.close());
+        this.closeTerminalButton.addEventListener('click', () => this.terminalViewer.close());
         
         // Close modals when clicking outside
         this.fileBrowserModal.addEventListener('click', (e) => {
@@ -103,13 +116,13 @@ export class FractalicChatClient {
         
         this.diffViewerModal.addEventListener('click', (e) => {
             if (e.target === this.diffViewerModal) {
-                this.fileBrowser.closeDiffViewer();
+                this.diffViewer.close();
             }
         });
-        
+
         this.terminalViewerModal.addEventListener('click', (e) => {
             if (e.target === this.terminalViewerModal) {
-                this.fileBrowser.closeTerminalViewer();
+                this.terminalViewer.close();
             }
         });
     }
@@ -192,6 +205,41 @@ export class FractalicChatClient {
         const receivedIso = receivedAtIso || new Date().toISOString();
         const now = formatTime(receivedIso);
         const sessionId = data.session_id || data.execution_id;
+        const eventSeqRaw = data.seq;
+        const seq = Number.isFinite(eventSeqRaw) ? eventSeqRaw : (typeof eventSeqRaw === 'string' && !Number.isNaN(Number(eventSeqRaw)) ? Number(eventSeqRaw) : null);
+
+        const bumpSeq = (executionId) => {
+            if (!executionId || seq == null) {
+                return true;
+            }
+
+            if (!this.executionSeqSeen.has(executionId)) {
+                this.executionSeqSeen.set(executionId, new Set());
+            }
+
+            const seenSet = this.executionSeqSeen.get(executionId);
+            if (seenSet.has(seq)) {
+                console.warn(`[SEQ] Duplicate event for ${executionId}: seq=${seq}`);
+                return false;
+            }
+            seenSet.add(seq);
+
+            const lastSeq = this.executionSeq.get(executionId) || 0;
+            if (seq < lastSeq) {
+                console.warn(`[SEQ] Out-of-order event for ${executionId}: seq=${seq} last=${lastSeq}`);
+            } else if (seq > lastSeq) {
+                this.executionSeq.set(executionId, seq);
+            }
+
+            if (this.executionBubbles.has(executionId)) {
+                const bubbleRefs = this.executionBubbles.get(executionId);
+                const prevSeq = bubbleRefs.lastSeq || 0;
+                if (seq > prevSeq) {
+                    bubbleRefs.lastSeq = seq;
+                }
+            }
+            return true;
+        };
 
         console.log('📥 Event:', data.type,
             data.role ? `(role: ${data.role})` : '',
@@ -226,6 +274,7 @@ export class FractalicChatClient {
 
                 if (isAssistantMessage && execId && this.executionBubbles.has(execId)) {
                     const bubbleRefs = this.executionBubbles.get(execId);
+                    if (!bumpSeq(execId)) break;
                     const placeholder = bubbleRefs.responseContent.querySelector('[data-placeholder="true"]');
                     if (placeholder) {
                         placeholder.remove();
@@ -268,18 +317,14 @@ export class FractalicChatClient {
                         blockId
                     );
                     this.executionBubbles.set(nestedExecId, bubbleRefs);
+                    bubbleRefs.isCompleted = false;
+                    bumpSeq(nestedExecId);
 
                     if (parentExecId && this.executionBubbles.has(parentExecId)) {
                         const parentBubble = this.executionBubbles.get(parentExecId);
-                        const streamExecutionId = parentBubble.rootExecutionId || parentExecId || nestedExecId;
-                        let streamLog = this.terminalLogs.get(streamExecutionId);
-                        if (!streamLog || typeof streamLog !== 'object' || typeof streamLog.raw !== 'string') {
-                            const raw = typeof streamLog === 'string' ? streamLog : '';
-                            streamLog = { raw };
-                            this.terminalLogs.set(streamExecutionId, streamLog);
-                        }
-                        const logEntry = streamLog;
-                        const terminalOffset = logEntry?.raw?.length || 0;
+                        // FIXED: Use nestedExecId for terminal stream instead of parent's rootExecutionId
+                        // Each nested module has its own terminal stream keyed by its nestedExecutionId
+                        const streamExecutionId = nestedExecId;
                         const childMeta = {
                             executionId: nestedExecId,
                             blockId: blockId || null,
@@ -287,20 +332,19 @@ export class FractalicChatClient {
                             savedParent: bubbleRefs.bubble.parentNode || parentBubble.responseContent,
                             savedNextSibling: bubbleRefs.bubble.nextSibling || null,
                             placeholderEl: null,
-                            streamExecutionId,
-                            terminalOffset
+                            streamExecutionId
                         };
                         parentBubble.childBubbles.push(childMeta);
 
                         bubbleRefs.terminalStreamId = streamExecutionId;
-                        bubbleRefs.terminalStartOffset = terminalOffset;
-                        bubbleRefs.terminalEndOffset = null;
                         bubbleRefs.isCompleted = false;
 
                         if (parentBubble.inspectPanel && parentBubble.inspectPanel.classList.contains('active')) {
                             this.uiRenderer.moveChildBubblesToInspect(parentBubble, nestedExecId);
                         }
                     }
+                } else {
+                    bumpSeq(nestedExecId);
                 }
                 break;
             }
@@ -309,6 +353,7 @@ export class FractalicChatClient {
                 const nestedExecId = data.nested_execution_id || data.execution_id;
 
                 if (nestedExecId && this.executionBubbles.has(nestedExecId)) {
+                    if (!bumpSeq(nestedExecId)) break;
                     const bubbleRefs = this.executionBubbles.get(nestedExecId);
                     const filePath = data.target || '';
                     const fileName = filePath.split('/').pop() || filePath;
@@ -321,13 +366,6 @@ export class FractalicChatClient {
                     `;
                     bubbleRefs.bubble.style.borderColor = '#83d69d';
                     bubbleRefs.isCompleted = true;
-
-                    const streamExecutionId = bubbleRefs.terminalStreamId || bubbleRefs.rootExecutionId || nestedExecId;
-                    const streamLog = this.terminalLogs.get(streamExecutionId);
-                    if (streamLog && typeof streamLog.raw === 'string') {
-                        const len = streamLog.raw.length;
-                        bubbleRefs.terminalEndOffset = len > bubbleRefs.terminalStartOffset ? len : bubbleRefs.terminalEndOffset;
-                    }
 
                     if (data.return_content) {
                         const placeholder = bubbleRefs.responseContent.querySelector('[data-placeholder="true"]');
@@ -342,6 +380,13 @@ export class FractalicChatClient {
                     }
                 }
 
+                // Mark terminal as complete
+                if (nestedExecId) {
+                    this.terminalViewer.markComplete(nestedExecId);
+                    this.executionSeq.delete(nestedExecId);
+                    this.executionSeqSeen.delete(nestedExecId);
+                }
+
                 break;
             }
 
@@ -349,6 +394,7 @@ export class FractalicChatClient {
                 const nestedExecId = data.nested_execution_id || data.execution_id;
 
                 if (nestedExecId && this.executionBubbles.has(nestedExecId)) {
+                    if (!bumpSeq(nestedExecId)) break;
                     const bubbleRefs = this.executionBubbles.get(nestedExecId);
                     const filePath = data.target || '';
                     const fileName = filePath.split('/').pop() || filePath;
@@ -376,13 +422,13 @@ export class FractalicChatClient {
                     errorBlock.textContent = `Error: ${errorMessage}`;
                     bubbleRefs.responseContent.appendChild(errorBlock);
                     bubbleRefs.isCompleted = true;
+                }
 
-                    const streamExecutionId = bubbleRefs.terminalStreamId || bubbleRefs.rootExecutionId || nestedExecId;
-                    const streamLog = this.terminalLogs.get(streamExecutionId);
-                    if (streamLog && typeof streamLog.raw === 'string') {
-                        const len = streamLog.raw.length;
-                        bubbleRefs.terminalEndOffset = len > bubbleRefs.terminalStartOffset ? len : bubbleRefs.terminalEndOffset;
-                    }
+                // Mark terminal as complete
+                if (nestedExecId) {
+                    this.terminalViewer.markComplete(nestedExecId);
+                    this.executionSeq.delete(nestedExecId);
+                    this.executionSeqSeen.delete(nestedExecId);
                 }
 
                 break;
@@ -390,14 +436,6 @@ export class FractalicChatClient {
 
             case 'execution_start': {
                 const execId = data.execution_id;
-                let logEntry = this.terminalLogs.get(execId);
-                if (!logEntry || typeof logEntry !== 'object' || typeof logEntry.raw !== 'string') {
-                    const raw = typeof logEntry === 'string' ? logEntry : '';
-                    logEntry = { raw };
-                    this.terminalLogs.set(execId, logEntry);
-                }
-
-                const startLength = logEntry && typeof logEntry.raw === 'string' ? logEntry.raw.length : 0;
 
                 if (!this.executionBubbles.has(execId)) {
                     const filePath = data.target || data.file_path || (this.selectedFile || '');
@@ -405,14 +443,12 @@ export class FractalicChatClient {
                     this.executionBubbles.set(execId, bubbleRefs);
                     bubbleRefs.isCompleted = false;
                     bubbleRefs.terminalStreamId = bubbleRefs.rootExecutionId || execId;
-                    bubbleRefs.terminalStartOffset = startLength;
-                    bubbleRefs.terminalEndOffset = null;
+                    bumpSeq(execId);
                 } else {
+                    if (!bumpSeq(execId)) break;
                     const bubbleRefs = this.executionBubbles.get(execId);
                     bubbleRefs.isCompleted = false;
                     bubbleRefs.terminalStreamId = bubbleRefs.rootExecutionId || execId;
-                    bubbleRefs.terminalStartOffset = startLength;
-                    bubbleRefs.terminalEndOffset = null;
                 }
 
                 break;
@@ -421,6 +457,7 @@ export class FractalicChatClient {
             case 'execution_complete': {
                 const execId = data.execution_id;
                 if (execId && this.executionBubbles.has(execId)) {
+                    if (!bumpSeq(execId)) break;
                     const bubbleRefs = this.executionBubbles.get(execId);
                     const checkIcon = createSVGIcon('checkCircle', 16, '#83d69d');
                     const filePath = data.target || data.file_path || '';
@@ -431,13 +468,13 @@ export class FractalicChatClient {
                     `;
                     bubbleRefs.bubble.style.borderColor = '#83d69d';
                     bubbleRefs.isCompleted = true;
+                }
 
-                    const streamExecutionId = bubbleRefs.terminalStreamId || bubbleRefs.rootExecutionId || execId;
-                    const streamLog = this.terminalLogs.get(streamExecutionId);
-                    if (streamLog && typeof streamLog.raw === 'string') {
-                        const len = streamLog.raw.length;
-                        bubbleRefs.terminalEndOffset = len > bubbleRefs.terminalStartOffset ? len : bubbleRefs.terminalEndOffset;
-                    }
+                // Mark terminal as complete
+                if (execId) {
+                    this.terminalViewer.markComplete(execId);
+                    this.executionSeq.delete(execId);
+                    this.executionSeqSeen.delete(execId);
                 }
 
                 break;
@@ -446,6 +483,7 @@ export class FractalicChatClient {
             case 'execution_error': {
                 const execId = data.execution_id;
                 if (execId && this.executionBubbles.has(execId)) {
+                    if (!bumpSeq(execId)) break;
                     const bubbleRefs = this.executionBubbles.get(execId);
                     const errorIcon = createSVGIcon('error', 16, '#d33f3f');
                     const filePath = data.target || data.file_path || '';
@@ -456,13 +494,13 @@ export class FractalicChatClient {
                     `;
                     bubbleRefs.bubble.style.borderColor = '#d33f3f';
                     bubbleRefs.isCompleted = true;
+                }
 
-                    const streamExecutionId = bubbleRefs.terminalStreamId || bubbleRefs.rootExecutionId || execId;
-                    const streamLog = this.terminalLogs.get(streamExecutionId);
-                    if (streamLog && typeof streamLog.raw === 'string') {
-                        const len = streamLog.raw.length;
-                        bubbleRefs.terminalEndOffset = len > bubbleRefs.terminalStartOffset ? len : bubbleRefs.terminalEndOffset;
-                    }
+                // Mark terminal as complete
+                if (execId) {
+                    this.terminalViewer.markComplete(execId);
+                    this.executionSeq.delete(execId);
+                    this.executionSeqSeen.delete(execId);
                 }
 
                 break;
@@ -480,6 +518,7 @@ export class FractalicChatClient {
             case 'ast_update': {
                 const execId = data.execution_id;
                 if (execId && this.executionBubbles.has(execId)) {
+                    if (!bumpSeq(execId)) break;
                     const bubbleRefs = this.executionBubbles.get(execId);
                     this.uiRenderer.renderASTBlocks(data.blocks || [], data.operation, bubbleRefs.astContainer, bubbleRefs);
                 }
@@ -489,6 +528,7 @@ export class FractalicChatClient {
             case 'tool_call': {
                 const execId = data.execution_id;
                 if (execId && this.executionBubbles.has(execId)) {
+                    if (!bumpSeq(execId)) break;
                     const toolIcon = createSVGIcon('tool', 14, '#4A54F5');
                     const eventHtml = `
                         <div style="font-weight: 500; margin-bottom: 6px; display: flex; align-items: center; gap: 6px;">
@@ -507,6 +547,7 @@ export class FractalicChatClient {
             case 'tool_result': {
                 const execId = data.execution_id;
                 if (execId && this.executionBubbles.has(execId)) {
+                    if (!bumpSeq(execId)) break;
                     const resultPreview = data.result && data.result.length > 200
                         ? data.result.substring(0, 200) + '...'
                         : data.result || '(empty)';
@@ -525,12 +566,16 @@ export class FractalicChatClient {
                 break;
             }
 
-            case 'token_usage': {
+            case 'token_usage':           // Legacy support - treat as call
+            case 'token_usage_call':      // Individual LLM call token usage
+            case 'token_usage_summary': { // Aggregated file/operation summary
                 const execId = data.execution_id;
                 const blockId = data.block_id;
-                const isSummary = data.is_summary === true;
+                // Determine type: check event type first, fallback to is_summary flag for legacy
+                const isSummary = data.type === 'token_usage_summary' || data.is_summary === true;
 
                 if (execId && this.executionBubbles.has(execId)) {
+                    if (!bumpSeq(execId)) break;
                     const bubbleRefs = this.executionBubbles.get(execId);
                     const inputTokens = data.input_tokens || 0;
                     const outputTokens = data.output_tokens || 0;
@@ -563,6 +608,10 @@ export class FractalicChatClient {
                             toolUsageCost: toolUsageCost,
                             totalCost: responseCost
                         });
+
+                        if (!isSummary) {
+                            this.uiRenderer.refreshBlockTokenBadge(execId, blockId);
+                        }
 
                         const chartIcon = createSVGIcon('chart', 14, isSummary ? '#6a9955' : '#d7a558');
                         const inputStr = inputTokens.toLocaleString();
@@ -624,10 +673,17 @@ export class FractalicChatClient {
             case 'block_processing': {
                 const execId = data.execution_id;
                 if (execId && this.executionBubbles.has(execId)) {
+                    if (!bumpSeq(execId)) break;
                     const bubbleRefs = this.executionBubbles.get(execId);
                     bubbleRefs.activeBlockId = data.block_id;
                     this.uiRenderer.highlightActiveBlock(data.block_id, execId);
                 }
+                break;
+            }
+
+            case 'terminal_output': {
+                // Forward terminal output to terminal viewer for buffering
+                this.terminalViewer.handleTerminalOutput(data);
                 break;
             }
 

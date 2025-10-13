@@ -38,19 +38,34 @@ class LocalFileStorage(SessionStorage):
         Args:
             base_dir: Base directory for sessions (defaults to .fractalic in current session_root)
         """
-        if base_dir is None:
+        # Store base_dir but don't resolve it yet (lazy initialization)
+        # This allows session_root to be set before first use
+        self._base_dir = base_dir
+        self._sessions_dir = None
+
+    def _ensure_initialized(self):
+        """Lazy initialization of directories when first needed."""
+        if self._sessions_dir is not None:
+            return
+
+        if self._base_dir is None:
             # Default to .fractalic in session_root (where script was run from)
             from core.paths import get_session_root
             session_root = get_session_root()
-            base_dir = Path(session_root) / ".fractalic"
+            if session_root is None:
+                raise RuntimeError(
+                    "session_root is not set. Call set_session_root() before using storage."
+                )
+            self._base_dir = Path(session_root) / ".fractalic"
 
-        self.base_dir = Path(base_dir)
-        self.sessions_dir = self.base_dir / "sessions"
-        self.sessions_dir.mkdir(parents=True, exist_ok=True)
+        self.base_dir = Path(self._base_dir)
+        self._sessions_dir = self.base_dir / "sessions"
+        self._sessions_dir.mkdir(parents=True, exist_ok=True)
 
     def get_sessions_dir(self) -> Path:
         """Get the root directory where sessions are stored."""
-        return self.sessions_dir
+        self._ensure_initialized()
+        return self._sessions_dir
 
     def create_session(self, execution_id: str, source_dir: Path,
                       initial_file: Optional[str] = None,
@@ -64,12 +79,14 @@ class LocalFileStorage(SessionStorage):
         3. Creates artifacts and metadata directories
         4. Saves session metadata
         """
+        self._ensure_initialized()
+
         source_dir = Path(source_dir).resolve()
 
         if not source_dir.exists():
             raise ValueError(f"Source directory does not exist: {source_dir}")
 
-        session_dir = self.sessions_dir / execution_id
+        session_dir = self._sessions_dir / execution_id
 
         if session_dir.exists():
             raise ValueError(f"Session already exists: {execution_id}")
@@ -143,7 +160,8 @@ class LocalFileStorage(SessionStorage):
 
     def get_session_context(self, execution_id: str) -> SessionContext:
         """Get context for an existing session."""
-        session_dir = self.sessions_dir / execution_id
+        self._ensure_initialized()
+        session_dir = self._sessions_dir / execution_id
 
         if not session_dir.exists():
             raise ValueError(f"Session does not exist: {execution_id}")
@@ -199,7 +217,7 @@ class LocalFileStorage(SessionStorage):
                 json.dump(metadata.to_dict(), f, indent=2)
 
         # Return relative path from session root
-        return str(artifact_path.relative_to(self.sessions_dir / execution_id))
+        return str(artifact_path.relative_to(self._sessions_dir / execution_id))
 
     def get_node_artifact(self, execution_id: str, node_id: str,
                          artifact_type: str) -> str:
@@ -281,12 +299,13 @@ class LocalFileStorage(SessionStorage):
 
     def list_sessions(self, source_dir: Optional[Path] = None) -> List[SessionInfo]:
         """List all sessions, optionally filtered by source directory."""
+        self._ensure_initialized()
         sessions = []
 
-        if not self.sessions_dir.exists():
+        if not self._sessions_dir.exists():
             return sessions
 
-        for session_dir in self.sessions_dir.iterdir():
+        for session_dir in self._sessions_dir.iterdir():
             if not session_dir.is_dir():
                 continue
 
@@ -350,7 +369,8 @@ class LocalFileStorage(SessionStorage):
 
     def cleanup_session(self, execution_id: str):
         """Delete a session and all its data."""
-        session_dir = self.sessions_dir / execution_id
+        self._ensure_initialized()
+        session_dir = self._sessions_dir / execution_id
 
         if not session_dir.exists():
             raise ValueError(f"Session does not exist: {execution_id}")

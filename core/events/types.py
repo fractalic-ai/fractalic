@@ -62,12 +62,24 @@ class EventType(str, Enum):
     LLM_CHUNK = "llm_chunk"
 
     # ===== Token usage tracking =====
+    # TOKEN_USAGE_CALL: Individual LLM call token usage
     # Payload: input_tokens (int), output_tokens (int), model (str),
-    #          block_id (Optional[str]), file_path (Optional[str]),
-    #          response_cost (Optional[float]), input_cost (Optional[float]),
-    #          output_cost (Optional[float]), tool_usage_cost (Optional[float])
-    TOKEN_USAGE = "token_usage"
+    #          block_id (Optional[str]), response_cost (Optional[float]),
+    #          input_cost (Optional[float]), output_cost (Optional[float]),
+    #          tool_usage_cost (Optional[float])
+    TOKEN_USAGE_CALL = "token_usage_call"
+
+    # TOKEN_USAGE_SUMMARY: Aggregated token usage for a file/operation
+    # Payload: input_tokens (int), output_tokens (int), model (str),
+    #          block_id (Optional[str]), source_file (str),
+    #          total_input (int), total_output (int),
+    #          response_cost (Optional[float])
+    TOKEN_USAGE_SUMMARY = "token_usage_summary"
 
     # ===== Block processing =====
     # Payload: block_id (str), operation (str), status (str)
     BLOCK_PROCESSING = "block_processing"
+
+    # ===== Terminal output =====
+    # Payload: data (str), is_stderr (bool)
+    TERMINAL_OUTPUT = "terminal_output"

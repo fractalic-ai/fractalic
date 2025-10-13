@@ -27,6 +27,8 @@ import threading
 from datetime import datetime
 import pathlib
 
+from core.events.types import EventType
+
 # --- Robust import for ToolRegistry regardless of working directory ---
 import sys
 import os
@@ -1543,14 +1545,55 @@ async def deploy_docker_registry_with_progress(request: Request):
 # Event streaming system (HTTP-based instead of EventBus)
 from collections import deque, defaultdict
 import threading
+import json
+from datetime import datetime
 
-# Store events per execution_id
-events_queues = defaultdict(lambda: deque(maxlen=1000))
+# Single FIFO queue for all events (maintains chronological order)
+# Previously used separate queues per execution_id which broke timestamp ordering
+events_queue = deque(maxlen=10000)
 events_lock = threading.Lock()
 
-# Store running processes per execution_id  
+# Global sequence counter for event ordering verification
+events_seq_counter = 0
+
+# Store running processes per execution_id
 running_processes = {}
 processes_lock = threading.Lock()
+
+# Track parent relationships between execution IDs
+execution_parent_map = {}
+
+# Track per-execution event sequence numbers
+event_sequence_counters = defaultdict(int)
+
+# Terminal stream ownership tracking
+terminal_owner_stacks = defaultdict(list)
+terminal_state_lock = threading.Lock()
+
+# Track which execution_ids have active capture tasks (prevent duplicates)
+active_capture_tasks = set()
+active_capture_tasks_lock = threading.Lock()
+
+
+def resolve_root_execution_id(execution_id: str) -> str:
+    if not execution_id:
+        return execution_id
+    current = execution_id
+    visited = set()
+    while True:
+        parent = execution_parent_map.get(current)
+        if not parent or parent in visited:
+            return current
+        visited.add(current)
+        current = parent
+
+
+def ensure_root_stack(root_execution_id: str):
+    stack = terminal_owner_stacks[root_execution_id]
+    if not stack or stack[0] != root_execution_id:
+        stack.clear()
+        stack.append(root_execution_id)
+    return stack
 
 @app.post("/api/events/receive")
 async def receive_event(event: dict):
@@ -1575,8 +1618,43 @@ async def receive_event(event: dict):
     elif event.get('type') == 'execution':
         print(f"[DEBUG /api/events/receive] EXECUTION event - phase: {event.get('phase')}, full event: {event}")
 
+    parent_execution_id = event.get('parent_execution_id')
+
+    # Update parent mapping & terminal ownership stack
+    with terminal_state_lock:
+        if parent_execution_id:
+            execution_parent_map[execution_id] = parent_execution_id
+        else:
+            execution_parent_map.setdefault(execution_id, None)
+
+        root_execution_id = resolve_root_execution_id(execution_id)
+        stack = ensure_root_stack(root_execution_id)
+
+        event_type = event.get('type')
+        if event_type == EventType.WORKFLOW_START.value or event_type == 'workflow_start':
+            if execution_id not in stack:
+                stack.append(execution_id)
+        elif event_type in (EventType.WORKFLOW_COMPLETE.value, EventType.WORKFLOW_ERROR.value, 'workflow_complete', 'workflow_error'):
+            if execution_id in stack:
+                while len(stack) > 1 and stack[-1] != execution_id:
+                    stack.pop()
+                if len(stack) > 1 and stack[-1] == execution_id:
+                    stack.pop()
+
+        event['root_execution_id'] = root_execution_id
+
+    # Add event to single global FIFO queue with global sequence counter
+    # This maintains chronological order across all execution IDs
     with events_lock:
-        events_queues[execution_id].append(event)
+        global events_seq_counter
+        events_seq_counter += 1
+        event['seq'] = events_seq_counter
+
+        # Also track per-execution sequence for compatibility
+        event_sequence_counters[execution_id] += 1
+        event['execution_seq'] = event_sequence_counters[execution_id]
+
+        events_queue.append(event)
 
     return {"status": "received"}
 
@@ -1609,7 +1687,7 @@ async def start_fractalic_process(file_path: str, execution_id: str, user_reques
             'LANG': 'en_US.UTF-8',
             'FRACTALIC_EXECUTION_ID': execution_id
         })
-        
+
         process = await asyncio.create_subprocess_shell(
             command,
             stdout=asyncio.subprocess.PIPE,
@@ -1617,16 +1695,104 @@ async def start_fractalic_process(file_path: str, execution_id: str, user_reques
             cwd=fractalic_root,
             env=env
         )
-        
+
         # Store process for terminal streaming
         with processes_lock:
             running_processes[execution_id] = process
-        
+
+        with terminal_state_lock:
+            stack = terminal_owner_stacks[execution_id]
+            stack.clear()
+            stack.append(execution_id)
+        event_sequence_counters[execution_id] = 0
+        execution_parent_map.setdefault(execution_id, None)
+
+        # Start background task to capture terminal output ALWAYS
+        # Only start if not already capturing for this execution_id
+        with active_capture_tasks_lock:
+            if execution_id not in active_capture_tasks:
+                active_capture_tasks.add(execution_id)
+                asyncio.create_task(capture_terminal_output(process, execution_id))
+                print(f"[DEBUG] Started terminal capture task for {execution_id}")
+            else:
+                print(f"[DEBUG] Skipped duplicate terminal capture task for {execution_id}")
+
         # Don't wait for completion - let events drive the response
         return process
     except Exception as e:
         print(f"[ERROR] Failed to start process: {str(e)}")
         return None
+
+async def capture_terminal_output(process, execution_id: str):
+    """Background task that captures terminal output and emits as events."""
+
+    def emit_terminal_chunk(data: str, is_stderr: bool):
+        """Emit terminal output as event to events_queue."""
+        with terminal_state_lock:
+            stack = ensure_root_stack(execution_id)
+            owner_id = stack[-1] if stack else execution_id
+
+        # Add event directly to events_queue
+        with events_lock:
+            global events_seq_counter
+            events_seq_counter += 1
+
+            event = {
+                'type': EventType.TERMINAL_OUTPUT.value,
+                'execution_id': owner_id,  # Route to current owner in stack
+                'root_execution_id': execution_id,  # Track root process
+                'data': data,
+                'is_stderr': is_stderr,
+                'timestamp': time.time(),
+                'seq': events_seq_counter
+            }
+            events_queue.append(event)
+            print(f"[DEBUG] Emitted terminal_output event for {owner_id} (root: {execution_id}), data length: {len(data)}")
+
+    try:
+        while True:
+            if process.returncode is not None:
+                # Process finished, read remaining data
+                remaining_stdout = await process.stdout.read()
+                remaining_stderr = await process.stderr.read()
+
+                if remaining_stdout:
+                    decoded = remaining_stdout.decode('utf-8', errors='replace')
+                    emit_terminal_chunk(decoded, is_stderr=False)
+
+                if remaining_stderr:
+                    decoded = remaining_stderr.decode('utf-8', errors='replace')
+                    emit_terminal_chunk(decoded, is_stderr=True)
+                break
+
+            # Read chunks periodically
+            try:
+                chunk = await asyncio.wait_for(process.stdout.read(1024), timeout=0.1)
+                if chunk:
+                    decoded = chunk.decode('utf-8', errors='replace')
+                    emit_terminal_chunk(decoded, is_stderr=False)
+            except asyncio.TimeoutError:
+                pass
+
+            try:
+                err_chunk = await asyncio.wait_for(process.stderr.read(1024), timeout=0.1)
+                if err_chunk:
+                    decoded = err_chunk.decode('utf-8', errors='replace')
+                    emit_terminal_chunk(decoded, is_stderr=True)
+            except asyncio.TimeoutError:
+                pass
+
+            await asyncio.sleep(0.05)  # Small delay to avoid busy loop
+
+    except Exception as e:
+        print(f"[ERROR] Terminal capture failed for {execution_id}: {str(e)}")
+    finally:
+        # Clean up
+        with processes_lock:
+            running_processes.pop(execution_id, None)
+        with active_capture_tasks_lock:
+            active_capture_tasks.discard(execution_id)
+        print(f"[DEBUG] Terminal capture completed for {execution_id}")
 
 @app.post('/api/chat/stream')
 async def stream_chat_events(request: Request):
@@ -1652,7 +1818,7 @@ async def stream_chat_events(request: Request):
                 yield f"{json.dumps({'type': 'error', 'message': 'Failed to start process'}, ensure_ascii=False)}\n"
                 return
             
-            # Stream events from queue as they arrive
+            # Stream events from single FIFO queue as they arrive (maintains chronological order)
             # Server is AGNOSTIC to event types and execution_id structure - just proxy everything
             completed = False
             timeout_count = 0
@@ -1660,17 +1826,17 @@ async def stream_chat_events(request: Request):
 
             while not completed and timeout_count < max_timeouts:
                 try:
-                    # Stream events from ALL queues without filtering
+                    # Stream events from single global queue in chronological order
                     events_found = False
                     with events_lock:
-                        # Iterate through ALL queues and stream all events
-                        for queue_id in list(events_queues.keys()):
-                            while events_queues[queue_id]:
-                                event = events_queues[queue_id].popleft()
-                                event_type = event.get('type')
-                                print(f"[DEBUG /api/chat/stream] Streaming event: {event_type} for {queue_id}")
-                                yield f"{json.dumps(event, ensure_ascii=False)}\n"
-                                events_found = True
+                        # Stream all events from FIFO queue
+                        while events_queue:
+                            event = events_queue.popleft()
+                            event_type = event.get('type')
+                            exec_id = event.get('execution_id', 'N/A')
+                            print(f"[DEBUG /api/chat/stream] Streaming event #{event.get('seq')}: {event_type} for {exec_id}")
+                            yield f"{json.dumps(event, ensure_ascii=False)}\n"
+                            events_found = True
 
                     if events_found:
                         timeout_count = 0  # Reset timeout when we get events
@@ -1685,16 +1851,15 @@ async def stream_chat_events(request: Request):
                             print(f"[DEBUG /api/chat/stream] Process finished, waiting for final events")
                             await asyncio.sleep(3)  # Wait 3 seconds for HTTP events to arrive
 
-                            # Drain all remaining events from ALL queues
+                            # Drain all remaining events from single queue
                             final_event_count = 0
                             with events_lock:
-                                # Stream ALL remaining events from ALL queues
-                                for queue_id in list(events_queues.keys()):
-                                    while events_queues[queue_id]:
-                                        event = events_queues[queue_id].popleft()
-                                        print(f"[DEBUG /api/chat/stream] Streaming FINAL event: {event.get('type')} for {queue_id}")
-                                        yield f"{json.dumps(event, ensure_ascii=False)}\n"
-                                        final_event_count += 1
+                                # Stream ALL remaining events from FIFO queue
+                                while events_queue:
+                                    event = events_queue.popleft()
+                                    print(f"[DEBUG /api/chat/stream] Streaming FINAL event #{event.get('seq')}: {event.get('type')} for {event.get('execution_id')}")
+                                    yield f"{json.dumps(event, ensure_ascii=False)}\n"
+                                    final_event_count += 1
 
                             print(f"[DEBUG /api/chat/stream] Streamed {final_event_count} final events")
                             completed = True
@@ -1718,86 +1883,6 @@ async def stream_chat_events(request: Request):
             'Cache-Control': 'no-cache', 
             'X-Execution-Id': execution_id
         }
-    )
-
-@app.get('/api/chat/terminal-stream/{execution_id}')
-async def stream_terminal_output(execution_id: str):
-    """Streamable HTTP endpoint for terminal output by execution_id."""
-    
-    async def terminal_stream():
-        try:
-            # Найти процесс по execution_id
-            process = None
-            with processes_lock:
-                process = running_processes.get(execution_id)
-            
-            if not process:
-                yield f"[INFO] Ожидание запуска процесса для execution: {execution_id}\n"
-                # Ждем появления процесса
-                for _ in range(50):  # 25 секунд ожидания
-                    await asyncio.sleep(0.5)
-                    with processes_lock:
-                        process = running_processes.get(execution_id)
-                    if process:
-                        break
-                
-                if not process:
-                    yield f"[ERROR] Процесс не найден для execution_id: {execution_id}\n"
-                    return
-            
-            yield f"[INFO] Подключение к terminal stream для: {execution_id}\n"
-            
-            # Читаем вывод процесса
-            buffer = b''
-            while True:
-                try:
-                    # Проверяем завершение процесса
-                    if process.returncode is not None:
-                        # Процесс завершился, читаем оставшийся вывод
-                        remaining_stdout = await process.stdout.read()
-                        remaining_stderr = await process.stderr.read()
-                        
-                        if remaining_stdout:
-                            yield remaining_stdout.decode('utf-8', errors='replace')
-                        if remaining_stderr:
-                            yield f"[STDERR] {remaining_stderr.decode('utf-8', errors='replace')}"
-                        
-                        break
-                    
-                    # Читаем stdout с таймаутом
-                    try:
-                        chunk = await asyncio.wait_for(process.stdout.read(1024), timeout=1.0)
-                        if chunk:
-                            # НЕ фильтруем [Event] строки - они нужны для фронтенда
-                            decoded = chunk.decode('utf-8', errors='replace')
-                            yield decoded
-                    except asyncio.TimeoutError:
-                        # Проверяем stderr
-                        try:
-                            err_chunk = await asyncio.wait_for(process.stderr.read(1024), timeout=0.1)
-                            if err_chunk:
-                                yield f"[STDERR] {err_chunk.decode('utf-8', errors='replace')}"
-                        except asyncio.TimeoutError:
-                            pass
-                        
-                except Exception as e:
-                    yield f"[ERROR] Terminal stream error: {str(e)}\n"
-                    break
-            
-            # Очистить процесс из хранилища
-            with processes_lock:
-                if execution_id in running_processes:
-                    del running_processes[execution_id]
-            
-            yield f"[INFO] Terminal stream завершён для {execution_id}\n"
-            
-        except Exception as e:
-            yield f"[ERROR] {str(e)}\n"
-
-    return StreamingResponse(
-        terminal_stream(),
-        media_type='text/plain',
-        headers={'Cache-Control': 'no-cache'}
     )
 
 # ============================================================================

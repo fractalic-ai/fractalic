@@ -45,9 +45,13 @@ def print_ast_state(ast):
 
 def run(filename: str, param_node: Optional[Union[Node, AST]] = None, create_new_branch: bool = True,
         p_parent_filename=None, p_parent_operation: str = None, p_call_tree_node=None,
-        committed_files=None, file_commit_hashes=None, base_dir=None) -> Tuple[AST, CallTreeNode, str, str, str, str, str, bool]:
-    """Modified return signature to include the return_mode flag at the end."""
- 
+        committed_files=None, file_commit_hashes=None, base_dir=None, nested_execution_id: str = None) -> Tuple[AST, CallTreeNode, str, str, str, str, str, bool]:
+    """Modified return signature to include the return_mode flag at the end.
+
+    Args:
+        nested_execution_id: Optional nested execution ID when this run is a child workflow (@run operation)
+    """
+
     console = Console(force_terminal=True, color_system="auto")
     if committed_files is None:
         committed_files = set()
@@ -122,7 +126,7 @@ def run(filename: str, param_node: Optional[Union[Node, AST]] = None, create_new
                 node.created_by_file = local_file_name
 
             # Emit initial AST snapshot after parsing (before param injection)
-            emit_ast_snapshot(ast, operation_type="parse")
+            emit_ast_snapshot(ast, operation_type="parse", nested_execution_id=nested_execution_id)
         except Exception as e:
             print(f"[ERROR runner.py] Error parsing file {local_file_name}: {str(e)}")
             print(f"[ERROR runner.py] Current directory: {os.getcwd()}")
@@ -193,7 +197,7 @@ def run(filename: str, param_node: Optional[Union[Node, AST]] = None, create_new
 
         # Emit AST snapshot after param injection (shows input parameters added)
         if param_node:
-            emit_ast_snapshot(ast, operation_type="param_inject")
+            emit_ast_snapshot(ast, operation_type="param_inject", nested_execution_id=nested_execution_id)
 
         # RESTORING LOGIC
         current_node = ast.first()
@@ -211,6 +215,7 @@ def run(filename: str, param_node: Optional[Union[Node, AST]] = None, create_new
                 # Emit block processing event for UI highlighting
                 emit_event(
                     EventType.BLOCK_PROCESSING,
+                    nested_execution_id=nested_execution_id,
                     block_id=current_node.key or current_node.hash,
                     operation=current_node.name
                 )
@@ -219,7 +224,7 @@ def run(filename: str, param_node: Optional[Union[Node, AST]] = None, create_new
                 if operation_name == "@import":
                     current_node = process_import(ast, current_node)
                     # Emit AST snapshot after import operation
-                    emit_ast_snapshot(ast, operation_type="import")
+                    emit_ast_snapshot(ast, operation_type="import", nested_execution_id=nested_execution_id)
                 elif operation_name == "@run":
                     current_node, child_node, run_ctx_file, run_ctx_hash, run_trc_file, run_trc_hash, _, child_explicit_return = process_run(
                         ast,
@@ -238,21 +243,22 @@ def run(filename: str, param_node: Optional[Union[Node, AST]] = None, create_new
                         call_tree_node=new_node,
                         committed_files=committed_files,
                         file_commit_hashes=file_commit_hashes,
-                        base_dir=base_dir
+                        base_dir=base_dir,
+                        nested_execution_id=nested_execution_id
                     )
                     # Emit AST snapshot after LLM operation
-                    emit_ast_snapshot(ast, operation_type="llm")
+                    emit_ast_snapshot(ast, operation_type="llm", nested_execution_id=nested_execution_id)
                 elif operation_name == "@goto":
                     current_node = process_goto(ast, current_node, goto_count)
                     # No AST snapshot for goto (doesn't modify structure)
                 elif operation_name == "@shell":
                     current_node = process_shell(ast, current_node)
                     # Emit AST snapshot after shell operation
-                    emit_ast_snapshot(ast, operation_type="shell")
+                    emit_ast_snapshot(ast, operation_type="shell", nested_execution_id=nested_execution_id)
                 elif operation_name == "@return":
                     return_result = process_return(ast, current_node)
                     # Emit AST snapshot after return operation
-                    emit_ast_snapshot(ast, operation_type="return")
+                    emit_ast_snapshot(ast, operation_type="return", nested_execution_id=nested_execution_id)
                     if return_result:
                         ctx_filename = Path(local_file_name).with_suffix('.ctx')
                         trc_filename = Path(local_file_name).with_suffix('.trc')
@@ -582,19 +588,15 @@ def process_run(ast: AST, current_node: Node, local_file_name, parent_operation,
     # Generate unique execution_id for this nested workflow using the NEW node_id
     nested_execution_id = f"{parent_execution_id}_{unique_node_id}"
 
-    # Set nested_execution_id in environment FIRST so WORKFLOW_START event gets routed correctly
-    # This is critical for proper event routing to nested execution bubbles
-    original_nested_id = os.environ.get('FRACTALIC_NESTED_EXECUTION_ID')
-    os.environ['FRACTALIC_NESTED_EXECUTION_ID'] = nested_execution_id
-
-    # Emit WORKFLOW_START event for nested agent execution (after setting env var)
+    # Emit WORKFLOW_START event for nested agent execution
+    # Pass nested_execution_id explicitly instead of using environment variables
     try:
         print(f"[DEBUG @run] Emitting WORKFLOW_START: nested_exec_id={nested_execution_id}, parent={parent_execution_id}, node={unique_node_id}, block={current_node.key or current_node.hash}")
         emit_event(
             EventType.WORKFLOW_START,
+            nested_execution_id=nested_execution_id,
             target=os.path.basename(source_path),
             parent_execution_id=parent_execution_id,
-            nested_execution_id=nested_execution_id,
             node_id=unique_node_id,
             block_id=current_node.key or current_node.hash
         )
@@ -617,7 +619,8 @@ def process_run(ast: AST, current_node: Node, local_file_name, parent_operation,
                 call_tree_node,
                 committed_files=committed_files,
                 file_commit_hashes=file_commit_hashes,
-                base_dir=base_dir
+                base_dir=base_dir,
+                nested_execution_id=nested_execution_id  # Pass explicitly to child run
             )
         else:
             run_result, child_call_tree_node, ctx_file, ctx_file_hash, trc_file, trc_file_hash, branch_name, explicit_return = run(
@@ -629,7 +632,8 @@ def process_run(ast: AST, current_node: Node, local_file_name, parent_operation,
                 call_tree_node,
                 committed_files=committed_files,
                 file_commit_hashes=file_commit_hashes,
-                base_dir=base_dir
+                base_dir=base_dir,
+                nested_execution_id=nested_execution_id  # Pass explicitly to child run
             )
 
         # Extract return content if available (after successful run)
@@ -637,42 +641,69 @@ def process_run(ast: AST, current_node: Node, local_file_name, parent_operation,
             from core.render.render_ast import render_ast_to_markdown_string
             workflow_return_content = render_ast_to_markdown_string(run_result)
 
-    except Exception as workflow_err:
-        # Capture error for emission
-        workflow_error = str(workflow_err)
-        # Re-raise to preserve existing error handling
-        raise
-    finally:
-        # Restore original nested_execution_id (or remove if didn't exist)
-        if original_nested_id is not None:
-            os.environ['FRACTALIC_NESTED_EXECUTION_ID'] = original_nested_id
-        else:
-            os.environ.pop('FRACTALIC_NESTED_EXECUTION_ID', None)
+        # Emit TOKEN_USAGE_SUMMARY for nested module BEFORE WORKFLOW_COMPLETE
+        # This ensures it appears after all operations in the nested module completed
+        try:
+            from core.simple_token_tracker import token_tracker
+            source_file = os.path.basename(source_path)
+            file_stats = token_tracker.get_file_stats(source_file)
+            global_stats = token_tracker.get_global_stats()
 
-    # Emit WORKFLOW_COMPLETE or WORKFLOW_ERROR event
-    try:
-        if workflow_error:
-            emit_event(
-                EventType.WORKFLOW_ERROR,
-                target=os.path.basename(source_path),
-                parent_execution_id=parent_execution_id,
-                nested_execution_id=nested_execution_id,
-                node_id=unique_node_id,
-                error_message=workflow_error
-            )
-        else:
+            if file_stats and (file_stats['file_input_tokens'] > 0 or file_stats['file_output_tokens'] > 0):
+                # Get the model from last LLM call in this nested module
+                last_call_stats = token_tracker.get_last_call_stats(source_file)
+                actual_model = last_call_stats['model'] if last_call_stats else 'unknown'
+
+                emit_event(EventType.TOKEN_USAGE_SUMMARY,
+                         nested_execution_id=nested_execution_id,  # This is nested execution
+                         block_id=current_node.key or current_node.hash,  # The @run operation block
+                         model=actual_model,
+                         input_tokens=file_stats['file_input_tokens'],
+                         output_tokens=file_stats['file_output_tokens'],
+                         total_input=global_stats['global_input_tokens'],
+                         total_output=global_stats['global_output_tokens'],
+                         source_file=source_file,
+                         response_cost=file_stats.get('file_cost', 0.0))
+        except Exception as token_e:
+            # Don't fail workflow completion if token summary fails
+            print(f"[WARNING] Failed to emit nested module token usage summary: {token_e}")
+
+        # Emit WORKFLOW_COMPLETE event IMMEDIATELY after successful execution
+        # while nested_execution_id is still in scope (before any cleanup)
+        try:
             emit_event(
                 EventType.WORKFLOW_COMPLETE,
+                nested_execution_id=nested_execution_id,
                 target=os.path.basename(source_path),
                 parent_execution_id=parent_execution_id,
-                nested_execution_id=nested_execution_id,
                 node_id=unique_node_id,
                 return_content=workflow_return_content,
                 explicit_return=explicit_return
             )
-    except Exception as e:
-        # Don't fail execution if event emission fails
-        print(f"[WARNING] Failed to emit WORKFLOW completion event: {e}")
+        except Exception as e:
+            # Don't fail execution if event emission fails
+            print(f"[WARNING] Failed to emit WORKFLOW_COMPLETE event: {e}")
+
+    except Exception as workflow_err:
+        # Capture error and emit WORKFLOW_ERROR event IMMEDIATELY
+        # while nested_execution_id is still in scope
+        workflow_error = str(workflow_err)
+
+        try:
+            emit_event(
+                EventType.WORKFLOW_ERROR,
+                nested_execution_id=nested_execution_id,
+                target=os.path.basename(source_path),
+                parent_execution_id=parent_execution_id,
+                node_id=unique_node_id,
+                error_message=workflow_error
+            )
+        except Exception as e:
+            # Don't fail execution if event emission fails
+            print(f"[WARNING] Failed to emit WORKFLOW_ERROR event: {e}")
+
+        # Re-raise to preserve existing error handling
+        raise
 
     # Handle results insertion
     # If child module didn't execute @return, create error block instead of returning full context

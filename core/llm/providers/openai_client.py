@@ -917,10 +917,13 @@ class liteclient:
                     # LLM finished conversation naturally - display tokens now
                     token_tracker.print_last_call_status()
 
-                    # Emit token usage event with cost information
-                    token_stats = token_tracker.get_last_call_stats()
+                    # Emit token usage event for this specific LLM call
+                    # Pass source_file to get stats for this specific file run (important for nested modules)
+                    source_file = op.get("_source_file", "unknown")
+                    token_stats = token_tracker.get_last_call_stats(source_file)
                     if token_stats:
-                        emit_event(EventType.TOKEN_USAGE,
+                        emit_event(EventType.TOKEN_USAGE_CALL,
+                                 nested_execution_id=op.get("_nested_execution_id"),
                                  block_id=op.get("_block_id"),
                                  model=token_stats["model"],
                                  input_tokens=token_stats["input_tokens"],
@@ -964,6 +967,7 @@ class liteclient:
 
                         # Emit tool call event for chat UI
                         emit_event(EventType.TOOL_CALL,
+                                 nested_execution_id=op.get("_nested_execution_id"),
                                  tool_call_id=tc['id'],
                                  tool_name=tc['function']['name'],
                                  arguments=clean_args)
@@ -975,10 +979,13 @@ class liteclient:
                         # Display token usage after tool execution completes but before showing response
                         token_tracker.print_last_call_status()
 
-                        # Emit token usage event with cost information
-                        token_stats = token_tracker.get_last_call_stats()
+                        # Emit token usage event for this specific LLM call (during tool loop)
+                        # Pass source_file to get stats for this specific file run (important for nested modules)
+                        source_file = op.get("_source_file", "unknown")
+                        token_stats = token_tracker.get_last_call_stats(source_file)
                         if token_stats:
-                            emit_event(EventType.TOKEN_USAGE,
+                            emit_event(EventType.TOKEN_USAGE_CALL,
+                                     nested_execution_id=op.get("_nested_execution_id"),
                                      block_id=op.get("_block_id"),
                                      model=token_stats["model"],
                                      input_tokens=token_stats["input_tokens"],
@@ -1004,6 +1011,7 @@ class liteclient:
 
                         # Emit tool result event for chat UI
                         emit_event(EventType.TOOL_RESULT,
+                                 nested_execution_id=op.get("_nested_execution_id"),
                                  tool_call_id=tc['id'],
                                  tool_name=tc['function']['name'],
                                  result=clean_response[:1000] if clean_response else "")  # Truncate long results

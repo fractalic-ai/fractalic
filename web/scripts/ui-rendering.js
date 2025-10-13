@@ -392,10 +392,7 @@ export class UIRenderer {
         terminalButton.onclick = (e) => {
             e.stopPropagation();
             const targetExecutionId = bubbleRefsRef?.terminalStreamId || bubbleRefsRef?.rootExecutionId || executionId;
-            const isCompleted = !!bubbleRefsRef?.isCompleted;
-            const startOffset = bubbleRefsRef?.terminalStartOffset || 0;
-            const endOffset = bubbleRefsRef?.terminalEndOffset ?? null;
-            this.client.fileBrowser.showTerminalViewer(filePath, executionId, targetExecutionId, isCompleted, startOffset, endOffset);
+            this.client.terminalViewer.show(filePath, executionId, targetExecutionId);
         };
 
         // Create tab switcher
@@ -514,8 +511,7 @@ export class UIRenderer {
             executionId,
             isCompleted: false,
             terminalStreamId: rootExecutionId,
-            terminalStartOffset: 0,
-            terminalEndOffset: null
+            lastSeq: 0
         };
         bubbleRefsRef = bubbleRefs;
         return bubbleRefs;
@@ -862,6 +858,10 @@ export class UIRenderer {
     blockEl.dataset.fullContent = block.content;
         }
 
+        // Persist metadata so we can refresh badges without full re-render
+        blockEl.dataset.blockType = block.type || '';
+        blockEl.dataset.blockIcon = typeIcon || '';
+
         // Add click handler to toggle expanded state
         blockEl.onclick = (e) => {
     e.stopPropagation();
@@ -910,11 +910,20 @@ export class UIRenderer {
     highlightActiveBlock(blockId, executionId) {
         if (!blockId) return;
 
-        // Remove 'active' class from all blocks in all bubbles
-        const currentAstMap = bubbleRefs?.astBlocks || this.globalAstBlocks;
-        currentAstMap.forEach((blockEl) => {
-            blockEl.classList.remove('active');
+        // Clear previous active states across all known AST maps
+        if (this.globalAstBlocks) {
+            this.globalAstBlocks.forEach((blockEl) => blockEl.classList.remove('active'));
+        }
+        this.client.executionBubbles.forEach((refs) => {
+            refs?.astBlocks?.forEach((blockEl) => blockEl.classList.remove('active'));
         });
+
+        const bubbleRefs = executionId && this.client.executionBubbles.has(executionId)
+            ? this.client.executionBubbles.get(executionId)
+            : null;
+
+        const currentAstMap = bubbleRefs?.astBlocks || this.globalAstBlocks;
+        if (!currentAstMap) return;
 
         // Add 'active' class to the target block
         const targetBlock = currentAstMap.get(blockId);
@@ -928,8 +937,7 @@ export class UIRenderer {
     });
 
     // Auto-switch to Inspect mode if block is being processed
-    if (executionId && this.client.executionBubbles.has(executionId)) {
-        const bubbleRefs = this.client.executionBubbles.get(executionId);
+    if (bubbleRefs) {
         const inspectTab = bubbleRefs.header.querySelector('[data-mode="inspect"]');
         if (inspectTab && !inspectTab.classList.contains('active')) {
             inspectTab.click(); // Auto-open Inspect mode to show AST
@@ -944,27 +952,11 @@ export class UIRenderer {
         const bubbleRefs = this.client.executionBubbles.get(executionId);
         const activeBlockId = bubbleRefs.activeBlockId;
 
-        if (!activeBlockId) {
-    // No active block yet, add to pending output section
-    bubbleRefs.pendingOutput.innerHTML += content;
-    return;
-        }
-
-        // Find the active block element
-        const astBlocksMap = bubbleRefs?.astBlocks || this.globalAstBlocks;
-        const activeBlockEl = astBlocksMap.get(activeBlockId);
-        if (!activeBlockEl) {
-    bubbleRefs.pendingOutput.innerHTML += content;
-    return;
-        }
-
-        // Create pending block element
         const pendingBlock = document.createElement('div');
         pendingBlock.className = 'pending-event-inline';
         pendingBlock.dataset.timestamp = timestamp.toString();
         pendingBlock.dataset.isSummary = isSummary.toString();
 
-        // Add special styling for summary blocks
         if (isSummary) {
             pendingBlock.style.cssText = `
                 margin-top: 12px;
@@ -978,8 +970,58 @@ export class UIRenderer {
 
         pendingBlock.innerHTML = content;
 
-        // Insert after active block
+        const astBlocksMap = bubbleRefs?.astBlocks || this.globalAstBlocks;
+        const activeBlockEl = activeBlockId ? astBlocksMap?.get(activeBlockId) : null;
+
+        if (!activeBlockEl) {
+            if (isSummary) {
+                bubbleRefs.responseContent.appendChild(pendingBlock);
+            } else {
+                bubbleRefs.pendingOutput.appendChild(pendingBlock);
+            }
+            return;
+        }
+
         activeBlockEl.insertAdjacentElement('afterend', pendingBlock);
+    }
+
+    refreshBlockTokenBadge(executionId, blockId) {
+        if (!blockId) return;
+
+        const bubbleRefs = executionId && this.client.executionBubbles.has(executionId)
+            ? this.client.executionBubbles.get(executionId)
+            : null;
+
+        const tokenMap = bubbleRefs?.blockTokens;
+        if (!tokenMap || !tokenMap.has(blockId)) return;
+
+        const blockMap = bubbleRefs?.astBlocks || this.globalAstBlocks;
+        if (!blockMap) return;
+
+        const blockEl = blockMap.get(blockId);
+        if (!blockEl) return;
+
+        const typeEl = blockEl.querySelector('.ast-block-type');
+        if (!typeEl) return;
+
+        const tokenStats = tokenMap.get(blockId);
+        const inputStr = (tokenStats.input ?? 0).toLocaleString();
+        const outputStr = (tokenStats.output ?? 0).toLocaleString();
+
+        const typeIcon = blockEl.dataset.blockIcon || '';
+        const typeLabel = blockEl.dataset.blockType || '';
+
+        const badgeHtml = `<span style="
+            font-size: 10px;
+            color: #d7a558;
+            background: rgba(215, 165, 88, 0.15);
+            padding: 2px 6px;
+            border-radius: 4px;
+            margin-left: 6px;
+            font-family: Monaco, monospace;
+        " title="Token usage for this block">${inputStr}/${outputStr}</span>`;
+
+        typeEl.innerHTML = `${typeIcon} ${typeLabel}${badgeHtml}`;
     }
 
     updateTokenCounter(bubbleRefs) {
@@ -1170,10 +1212,7 @@ export class UIRenderer {
     e.stopPropagation(); // Prevent collapse/expand
     const bubbleRefs = this.client.executionBubbles.get(executionId);
     const targetExecutionId = bubbleRefs?.terminalStreamId || bubbleRefs?.rootExecutionId || executionId;
-    const isCompleted = !!bubbleRefs?.isCompleted;
-    const startOffset = bubbleRefs?.terminalStartOffset || 0;
-    const endOffset = bubbleRefs?.terminalEndOffset ?? null;
-    this.client.fileBrowser.showTerminalViewer(filePath, executionId, targetExecutionId, isCompleted, startOffset, endOffset);
+    this.client.terminalViewer.show(filePath, executionId, targetExecutionId);
         };
 
         leftSection.appendChild(statusIcon);
@@ -1374,7 +1413,7 @@ export class UIRenderer {
         diffIcon.onmouseout = () => diffIcon.style.opacity = '0.7';
         diffIcon.onclick = (e) => {
             e.stopPropagation(); // Prevent collapse/expand
-            this.client.fileBrowser.showDiffViewer(file_path, branch_name);
+            this.client.diffViewer.show(file_path, branch_name);
         };
 
         // Insert before terminal button
@@ -1505,7 +1544,7 @@ export class UIRenderer {
     const diffButton = document.createElement('button');
     diffButton.className = 'action-button primary diff-button';
     diffButton.innerHTML = '📋 Просмотр Diff';
-    diffButton.onclick = () => this.client.fileBrowser.showDiffViewer(file_path, branch_name);
+    diffButton.onclick = () => this.client.diffViewer.show(file_path, branch_name);
     actionsDiv.appendChild(diffButton);
         }
 
