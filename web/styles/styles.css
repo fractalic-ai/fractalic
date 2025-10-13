@@ -190,8 +190,7 @@
             display: block;
             -webkit-line-clamp: unset;
             -webkit-box-orient: unset;
-            max-height: 300px;
-            overflow-y: auto;
+            /* Removed max-height and overflow - full content displayed naturally */
         }
 
         .ast-block-id {
@@ -590,15 +589,15 @@
 
         .bubble-inspect-panel.active {
             display: flex;
-            max-height: 600px;
-            overflow-y: auto;
+            max-height: none;
+            overflow: visible;
         }
 
         .bubble-ast-container {
             flex: 1;
             padding: 20px;
             /* background: #25292e; */
-            overflow-y: auto;
+            /* Removed overflow - natural height, scroll only in main chat container */
         }
 
         .bubble-pending-output {

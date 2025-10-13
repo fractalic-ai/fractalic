@@ -2,12 +2,12 @@
  * Fractalic Chat Client - Main class that coordinates all modules
  */
 
-import { FileBrowser } from './file-browser.js?v=7';
-import { UIRenderer } from './ui-rendering.js?v=7';
-import { StreamClient } from './stream-client.js?v=7';
-import { TerminalViewer } from './terminal-viewer.js?v=7';
-import { DiffViewer } from './diff-viewer.js?v=7';
-import { createSVGIcon, formatTime } from './utils.js?v=7';
+import { FileBrowser } from './file-browser.js?v=9';
+import { UIRenderer } from './ui-rendering.js?v=9';
+import { StreamClient } from './stream-client.js?v=9';
+import { TerminalViewer } from './terminal-viewer.js?v=9';
+import { DiffViewer } from './diff-viewer.js?v=9';
+import { createSVGIcon, formatTime } from './utils.js?v=9';
 
 export class FractalicChatClient {
     constructor() {
@@ -134,6 +134,13 @@ export class FractalicChatClient {
             alert('Сначала выберите markdown файл');
             return;
         }
+
+        // Clean up previous execution bubbles and tracking Maps before starting new request
+        console.log('[CLEANUP] Clearing execution bubbles from previous run');
+        this.executionBubbles.clear();
+        this.executionSeq.clear();
+        this.executionSeqSeen.clear();
+
         const timestamp = new Date().toISOString();
         // Don't store current message in history yet - it will be added after fractalic confirms
         this.uiRenderer.addMessage('user', text, formatTime(timestamp), { storeHistory: false });
@@ -380,11 +387,9 @@ export class FractalicChatClient {
                     }
                 }
 
-                // Mark terminal as complete
+                // Mark terminal as complete (but don't delete from Maps - will be cleaned on next sendMessage)
                 if (nestedExecId) {
                     this.terminalViewer.markComplete(nestedExecId);
-                    this.executionSeq.delete(nestedExecId);
-                    this.executionSeqSeen.delete(nestedExecId);
                 }
 
                 break;
@@ -424,11 +429,9 @@ export class FractalicChatClient {
                     bubbleRefs.isCompleted = true;
                 }
 
-                // Mark terminal as complete
+                // Mark terminal as complete (but don't delete from Maps - will be cleaned on next sendMessage)
                 if (nestedExecId) {
                     this.terminalViewer.markComplete(nestedExecId);
-                    this.executionSeq.delete(nestedExecId);
-                    this.executionSeqSeen.delete(nestedExecId);
                 }
 
                 break;
@@ -470,11 +473,9 @@ export class FractalicChatClient {
                     bubbleRefs.isCompleted = true;
                 }
 
-                // Mark terminal as complete
+                // Mark terminal as complete (but don't delete from Maps - will be cleaned on next sendMessage)
                 if (execId) {
                     this.terminalViewer.markComplete(execId);
-                    this.executionSeq.delete(execId);
-                    this.executionSeqSeen.delete(execId);
                 }
 
                 break;
@@ -496,11 +497,9 @@ export class FractalicChatClient {
                     bubbleRefs.isCompleted = true;
                 }
 
-                // Mark terminal as complete
+                // Mark terminal as complete (but don't delete from Maps - will be cleaned on next sendMessage)
                 if (execId) {
                     this.terminalViewer.markComplete(execId);
-                    this.executionSeq.delete(execId);
-                    this.executionSeqSeen.delete(execId);
                 }
 
                 break;
@@ -599,6 +598,10 @@ export class FractalicChatClient {
                         bubbleRefs.totalTokens.cost += responseCost;
                     }
 
+                    // For summary events, always create a display block even without blockId
+                    // For call events, only create display if blockId is present
+                    const shouldCreateDisplay = isSummary || blockId;
+
                     if (blockId) {
                         bubbleRefs.blockTokens.set(blockId, {
                             input: inputTokens,
@@ -612,7 +615,9 @@ export class FractalicChatClient {
                         if (!isSummary) {
                             this.uiRenderer.refreshBlockTokenBadge(execId, blockId);
                         }
+                    }
 
+                    if (shouldCreateDisplay) {
                         const chartIcon = createSVGIcon('chart', 14, isSummary ? '#6a9955' : '#d7a558');
                         const inputStr = inputTokens.toLocaleString();
                         const outputStr = outputTokens.toLocaleString();

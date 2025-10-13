@@ -840,23 +840,22 @@ export class UIRenderer {
     html += `<div class="ast-block-header">${escapeHtml(block.header)}</div>`;
         }
 
-        // Create preview from full content (truncate to 100 chars)
+        // Show full content by default (expanded state)
         if (block.content) {
-    let preview = block.content;
-    if (preview.length > 100) {
-        preview = preview.substring(0, 100) + '...';
-    }
-    html += `<div class="ast-block-preview">${escapeHtml(preview)}</div>`;
+    html += `<div class="ast-block-preview">${escapeHtml(block.content)}</div>`;
         }
 
         html += `<div class="ast-block-id">ID: ${escapeHtml(blockId.substring(0, 16))}</div>`;
 
         blockEl.innerHTML = html;
 
-        // Store full content in data attribute for expansion
+        // Store full content in data attribute for toggling
         if (block.content) {
     blockEl.dataset.fullContent = block.content;
         }
+
+        // Set expanded by default
+        blockEl.classList.add('expanded');
 
         // Persist metadata so we can refresh badges without full re-render
         blockEl.dataset.blockType = block.type || '';
@@ -975,7 +974,9 @@ export class UIRenderer {
 
         if (!activeBlockEl) {
             if (isSummary) {
-                bubbleRefs.responseContent.appendChild(pendingBlock);
+                // For File Summary blocks without an active block, append to END of AST container
+                // This ensures they appear at the bottom of the Inspect view
+                bubbleRefs.astContainer.appendChild(pendingBlock);
             } else {
                 bubbleRefs.pendingOutput.appendChild(pendingBlock);
             }
