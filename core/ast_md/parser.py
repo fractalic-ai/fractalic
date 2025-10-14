@@ -252,7 +252,26 @@ operations:
         default: false
         description: "Whether this operation should only run once."
 
- 
+  emit:
+    description: "Emit custom event to frontend for web components and UI updates"
+    type: object
+    required: ["event"]
+    properties:
+      event:
+        type: string
+        description: "Event type name (e.g., 'image_generated', 'chart_created', 'messages_batch')"
+      data:
+        type: object
+        description: "Arbitrary JSON data to send with event (key-value pairs)"
+      prompt:
+        type: string
+        description: "Optional text message to include with the event"
+      run-once:
+        type: boolean
+        default: false
+        description: "Whether this operation should only run once"
+
+
 processors:
   path:
     description: "Process full path with file and blocks"

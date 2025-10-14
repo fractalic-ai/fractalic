@@ -53,6 +53,11 @@ logging.getLogger("git.cmd").setLevel(logging.CRITICAL)
 
 app = FastAPI()
 
+# Dev mode check - disable caching for static files during development
+DEV_MODE = os.environ.get("FRACTALIC_DEV_MODE", "0") not in ("0", "false", "False", "")
+if DEV_MODE:
+    print("⚡ DEV MODE: Static file caching disabled")
+
 current_repo_path = ""
 
 # MCP Manager process management
@@ -89,6 +94,17 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Middleware to disable caching in dev mode
+@app.middleware("http")
+async def disable_caching_in_dev_mode(request: Request, call_next):
+    response = await call_next(request)
+    if DEV_MODE and (request.url.path.startswith("/chat/") or request.url.path == "/chat"):
+        # Disable caching for all static files in dev mode
+        response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+        response.headers["Pragma"] = "no-cache"
+        response.headers["Expires"] = "0"
+    return response
 
 # Mount static files for modular web structure OR fallback to legacy file
 root = get_fractalic_root()

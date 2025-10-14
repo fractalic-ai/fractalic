@@ -9,6 +9,14 @@ import { TerminalViewer } from './terminal-viewer.js?v=9';
 import { DiffViewer } from './diff-viewer.js?v=9';
 import { createSVGIcon, formatTime } from './utils.js?v=9';
 
+// Component System imports - using central module to avoid cache issues
+import {
+    componentRouter,
+    componentRegistry,
+    ImageGalleryComponent,
+    MessageListComponent
+} from './components.js?v=10';
+
 export class FractalicChatClient {
     constructor() {
         // DOM Elements
@@ -38,6 +46,11 @@ export class FractalicChatClient {
         this.terminalModalCloseButton = document.getElementById('terminalModalCloseBtn');
         this.closeTerminalButton = document.getElementById('closeTerminalBtn');
 
+        // Artifacts panel elements
+        this.artifactsPanel = document.getElementById('artifactsPanel');
+        this.artifactsContent = document.getElementById('artifactsContent');
+        this.artifactsToggle = document.getElementById('artifactsToggle');
+
         // State
         this.selectedFile = null;
         this.conversation = [];
@@ -62,12 +75,41 @@ export class FractalicChatClient {
             content: this.diffContent
         });
 
+        // Initialize component system
+        this.initializeComponentSystem();
+
         // Setup event listeners
         this.initializeEventListeners();
 
         // Set connection status (HTTP streaming mode, no persistent WebSocket)
         this.connectionStatus.textContent = '🟢 Готово (HTTP Stream)';
         this.connectionStatus.className = 'status-connected';
+    }
+
+    initializeComponentSystem() {
+        // Register components with their manifests
+        componentRegistry.register(
+            'image-gallery',
+            ImageGalleryComponent,
+            ImageGalleryComponent.getManifest()
+        );
+
+        componentRegistry.register(
+            'message-list',
+            MessageListComponent,
+            MessageListComponent.getManifest()
+        );
+
+        // Initialize router with mount points
+        componentRouter.initialize({
+            chat: this.messagesContainer,
+            artifacts: this.artifactsContent
+        });
+
+        console.log('[ComponentSystem] Initialized:', {
+            components: componentRegistry.getAllComponents().length,
+            mountPoints: ['chat', 'artifacts']
+        });
     }
 
     initializeEventListeners() {
@@ -125,6 +167,16 @@ export class FractalicChatClient {
                 this.terminalViewer.close();
             }
         });
+
+        // Artifacts panel toggle
+        if (this.artifactsToggle) {
+            this.artifactsToggle.addEventListener('click', () => {
+                this.artifactsPanel.classList.toggle('hidden');
+                const isHidden = this.artifactsPanel.classList.contains('hidden');
+                this.artifactsToggle.textContent = isHidden ? '▶' : '◀';
+                this.artifactsToggle.title = isHidden ? 'Show artifacts panel' : 'Hide artifacts panel';
+            });
+        }
     }
 
     async sendMessage() {
@@ -696,7 +748,14 @@ export class FractalicChatClient {
                 break;
 
             default:
-                console.log('Unknown event type:', data.type, data);
+                // Check if any component handles this custom event
+                const executionId = data.execution_id || data.nested_execution_id || 'default';
+                if (componentRegistry.hasHandlerForEvent(data.type)) {
+                    console.log(`[ComponentRouter] Routing custom event: ${data.type} to components`);
+                    componentRouter.routeEvent(data.type, data, executionId);
+                } else {
+                    console.log('Unknown event type:', data.type, data);
+                }
                 break;
         }
 

@@ -6,6 +6,7 @@
 #   --port <n>        Порт сервера (default 8000)
 #   --host <h>        Хост (default 0.0.0.0)
 #   --debug           Включить расширенный лог исполнения (FRACTALIC_DEBUG_EXEC=1)
+#   --dev             Включить режим разработки (отключить кэширование статики)
 #   --background      Запуск сервера в фоне (не открывать браузер, просто tail логи)
 #   --no-browser      Не открывать браузер автоматически
 #   --help            Показать помощь
@@ -15,6 +16,7 @@ set -euo pipefail
 PORT=8000
 HOST=0.0.0.0
 DEBUG=0
+DEV_MODE=0
 BACKGROUND=0
 OPEN_BROWSER=1
 
@@ -26,6 +28,8 @@ while [[ $# -gt 0 ]]; do
             HOST="$2"; shift 2;;
         --debug)
             DEBUG=1; shift;;
+        --dev)
+            DEV_MODE=1; shift;;
         --background)
             BACKGROUND=1; shift;;
         --no-browser)
@@ -96,6 +100,10 @@ export PORT="${PORT}"  # некоторые платформы читают PORT
 if [ "$DEBUG" = "1" ]; then
     export FRACTALIC_DEBUG_EXEC=1
     echo "🛠  Debug режим включен (FRACTALIC_DEBUG_EXEC=1)"
+fi
+if [ "$DEV_MODE" = "1" ]; then
+    export FRACTALIC_DEV_MODE=1
+    echo "⚡ Dev режим включен (кэширование статики отключено)"
 fi
 
 # Запускаем UI Server

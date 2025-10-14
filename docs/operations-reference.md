@@ -1,6 +1,6 @@
 ---
 title: Operations Reference
-description: Complete reference for all Fractalic operations - @llm, @shell, @import, @run, and @return
+description: Complete reference for all Fractalic operations - @llm, @shell, @import, @run, @return, @goto, and @emit
 outline: deep
 ---
 
@@ -350,6 +350,71 @@ block: decision-node
 
 Note: @goto has built-in loop prevention via GOTO_LIMIT configuration.
 
+## @emit
+Send custom events to the web UI frontend to trigger dynamic component rendering.
+
+**Purpose:** Enable workflows to create interactive visualizations, notifications, and UI updates visible only in the web interface. Does not modify the AST or workflow document.
+
+**Parameters:**
+| Field | Required | Type | Description |
+|-------|----------|------|-------------|
+| `event` | Yes | string | Event type identifier (e.g., `msg_success`, `image_generated`) |
+| `data` | Yes | object | Event payload with component-specific fields |
+| `data.to` | No | string | Explicit component target (format: `component-name:instance-id`) |
+| `prompt` | No | string | Confirmation message shown in workflow output (not sent to frontend) |
+
+**Examples:**
+```markdown
+@emit
+event: msg_success
+data:
+  message: "Task completed successfully!"
+prompt: "✅ Sent success message"
+```
+
+Send image to gallery:
+```markdown
+@emit
+event: image_generated
+data:
+  url: https://example.com/image.jpg
+  caption: "Generated visualization"
+prompt: "✅ Image added to gallery"
+```
+
+Target specific component instance:
+```markdown
+@emit
+event: msg_info
+data:
+  message: "System notification"
+  to: "message-list:system-logs"
+prompt: "✅ Sent to system-logs"
+```
+
+Batch events:
+```markdown
+@emit
+event: images_batch
+data:
+  images:
+    - url: https://example.com/img1.jpg
+      caption: "First image"
+    - url: https://example.com/img2.jpg
+      caption: "Second image"
+prompt: "✅ Sent batch of 2 images"
+```
+
+**Key Characteristics:**
+- Non-blocking: Executes instantly without waiting for frontend response
+- Web UI only: Events ignored when running workflows via CLI
+- Event-driven: Frontend components automatically handle matching event types
+- Zero configuration: No manual component setup required
+
+**Event Flow:** @emit → HTTP POST `/events` → UI Server queue → NDJSON stream → Frontend ComponentRouter → Component instance → DOM update
+
+**See Also:** [Complete @emit and Component System Documentation](emit-and-components.md) for full event routing details, component lifecycle, built-in components (MessageList, ImageGallery), and creating custom components.
+
 ## Internal Execution Flow
 1. Parse YAML
 2. Resolve block refs
@@ -368,6 +433,7 @@ Note: @goto has built-in loop prevention via GOTO_LIMIT configuration.
 | @run      | Optional     | Yes (callee return) | FS      | Optional        | Yes          | Indirect  | Yes          |
 | @return   | Optional     | (Return value) | None       | Optional        | No           | No        | No           |
 | @goto     | Optional     | No            | None        | No              | No           | No        | Yes          |
+| @emit     | No           | No (UI only)  | HTTP/WS     | No (event+data) | No           | No        | Yes          |
 
 ## Choosing the Right Operation
 - Static knowledge: @import
@@ -376,6 +442,7 @@ Note: @goto has built-in loop prevention via GOTO_LIMIT configuration.
 - Modularity: @run
 - Completion: @return
 - Experimental flow: @goto
+- Interactive UI / visualizations: @emit
 
 ## Error Handling Patterns
 | Symptom | Likely Cause | Fix |

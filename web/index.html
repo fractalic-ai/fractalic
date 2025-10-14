@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Fractalic Chat Agent</title>
     <link rel="stylesheet" href="styles/styles.css">
+    <link rel="stylesheet" href="styles/components.css">
     <!-- Highlight.js for syntax highlighting -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
@@ -27,7 +28,9 @@
                 </div>
             </div>
 
-            <div class="chat-messages" id="messages"></div>
+            <div class="chat-messages" id="messages">
+                <!-- Dynamic components mounted here via ComponentRouter -->
+            </div>
 
             <div class="typing-indicator" id="typingIndicator">
                 Агент обрабатывает ваш запрос...
@@ -41,6 +44,20 @@
                            maxlength="1000" disabled>
                     <button class="history-toggle-btn active" id="historyToggle" title="Использовать историю сообщений">📜</button>
                     <button class="send-button" id="sendButton" disabled>▶</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Artifacts Panel (right side) -->
+        <div class="artifacts-panel" id="artifactsPanel">
+            <div class="artifacts-header">
+                <h3>Artifacts</h3>
+                <button class="artifacts-toggle" id="artifactsToggle" title="Hide artifacts panel">◀</button>
+            </div>
+            <div class="artifacts-content" id="artifactsContent">
+                <!-- Dynamic components mounted here via ComponentRouter -->
+                <div class="artifacts-empty">
+                    No artifacts yet. Components will appear here automatically.
                 </div>
             </div>
         </div>
@@ -106,6 +123,6 @@
         </div>
     </div>
 
-    <script type="module" src="scripts/main.js?v=9"></script>
+    <script type="module" src="scripts/main.js?v=10"></script>
 </body>
 </html>

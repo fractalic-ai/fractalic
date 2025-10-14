@@ -16,6 +16,7 @@ from core.operations.llm_op import process_llm
 from core.operations.goto_op import process_goto
 from core.operations.shell_op import process_shell
 from core.operations.return_op import process_return
+from core.operations.emit_op import process_emit
 from core.operations.call_tree import CallTreeNode
 from core.storage import get_session_storage
 from core.simple_token_tracker import token_tracker
@@ -251,6 +252,9 @@ def run(filename: str, param_node: Optional[Union[Node, AST]] = None, create_new
                 elif operation_name == "@goto":
                     current_node = process_goto(ast, current_node, goto_count)
                     # No AST snapshot for goto (doesn't modify structure)
+                elif operation_name == "@emit":
+                    current_node = process_emit(ast, current_node, nested_execution_id)
+                    # No AST snapshot for emit (doesn't modify structure)
                 elif operation_name == "@shell":
                     current_node = process_shell(ast, current_node)
                     # Emit AST snapshot after shell operation
