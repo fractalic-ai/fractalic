@@ -780,7 +780,79 @@ class ToolRegistry(dict):
         }
         
         self._register(fractalic_run_manifest, runner_override=self._handle_fractalic_run)
-    
+
+        # Register fractalic_emit tool
+        fractalic_emit_manifest = {
+            "name": "fractalic_emit",
+            "description": (
+                "Emit custom event(s) to frontend UI for real-time visualization. "
+                "USAGE: For single event use 'event'+'data' OR 'message'. For multiple events use 'events' array. "
+                "Common event types: msg_success, msg_info, msg_warning, msg_error, msg_debug, image_generated."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "event": {
+                        "type": "string",
+                        "description": (
+                            "Event type for single event emission. "
+                            "Valid types: 'msg_success', 'msg_info', 'msg_warning', 'msg_error', 'msg_debug', 'image_generated'. "
+                            "Cannot be used with 'events' parameter."
+                        )
+                    },
+                    "data": {
+                        "type": "object",
+                        "description": (
+                            "Event payload for single event. Common fields: 'message' (string), 'url' (string for images), "
+                            "'caption' (string for images), 'to' (string for component targeting like 'message-list:custom-id')"
+                        ),
+                        "properties": {
+                            "message": {"type": "string", "description": "Message text to display"},
+                            "url": {"type": "string", "description": "Image URL for image_generated events"},
+                            "caption": {"type": "string", "description": "Image caption for image_generated events"},
+                            "to": {"type": "string", "description": "Component target like 'message-list:instance-id'"}
+                        }
+                    },
+                    "message": {
+                        "type": "string",
+                        "description": "Shorthand for data.message. Use this for simple text messages instead of creating a data object."
+                    },
+                    "events": {
+                        "type": "array",
+                        "description": (
+                            "Array of events for batch emission. Each item needs 'event' (type) and optionally 'data' (payload). "
+                            "Example: [{\"event\": \"msg_info\", \"data\": {\"message\": \"Started\"}}, "
+                            "{\"event\": \"msg_success\", \"data\": {\"message\": \"Done\"}}]. "
+                            "Cannot be used with 'event' parameter."
+                        ),
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "event": {
+                                    "type": "string",
+                                    "description": "Event type: msg_success, msg_info, msg_warning, msg_error, msg_debug, or image_generated"
+                                },
+                                "data": {
+                                    "type": "object",
+                                    "description": "Event payload with fields like 'message', 'url', 'caption', or 'to'",
+                                    "properties": {
+                                        "message": {"type": "string"},
+                                        "url": {"type": "string"},
+                                        "caption": {"type": "string"},
+                                        "to": {"type": "string"}
+                                    }
+                                }
+                            },
+                            "required": ["event"]
+                        }
+                    }
+                }
+            },
+            "_builtin": True
+        }
+
+        self._register(fractalic_emit_manifest, runner_override=self._handle_fractalic_emit)
+
     def _handle_fractalic_run(self, **kwargs):
         """Handle fractalic_run tool calls."""
         try:
@@ -940,7 +1012,7 @@ class ToolRegistry(dict):
                 response["message"] = "Script executed successfully"
             
             return response
-            
+
         except Exception as e:
             import traceback
             return {
@@ -948,7 +1020,124 @@ class ToolRegistry(dict):
                 "status": "failed",
                 "traceback": traceback.format_exc()
             }
-    
+
+    def _handle_fractalic_emit(self, **kwargs):
+        """Handle fractalic_emit tool calls. Supports single/batch modes."""
+        try:
+            from core.event_emitters import emit_event
+
+            events_batch = kwargs.get("events")
+            single_event = kwargs.get("event")
+
+            # Validate mutual exclusion
+            if events_batch and single_event:
+                return {
+                    "error": "Cannot specify both 'event' and 'events' parameters",
+                    "status": "failed"
+                }
+
+            if not events_batch and not single_event:
+                return {
+                    "error": "Must specify either 'event' or 'events' parameter",
+                    "status": "failed"
+                }
+
+            emitted_count = 0
+            errors = []
+
+            # Single event mode
+            if single_event:
+                try:
+                    event_data = kwargs.get("data", {})
+
+                    # Handle shorthand 'message' parameter
+                    message = kwargs.get("message")
+                    if message and "message" not in event_data:
+                        event_data["message"] = message
+
+                    # Emit the event
+                    emit_event(
+                        single_event,
+                        nested_execution_id=None,
+                        **event_data
+                    )
+                    emitted_count = 1
+                except Exception as e:
+                    errors.append({
+                        "event": single_event,
+                        "error": str(e)
+                    })
+
+            # Batch mode
+            elif events_batch:
+                if not isinstance(events_batch, list):
+                    return {
+                        "error": "'events' parameter must be an array",
+                        "status": "failed"
+                    }
+
+                for idx, event_item in enumerate(events_batch):
+                    if not isinstance(event_item, dict):
+                        errors.append({
+                            "index": idx,
+                            "error": "Event must be an object"
+                        })
+                        continue
+
+                    event_type = event_item.get("event")
+                    if not event_type:
+                        errors.append({
+                            "index": idx,
+                            "error": "Missing 'event' field"
+                        })
+                        continue
+
+                    try:
+                        event_data = event_item.get("data", {})
+                        emit_event(
+                            event_type,
+                            nested_execution_id=None,
+                            **event_data
+                        )
+                        emitted_count += 1
+                    except Exception as e:
+                        errors.append({
+                            "index": idx,
+                            "event": event_type,
+                            "error": str(e)
+                        })
+
+            # Build response
+            if emitted_count > 0 and len(errors) == 0:
+                return {
+                    "status": "success",
+                    "emitted": emitted_count,
+                    "message": f"Successfully emitted {emitted_count} event(s)"
+                }
+            elif emitted_count > 0 and len(errors) > 0:
+                return {
+                    "status": "partial",
+                    "emitted": emitted_count,
+                    "errors": errors,
+                    "message": f"Emitted {emitted_count} event(s) with {len(errors)} error(s)"
+                }
+            else:
+                return {
+                    "status": "failed",
+                    "emitted": 0,
+                    "errors": errors,
+                    "message": "Failed to emit any events"
+                }
+
+        except Exception as e:
+            import traceback
+            # Graceful degradation: return warning instead of error
+            return {
+                "status": "warning",
+                "message": f"Event emission failed but workflow continues: {str(e)}",
+                "traceback": traceback.format_exc()
+            }
+
     def _build_run_params(self, file_path, prompt=None, block_uri=None, mode="append"):
         """Build parameters dictionary in format expected by process_run."""
         # Parse file path to get directory and filename
@@ -1089,12 +1278,20 @@ class ToolRegistry(dict):
                 if not (server and svc and uri):
                     return {"error": "Missing required 'uri' for resource read"}
                 return _read_resource(server, svc, uri)
+            elif manifest.get("_builtin"):
+                # Built-in tool - get the runner directly from dict
+                tool_name = manifest.get("name")
+                if tool_name in dict.keys(self):
+                    runner = dict.__getitem__(self, tool_name)
+                    return runner(**kwargs)
+                else:
+                    return {"error": f"Built-in tool '{tool_name}' not found in registry"}
             elif manifest.get("_src"):
                 # Local tool - handle file-based tools
                 return self._execute_local_tool(manifest, kwargs)
             else:
                 raise ValueError(f"Unknown tool type for {manifest.get('name')}")
-                
+
         return tool_function
 
     def _execute_local_tool(self, manifest: dict, args: dict):
