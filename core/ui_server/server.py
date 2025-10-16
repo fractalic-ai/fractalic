@@ -730,26 +730,106 @@ async def get_file_content_endpoint(
     file_path: str = Query(...),
     commit_hash: str = Query(...)
 ):
-    """Get file using Git adapter (searches all sessions)."""
+    """Return file content for the storage-backed session system.
+
+    Frontend queries the same endpoint twice when building a diff:
+    1) once for the original markdown (`file_path` relative to project root);
+    2) once for the produced context/trace (`file_path` under `artifacts/nodes/...`).
+
+    This resolver inspects the recorded sessions and deterministically selects
+    the execution_id that owns the requested file.
+    """
     from core.ui_server.storage_git_bridge import get_artifact_from_storage
 
     try:
-        # Search all sessions for artifact
         from pathlib import Path
+        import json
+        import hashlib
+
         sessions_dir = Path(repo_path) / '.fractalic' / 'sessions'
+        if not sessions_dir.exists():
+            raise HTTPException(status_code=404, detail="No sessions found")
 
-        if sessions_dir.exists():
-            for session_dir in sessions_dir.iterdir():
-                if not session_dir.is_dir():
+        sessions = [p for p in sessions_dir.iterdir() if p.is_dir()]
+        if not sessions:
+            raise HTTPException(status_code=404, detail="No sessions found")
+
+        # Prefer newest sessions first (mtime descending) for faster resolution in practice
+        sessions.sort(key=lambda p: p.stat().st_mtime, reverse=True)
+
+        execution_id = None
+        is_artifact_request = file_path.startswith('artifacts/')
+
+        # 1) Direct path resolution for artifacts (unique per session)
+        if is_artifact_request:
+            for session_dir in sessions:
+                candidate = session_dir / file_path
+                if candidate.exists():
+                    execution_id = session_dir.name
+                    break
+
+        # 2) Inspect call_tree metadata for md/ctx/trc entries
+        if execution_id is None:
+            def node_matches(tree: dict) -> bool:
+                stack = [tree]
+                while stack:
+                    node = stack.pop()
+                    if (
+                        node.get('ctx_file') == file_path
+                        and node.get('ctx_commit_hash') == commit_hash
+                    ):
+                        return True
+                    if (
+                        node.get('trc_file') == file_path
+                        and node.get('trc_commit_hash') == commit_hash
+                    ):
+                        return True
+                    if (
+                        node.get('filename') == file_path
+                        and node.get('md_commit_hash') == commit_hash
+                    ):
+                        return True
+                    stack.extend(node.get('children', []) or [])
+                return False
+
+            for session_dir in sessions:
+                meta_file = session_dir / 'metadata' / 'call_tree.json'
+                if not meta_file.exists():
                     continue
+                try:
+                    with meta_file.open('r', encoding='utf-8') as f:
+                        tree = json.load(f)
+                except Exception:
+                    continue
+                if tree and node_matches(tree):
+                    execution_id = session_dir.name
+                    break
 
-                execution_id = session_dir.name
-                content = get_artifact_from_storage(execution_id, commit_hash, file_path, repo_path)
+        # 3) Fallback: hash workspace file and compare with commit (for legacy sessions)
+        if execution_id is None and not is_artifact_request:
+            for session_dir in sessions:
+                workspace_file = session_dir / 'workspace' / file_path
+                if not workspace_file.exists():
+                    continue
+                try:
+                    with workspace_file.open('r', encoding='utf-8') as wf:
+                        content = wf.read()
+                except Exception:
+                    continue
+                computed_hash = hashlib.sha256(content.encode('utf-8')).hexdigest()[:40]
+                if computed_hash == commit_hash:
+                    execution_id = session_dir.name
+                    break
 
-                if content:
-                    return PlainTextResponse(content)
+        if execution_id is None:
+            raise HTTPException(status_code=404, detail=f"Content mapping not found for {file_path} @ {commit_hash}")
 
-        raise HTTPException(status_code=404, detail=f"File not found: {file_path}")
+        content = get_artifact_from_storage(execution_id, commit_hash, file_path, repo_path)
+        if content is None:
+            raise HTTPException(status_code=404, detail=f"File not found in session {execution_id}: {file_path}")
+        return PlainTextResponse(content)
+    except HTTPException:
+        raise
     except Exception as e:
         print(f"Error fetching file content: {str(e)}")
         import traceback

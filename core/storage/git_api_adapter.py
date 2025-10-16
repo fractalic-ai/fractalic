@@ -94,9 +94,12 @@ class GitApiAdapter:
         Returns:
             Artifact content
         """
-        # Case 1: Direct artifact path (e.g., "artifacts/nodes/abc123/result.ctx")
+        # Case 1a: Direct artifact path in hash field (legacy compatibility)
         if hash_or_path.startswith('artifacts/'):
             return self._read_artifact_by_path(hash_or_path)
+        # Case 1b: Direct artifact path provided as filepath (storage-first API)
+        if filepath.startswith('artifacts/'):
+            return self._read_artifact_by_path(filepath)
 
         # Case 2: Content hash lookup
         try:
@@ -107,16 +110,23 @@ class GitApiAdapter:
             )
             if content is not None:
                 return content
-        except Exception as e:
-            print(f"[GitApiAdapter] Hash lookup failed: {e}")
+        except Exception:
+            # Storage hash lookup not available; fall back to filename search
+            pass
 
         # Case 3: Fallback - search by filename in all nodes
         return self._search_artifact_by_filename(filepath)
 
     def _read_artifact_by_path(self, artifact_path: str) -> str:
-        """Read artifact directly by path."""
+        """Read artifact directly by path.
+
+        IMPORTANT: In the UI server process we may not have session_root set.
+        Always resolve sessions directory relative to the provided repo_path
+        to avoid accidentally reading from a different project or stale session.
+        """
         from core.storage import get_sessions_dir
-        sessions_dir = get_sessions_dir()
+        # Resolve sessions dir using the repo path passed to the adapter
+        sessions_dir = get_sessions_dir(session_root=self.repo_path)
         session_dir = sessions_dir / self.execution_id
         full_path = session_dir / artifact_path
 
@@ -134,7 +144,8 @@ class GitApiAdapter:
         Returns the first matching artifact found.
         """
         from core.storage import get_sessions_dir
-        sessions_dir = get_sessions_dir()
+        # Resolve sessions dir using the repo path passed to the adapter
+        sessions_dir = get_sessions_dir(session_root=self.repo_path)
         session_dir = sessions_dir / self.execution_id
         artifacts_dir = session_dir / 'artifacts' / 'nodes'
 
