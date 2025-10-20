@@ -45,6 +45,12 @@ export class BaseComponent {
         this.container.setAttribute('data-component-id', this.componentId);
         this.container.setAttribute('data-component-type', this.constructor.name);
 
+        // Add control buttons if in artifacts panel
+        if (this.mountPoint === 'artifacts') {
+            this._addControlButtons();
+            this._setupDragAndDrop();
+        }
+
         // Call lifecycle hook
         this.onMount();
 
@@ -178,6 +184,88 @@ export class BaseComponent {
         }
 
         return element;
+    }
+
+    /**
+     * Add close and drag buttons to component
+     * @private
+     */
+    _addControlButtons() {
+        // Drag handle (⋮⋮)
+        const dragHandle = this.createElement('div', {
+            classes: ['component-drag-handle'],
+            innerHTML: '⋮⋮',
+            attributes: {
+                'title': 'Drag to reorder',
+                'draggable': 'false'
+            }
+        });
+        this.container.appendChild(dragHandle);
+
+        // Close button
+        const closeBtn = this.createElement('button', {
+            classes: ['component-close-btn'],
+            innerHTML: '×',
+            attributes: {
+                'title': 'Close component'
+            }
+        });
+
+        this.addEventListener(closeBtn, 'click', (e) => {
+            e.stopPropagation();
+            this._handleClose();
+        });
+
+        this.container.appendChild(closeBtn);
+    }
+
+    /**
+     * Setup drag and drop functionality
+     * @private
+     */
+    _setupDragAndDrop() {
+        this.container.setAttribute('draggable', 'true');
+
+        this.addEventListener(this.container, 'dragstart', (e) => {
+            e.dataTransfer.effectAllowed = 'move';
+            e.dataTransfer.setData('text/html', this.componentId);
+            this.container.classList.add('dragging');
+        });
+
+        this.addEventListener(this.container, 'dragend', (e) => {
+            this.container.classList.remove('dragging');
+        });
+
+        this.addEventListener(this.container, 'dragover', (e) => {
+            e.preventDefault();
+            e.dataTransfer.dropEffect = 'move';
+
+            const draggingComponent = document.querySelector('.dragging');
+            if (draggingComponent && draggingComponent !== this.container) {
+                const rect = this.container.getBoundingClientRect();
+                const midpoint = rect.left + rect.width / 2;
+
+                if (e.clientX < midpoint) {
+                    this.container.parentNode.insertBefore(draggingComponent, this.container);
+                } else {
+                    this.container.parentNode.insertBefore(draggingComponent, this.container.nextSibling);
+                }
+            }
+        });
+    }
+
+    /**
+     * Handle component close
+     * @private
+     */
+    _handleClose() {
+        // Animate out
+        this.container.style.opacity = '0';
+        this.container.style.transform = 'scale(0.95)';
+
+        setTimeout(() => {
+            this.unmount();
+        }, 200);
     }
 
     /**

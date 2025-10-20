@@ -2,7 +2,7 @@
  * Fractalic Chat Client - Main class that coordinates all modules
  */
 
-import { FileBrowser } from './file-browser.js?v=9';
+import { FileBrowser } from './file-browser.js?v=14';
 import { UIRenderer } from './ui-rendering.js?v=9';
 import { StreamClient } from './stream-client.js?v=9';
 import { TerminalViewer } from './terminal-viewer.js?v=9';
@@ -84,6 +84,18 @@ export class FractalicChatClient {
         // Set connection status (HTTP streaming mode, no persistent WebSocket)
         this.connectionStatus.textContent = '🟢 Готово (HTTP Stream)';
         this.connectionStatus.className = 'status-connected';
+
+        // Update sidebar connection status
+        const sidebarStatus = document.getElementById('connectionStatusSidebar');
+        if (sidebarStatus) {
+            sidebarStatus.innerHTML = `
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
+                    <circle cx="12" cy="12" r="10"/>
+                </svg>
+                Готово
+            `;
+            sidebarStatus.className = 'status-connected';
+        }
     }
 
     initializeComponentSystem() {
@@ -113,68 +125,122 @@ export class FractalicChatClient {
     }
 
     initializeEventListeners() {
-        this.sendButton.addEventListener('click', () => this.sendMessage());
-        this.chatInput.addEventListener('keypress', (e) => {
-            if (e.key === 'Enter' && !e.shiftKey) {
-                e.preventDefault();
-                this.sendMessage();
-            }
-        });
-
-        // History toggle button
-        const historyToggleBtn = document.getElementById('historyToggle');
-        if (historyToggleBtn) {
-            historyToggleBtn.addEventListener('click', () => {
-                historyToggleBtn.classList.toggle('active');
+        if (this.sendButton) {
+            this.sendButton.addEventListener('click', () => this.sendMessage());
+        }
+        if (this.chatInput) {
+            this.chatInput.addEventListener('keypress', (e) => {
+                if (e.key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault();
+                    this.sendMessage();
+                }
             });
         }
 
-        // Attach button (file selector)
+        // History toggle buttons (sidebar and inline)
+        const historyToggleBtn = document.getElementById('historyToggle');
+        const historyToggleInline = document.getElementById('historyToggleInline');
+
+        const toggleHistoryMode = () => {
+            const isActive = historyToggleBtn ? historyToggleBtn.classList.contains('active') : false;
+            const newState = !isActive;
+
+            if (historyToggleBtn) {
+                historyToggleBtn.classList.toggle('active', newState);
+            }
+            if (historyToggleInline) {
+                historyToggleInline.classList.toggle('active', newState);
+            }
+        };
+
+        if (historyToggleBtn) {
+            historyToggleBtn.addEventListener('click', toggleHistoryMode);
+        }
+        if (historyToggleInline) {
+            historyToggleInline.addEventListener('click', toggleHistoryMode);
+        }
+
+        // Attach button (file selector) - main area
         const attachBtn = document.getElementById('fileSelectBtn');
         if (attachBtn) {
             attachBtn.addEventListener('click', () => this.fileBrowser.openFileBrowser());
         }
 
+        // File selector button in sidebar
+        const sidebarFileSelectBtn = document.getElementById('selectFileBtnSidebar');
+        if (sidebarFileSelectBtn) {
+            sidebarFileSelectBtn.addEventListener('click', () => this.fileBrowser.openFileBrowser());
+        }
+
         // File browser events
-        this.selectFileButton.addEventListener('click', () => this.fileBrowser.openFileBrowser());
-        this.clearSelectionButton.addEventListener('click', () => this.fileBrowser.clearFileSelection());
-        this.modalCloseButton.addEventListener('click', () => this.fileBrowser.closeFileBrowser());
-        this.cancelButton.addEventListener('click', () => this.fileBrowser.closeFileBrowser());
+        if (this.selectFileButton) {
+            this.selectFileButton.addEventListener('click', () => this.fileBrowser.openFileBrowser());
+        }
+        if (this.clearSelectionButton) {
+            this.clearSelectionButton.addEventListener('click', () => this.fileBrowser.clearFileSelection());
+        }
+        if (this.modalCloseButton) {
+            this.modalCloseButton.addEventListener('click', () => this.fileBrowser.closeFileBrowser());
+        }
+        if (this.cancelButton) {
+            this.cancelButton.addEventListener('click', () => this.fileBrowser.closeFileBrowser());
+        }
         
         // Diff viewer events
-        this.diffModalCloseButton.addEventListener('click', () => this.diffViewer.close());
-        this.closeDiffButton.addEventListener('click', () => this.diffViewer.close());
+        if (this.diffModalCloseButton) {
+            this.diffModalCloseButton.addEventListener('click', () => this.diffViewer.close());
+        }
+        if (this.closeDiffButton) {
+            this.closeDiffButton.addEventListener('click', () => this.diffViewer.close());
+        }
 
         // Terminal viewer events
-        this.terminalModalCloseButton.addEventListener('click', () => this.terminalViewer.close());
-        this.closeTerminalButton.addEventListener('click', () => this.terminalViewer.close());
-        
+        if (this.terminalModalCloseButton) {
+            this.terminalModalCloseButton.addEventListener('click', () => this.terminalViewer.close());
+        }
+        if (this.closeTerminalButton) {
+            this.closeTerminalButton.addEventListener('click', () => this.terminalViewer.close());
+        }
+
         // Close modals when clicking outside
-        this.fileBrowserModal.addEventListener('click', (e) => {
-            if (e.target === this.fileBrowserModal) {
-                this.fileBrowser.closeFileBrowser();
-            }
-        });
-        
-        this.diffViewerModal.addEventListener('click', (e) => {
-            if (e.target === this.diffViewerModal) {
-                this.diffViewer.close();
-            }
-        });
+        if (this.fileBrowserModal) {
+            this.fileBrowserModal.addEventListener('click', (e) => {
+                if (e.target === this.fileBrowserModal) {
+                    this.fileBrowser.closeFileBrowser();
+                }
+            });
+        }
 
-        this.terminalViewerModal.addEventListener('click', (e) => {
-            if (e.target === this.terminalViewerModal) {
-                this.terminalViewer.close();
-            }
-        });
+        if (this.diffViewerModal) {
+            this.diffViewerModal.addEventListener('click', (e) => {
+                if (e.target === this.diffViewerModal) {
+                    this.diffViewer.close();
+                }
+            });
+        }
 
-        // Artifacts panel toggle
-        if (this.artifactsToggle) {
-            this.artifactsToggle.addEventListener('click', () => {
+        if (this.terminalViewerModal) {
+            this.terminalViewerModal.addEventListener('click', (e) => {
+                if (e.target === this.terminalViewerModal) {
+                    this.terminalViewer.close();
+                }
+            });
+        }
+
+        // Artifacts panel toggle - button in header
+        const artifactsToggleBtn = document.getElementById('artifactsToggleBtn');
+        if (artifactsToggleBtn && this.artifactsPanel) {
+            artifactsToggleBtn.addEventListener('click', () => {
                 this.artifactsPanel.classList.toggle('hidden');
                 const isHidden = this.artifactsPanel.classList.contains('hidden');
-                this.artifactsToggle.textContent = isHidden ? '▶' : '◀';
-                this.artifactsToggle.title = isHidden ? 'Show artifacts panel' : 'Hide artifacts panel';
+                artifactsToggleBtn.title = isHidden ? 'Показать артефакты' : 'Скрыть артефакты';
+            });
+        }
+
+        // Artifacts panel close button (inside panel)
+        if (this.artifactsToggle && this.artifactsPanel) {
+            this.artifactsToggle.addEventListener('click', () => {
+                this.artifactsPanel.classList.add('hidden');
             });
         }
     }

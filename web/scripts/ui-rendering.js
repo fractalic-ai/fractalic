@@ -354,9 +354,6 @@ export class UIRenderer {
         const tokenCounter = document.createElement('div');
         tokenCounter.className = 'token-counter-badge';
         tokenCounter.style.cssText = `
-            background: #25292e;
-            border: 1px solid #525b67;
-            border-radius: 8px;
             padding: 4px 8px;
             font-size: 11px;
             color: #a0a8b2;
@@ -364,6 +361,31 @@ export class UIRenderer {
             display: none;
         `;
         tokenCounter.title = 'Token usage (input/output)';
+
+        // Info button (i) for metadata
+        const infoButton = document.createElement('button');
+        infoButton.className = 'info-icon-button';
+        infoButton.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="10" stroke="#a0a8b2" stroke-width="2"/><path d="M12 16v-4M12 8h.01" stroke="#a0a8b2" stroke-width="2" stroke-linecap="round"/></svg>';
+        infoButton.title = `Execution ID: ${executionId}\nFile: ${filePath || 'N/A'}`;
+        infoButton.style.cssText = `
+            background: transparent;
+            border: none;
+            cursor: help;
+            padding: 4px 8px;
+            display: flex;
+            align-items: center;
+            opacity: 0.6;
+            transition: all 0.2s;
+        `;
+        infoButton.onmouseover = () => {
+            infoButton.style.opacity = '1';
+        };
+        infoButton.onmouseout = () => {
+            infoButton.style.opacity = '0.6';
+        };
+        infoButton.onclick = (e) => {
+            e.stopPropagation();
+        };
 
         // Terminal button
         const terminalButton = document.createElement('button');
@@ -412,6 +434,7 @@ export class UIRenderer {
         tabSwitcher.appendChild(responseTab);
         tabSwitcher.appendChild(inspectTab);
 
+        controlsContainer.appendChild(infoButton);
         controlsContainer.appendChild(terminalButton);
         controlsContainer.appendChild(tokenCounter);
         controlsContainer.appendChild(tabSwitcher);
@@ -831,21 +854,25 @@ export class UIRenderer {
     " title="Token usage for this block">${inputStr}/${outputStr}</span>`;
         }
 
-        // Build block HTML
+        // Build metadata tooltip for info icon
+        const metadataTooltip = `Type: ${block.type}\\nID: ${blockId}`;
+
+        // Build block HTML with info icon and title
         let html = `
-    <div class="ast-block-type">${typeIcon} ${block.type}${tokenBadge}</div>
+    <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px;">
+        <span style="opacity: 0.6; cursor: help; font-size: 14px;" title="${metadataTooltip}">ℹ️</span>
+        ${tokenBadge}
+    </div>
         `;
 
         if (block.header) {
-    html += `<div class="ast-block-header">${escapeHtml(block.header)}</div>`;
+    html += `<div class="ast-block-header" style="font-size: 14px; font-weight: 600; margin-bottom: 8px;">${escapeHtml(block.header)}</div>`;
         }
 
         // Show full content by default (expanded state)
         if (block.content) {
     html += `<div class="ast-block-preview">${escapeHtml(block.content)}</div>`;
         }
-
-        html += `<div class="ast-block-id">ID: ${escapeHtml(blockId.substring(0, 16))}</div>`;
 
         blockEl.innerHTML = html;
 
@@ -1002,16 +1029,16 @@ export class UIRenderer {
         const blockEl = blockMap.get(blockId);
         if (!blockEl) return;
 
-        const typeEl = blockEl.querySelector('.ast-block-type');
-        if (!typeEl) return;
-
         const tokenStats = tokenMap.get(blockId);
         const inputStr = (tokenStats.input ?? 0).toLocaleString();
         const outputStr = (tokenStats.output ?? 0).toLocaleString();
 
-        const typeIcon = blockEl.dataset.blockIcon || '';
-        const typeLabel = blockEl.dataset.blockType || '';
+        // Find the first div (info + token badge container)
+        const containerDiv = blockEl.querySelector('div');
+        if (!containerDiv) return;
 
+        // Update or create token badge
+        let badgeEl = containerDiv.querySelector('span[title*="Token usage"]');
         const badgeHtml = `<span style="
             font-size: 10px;
             color: #d7a558;
@@ -1022,7 +1049,15 @@ export class UIRenderer {
             font-family: Monaco, monospace;
         " title="Token usage for this block">${inputStr}/${outputStr}</span>`;
 
-        typeEl.innerHTML = `${typeIcon} ${typeLabel}${badgeHtml}`;
+        if (badgeEl) {
+            // Replace existing badge
+            const tempDiv = document.createElement('div');
+            tempDiv.innerHTML = badgeHtml;
+            badgeEl.replaceWith(tempDiv.firstChild);
+        } else {
+            // Append new badge if it doesn't exist
+            containerDiv.insertAdjacentHTML('beforeend', badgeHtml);
+        }
     }
 
     updateTokenCounter(bubbleRefs) {
@@ -1078,8 +1113,35 @@ export class UIRenderer {
         const aggInputStr = formatNum(aggregatedInput);
         const aggOutputStr = formatNum(aggregatedOutput);
 
+        // Smart price formatting - show decimals up to first non-zero digit
+        const formatPrice = (price) => {
+            if (price === 0) return '0';
+            const str = price.toString();
+            const parts = str.split('.');
+            if (parts.length === 1) return str; // No decimals
+
+            const decimals = parts[1];
+            // Find first non-zero digit position
+            let firstNonZero = -1;
+            for (let i = 0; i < decimals.length; i++) {
+                if (decimals[i] !== '0') {
+                    firstNonZero = i;
+                    break;
+                }
+            }
+
+            if (firstNonZero === -1) return parts[0]; // All zeros
+            if (firstNonZero <= 1) {
+                // First or second position - show 2 decimals
+                return price.toFixed(2);
+            } else {
+                // Show up to and including first non-zero digit
+                return price.toFixed(firstNonZero + 1);
+            }
+        };
+
         // Build display text with aggregation info
-        let displayText = `🎯 ${aggInputStr}/${aggOutputStr}`;
+        let displayText = `${aggInputStr} -> ${aggOutputStr}`;
         let tooltipText = `Total Token usage - Input: ${aggregatedInput.toLocaleString()} / Output: ${aggregatedOutput.toLocaleString()}`;
 
         // Show breakdown if there are children
@@ -1096,7 +1158,7 @@ export class UIRenderer {
         }
 
         if (aggregatedCost > 0) {
-            displayText += ` 💰$${aggregatedCost.toFixed(6)}`;
+            displayText += ` / $${formatPrice(aggregatedCost)}`;
             tooltipText += `\n\nTotal Cost: $${aggregatedCost.toFixed(6)}`;
 
             if (bubbleRefs.childBubbles && bubbleRefs.childBubbles.length > 0) {

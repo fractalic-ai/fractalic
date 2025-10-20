@@ -78,30 +78,48 @@ export class FileBrowser {
 
     selectFile(path, name) {
         this.client.selectedFile = path;
-        this.client.selectedFileDisplay.textContent = `📄 ${name}`;
-        this.client.selectedFileDisplay.title = path; // tooltip with full path
-        this.client.selectedFileDisplay.classList.add('has-file');
-        this.client.clearSelectionButton.style.display = 'block';
+        if (this.client.selectedFileDisplay) {
+            this.client.selectedFileDisplay.textContent = `📄 ${name}`;
+            this.client.selectedFileDisplay.title = path; // tooltip with full path
+            this.client.selectedFileDisplay.classList.add('has-file');
+        }
+        if (this.client.clearSelectionButton) {
+            this.client.clearSelectionButton.style.display = 'block';
+        }
         this.updateInputPlaceholder();
         this.closeFileBrowser();
-        this.client.sendButton.disabled = false;
-        this.client.chatInput.disabled = false;
+        if (this.client.sendButton) {
+            this.client.sendButton.disabled = false;
+        }
+        if (this.client.chatInput) {
+            this.client.chatInput.disabled = false;
+        }
     }
 
     clearFileSelection() {
         this.client.selectedFile = null;
-        this.client.selectedFileDisplay.textContent = 'Файл не выбран';
-        this.client.selectedFileDisplay.removeAttribute('title');
-        this.client.selectedFileDisplay.classList.remove('has-file');
-        this.client.clearSelectionButton.style.display = 'none';
+        if (this.client.selectedFileDisplay) {
+            this.client.selectedFileDisplay.textContent = 'Файл не выбран';
+            this.client.selectedFileDisplay.removeAttribute('title');
+            this.client.selectedFileDisplay.classList.remove('has-file');
+        }
+        if (this.client.clearSelectionButton) {
+            this.client.clearSelectionButton.style.display = 'none';
+        }
         this.updateInputPlaceholder();
-        this.client.sendButton.disabled = true;
-        this.client.chatInput.disabled = true;
+        if (this.client.sendButton) {
+            this.client.sendButton.disabled = true;
+        }
+        if (this.client.chatInput) {
+            this.client.chatInput.disabled = true;
+        }
     }
 
     updateInputPlaceholder() {
-        this.client.chatInput.placeholder = this.client.selectedFile
-            ? 'Введите запрос и нажмите Отправить'
-            : 'Сначала выберите markdown файл выше';
+        if (this.client.chatInput) {
+            this.client.chatInput.placeholder = this.client.selectedFile
+                ? 'Введите запрос и нажмите Отправить'
+                : 'Сначала выберите markdown файл выше';
+        }
     }
 }
