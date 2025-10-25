@@ -24,17 +24,47 @@ export class UIRenderer {
     configureMarkdown() {
         if (this.markdownConfigured || typeof markdownit === 'undefined') return;
 
-        // Initialize markdown-it with GFM-like options
+        // Initialize markdown-it with GFM-like options and syntax highlighting
         this.md = markdownit({
             html: true,         // Enable HTML tags in source
             breaks: true,       // Convert \n to <br>
             linkify: true,      // Auto-convert URLs to links
-            typographer: true   // Enable smartquotes and other replacements
+            typographer: true,  // Enable smartquotes and other replacements
+            highlight: function (str, lang) {
+                // Use highlight.js for code syntax highlighting
+                if (lang && typeof hljs !== 'undefined' && hljs.getLanguage(lang)) {
+                    try {
+                        return '<pre class="hljs"><code>' +
+                               hljs.highlight(str, { language: lang, ignoreIllegals: true }).value +
+                               '</code></pre>';
+                    } catch (__) {}
+                }
+                // No language specified or hljs not available - return escaped code
+                return '<pre class="hljs"><code>' + this.md.utils.escapeHtml(str) + '</code></pre>';
+            }.bind(this)
         });
 
-        // Use markdown-it-highlightjs plugin for syntax highlighting
-        if (typeof markdownitHighlightjs !== 'undefined') {
-            this.md.use(markdownitHighlightjs);
+        if (typeof markdownItEmoji !== 'undefined') {
+            this.md.use(markdownItEmoji);
+        }
+
+        if (typeof markdownitTaskLists !== 'undefined') {
+            this.md.use(markdownitTaskLists, {
+                enabled: true,
+                label: true
+            });
+        }
+
+        if (typeof markdownItMark !== 'undefined') {
+            this.md.use(markdownItMark);
+        }
+
+        if (typeof markdownItSub !== 'undefined') {
+            this.md.use(markdownItSub);
+        }
+
+        if (typeof markdownItSup !== 'undefined') {
+            this.md.use(markdownItSup);
         }
 
         // Configure Mermaid

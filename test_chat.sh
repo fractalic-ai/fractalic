@@ -162,7 +162,7 @@ if curl -s "http://localhost:${PORT}/health" > /dev/null; then
             echo "📌 Для остановки: kill $(cat .server_pid) или ./test_chat.sh --stop"
             exit 0
         else
-            trap "echo '🛑 Останавливаем сервер...'; kill $SERVER_PID; exit 0" INT
+            trap "echo '🛑 Останавливаем сервер...'; lsof -ti:$PORT | xargs kill -9 2>/dev/null || true; exit 0" INT
             wait $SERVER_PID
         fi
     

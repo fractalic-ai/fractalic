@@ -764,6 +764,18 @@ button {
     background: transparent;
     padding: var(--space-sm) 0;
     font-family: var(--font-sans);
+    overflow-y: auto;
+    max-height: calc(1.6em * 5); /* 5 lines max */
+    min-height: calc(1.6em * 1); /* 1 line min */
+}
+
+.chat-input::-webkit-scrollbar {
+    width: 4px;
+}
+
+.chat-input::-webkit-scrollbar-thumb {
+    background: var(--color-border);
+    border-radius: var(--radius-sm);
 }
 
 .chat-input::placeholder {
@@ -1354,4 +1366,69 @@ button {
     font-family: var(--font-mono);
     font-size: 12px;
     overflow-x: auto;
+}
+
+/* ========================================
+   TASK LISTS (CHECKBOXES)
+   ======================================== */
+
+.message-content .task-list-item,
+.bubble-response-content .task-list-item {
+    list-style-type: none;
+    position: relative;
+    padding-left: 0;
+}
+
+.message-content .task-list-item-checkbox,
+.bubble-response-content .task-list-item-checkbox {
+    margin-right: var(--space-sm);
+    cursor: pointer;
+    width: 16px;
+    height: 16px;
+    accent-color: var(--color-accent-primary);
+}
+
+.message-content .task-list-item input[type="checkbox"],
+.bubble-response-content .task-list-item input[type="checkbox"] {
+    margin-right: var(--space-sm);
+}
+
+/* ========================================
+   MARK (HIGHLIGHTED TEXT)
+   ======================================== */
+
+.message-content mark,
+.bubble-response-content mark {
+    background: rgba(255, 235, 59, 0.3);
+    color: var(--color-text-primary);
+    padding: 2px 4px;
+    border-radius: 3px;
+}
+
+/* ========================================
+   STRIKETHROUGH
+   ======================================== */
+
+.message-content s,
+.message-content del,
+.bubble-response-content s,
+.bubble-response-content del {
+    text-decoration: line-through;
+    opacity: 0.7;
+}
+
+/* ========================================
+   SUBSCRIPT AND SUPERSCRIPT
+   ======================================== */
+
+.message-content sub,
+.bubble-response-content sub {
+    font-size: 0.75em;
+    vertical-align: sub;
+}
+
+.message-content sup,
+.bubble-response-content sup {
+    font-size: 0.75em;
+    vertical-align: super;
 }

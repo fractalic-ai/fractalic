@@ -1833,6 +1833,12 @@ async def capture_terminal_output(process, execution_id: str):
             global events_seq_counter
             events_seq_counter += 1
 
+            data_len = len(data)
+
+            # Warn about very large chunks
+            if data_len > 10000:
+                print(f"[WARNING] Large terminal chunk: {data_len} bytes - may cause delays")
+
             event = {
                 'type': EventType.TERMINAL_OUTPUT.value,
                 'execution_id': owner_id,  # Route to current owner in stack
@@ -1843,7 +1849,7 @@ async def capture_terminal_output(process, execution_id: str):
                 'seq': events_seq_counter
             }
             events_queue.append(event)
-            print(f"[DEBUG] Emitted terminal_output event for {owner_id} (root: {execution_id}), data length: {len(data)}")
+            print(f"[DEBUG] Emitted terminal_output event for {owner_id} (root: {execution_id}), data length: {data_len} bytes")
 
     try:
         while True:
@@ -1861,9 +1867,9 @@ async def capture_terminal_output(process, execution_id: str):
                     emit_terminal_chunk(decoded, is_stderr=True)
                 break
 
-            # Read chunks periodically
+            # Read chunks periodically with larger buffer for faster capture
             try:
-                chunk = await asyncio.wait_for(process.stdout.read(1024), timeout=0.1)
+                chunk = await asyncio.wait_for(process.stdout.read(8192), timeout=0.1)
                 if chunk:
                     decoded = chunk.decode('utf-8', errors='replace')
                     emit_terminal_chunk(decoded, is_stderr=False)
@@ -1871,7 +1877,7 @@ async def capture_terminal_output(process, execution_id: str):
                 pass
 
             try:
-                err_chunk = await asyncio.wait_for(process.stderr.read(1024), timeout=0.1)
+                err_chunk = await asyncio.wait_for(process.stderr.read(8192), timeout=0.1)
                 if err_chunk:
                     decoded = err_chunk.decode('utf-8', errors='replace')
                     emit_terminal_chunk(decoded, is_stderr=True)
@@ -1930,9 +1936,29 @@ async def stream_chat_events(request: Request):
                             event = events_queue.popleft()
                             event_type = event.get('type')
                             exec_id = event.get('execution_id', 'N/A')
-                            print(f"[DEBUG /api/chat/stream] Streaming event #{event.get('seq')}: {event_type} for {exec_id}")
-                            yield f"{json.dumps(event, ensure_ascii=False)}\n"
-                            events_found = True
+
+                            # Log data size for terminal_output events
+                            if event_type == 'terminal_output' and 'data' in event:
+                                data_len = len(event.get('data', ''))
+                                print(f"[DEBUG /api/chat/stream] Streaming event #{event.get('seq')}: {event_type} for {exec_id} (data: {data_len} bytes)")
+                            else:
+                                print(f"[DEBUG /api/chat/stream] Streaming event #{event.get('seq')}: {event_type} for {exec_id}")
+
+                            # Safe JSON serialization with error handling
+                            try:
+                                json_str = json.dumps(event, ensure_ascii=False)
+                                yield f"{json_str}\n"
+                                events_found = True
+                            except Exception as json_err:
+                                print(f"[ERROR] Failed to serialize event {event.get('seq')}: {json_err}")
+                                # Send error event instead
+                                error_event = {
+                                    'type': 'error',
+                                    'message': f'Failed to serialize event: {str(json_err)}',
+                                    'execution_id': exec_id
+                                }
+                                yield f"{json.dumps(error_event, ensure_ascii=False)}\n"
+                                events_found = True
 
                     if events_found:
                         timeout_count = 0  # Reset timeout when we get events
@@ -1943,9 +1969,52 @@ async def stream_chat_events(request: Request):
 
                         # Check if process is still running - if not, wait for final events and exit
                         if process and hasattr(process, 'returncode') and process.returncode is not None:
-                            # Process finished, wait longer for final events to arrive via HTTP
-                            print(f"[DEBUG /api/chat/stream] Process finished, waiting for final events")
-                            await asyncio.sleep(3)  # Wait 3 seconds for HTTP events to arrive
+                            # Process finished, wait for terminal capture to complete AND events queue to drain
+                            print(f"[DEBUG /api/chat/stream] Process finished (returncode={process.returncode}), waiting for terminal capture completion")
+
+                            # Wait for capture task to finish (up to 10 seconds)
+                            wait_time = 0
+                            capture_finished = False
+                            while wait_time < 10:
+                                with active_capture_tasks_lock:
+                                    if execution_id not in active_capture_tasks:
+                                        capture_finished = True
+                                        print(f"[DEBUG /api/chat/stream] Terminal capture task completed")
+                                        break
+                                await asyncio.sleep(0.5)
+                                wait_time += 0.5
+
+                            if not capture_finished:
+                                print(f"[WARNING /api/chat/stream] Terminal capture task timeout after {wait_time}s")
+
+                            # Now wait for events queue to drain (up to 5 seconds)
+                            print(f"[DEBUG /api/chat/stream] Waiting for events queue to drain...")
+                            drain_wait = 0
+                            last_queue_size = -1
+                            stuck_iterations = 0
+                            while drain_wait < 5:
+                                with events_lock:
+                                    queue_size = len(events_queue)
+                                    print(f"[DEBUG /api/chat/stream] Events queue size: {queue_size}")
+                                    if queue_size == 0:
+                                        print(f"[DEBUG /api/chat/stream] Events queue drained")
+                                        break
+                                    # If queue is not shrinking, detect no reader scenario
+                                    if queue_size == last_queue_size:
+                                        stuck_iterations += 1
+                                        print(f"[DEBUG /api/chat/stream] Events queue stuck at {queue_size} events (iteration {stuck_iterations})")
+                                        # If stuck for 3 iterations (1.5s), assume no reader and exit early
+                                        if stuck_iterations >= 3:
+                                            print(f"[INFO /api/chat/stream] No active consumer detected, exiting drain wait")
+                                            break
+                                    else:
+                                        stuck_iterations = 0  # Reset if queue is changing
+                                    last_queue_size = queue_size
+                                await asyncio.sleep(0.5)
+                                drain_wait += 0.5
+
+                            # Extra delay for HTTP events to arrive
+                            await asyncio.sleep(0.5)
 
                             # Drain all remaining events from single queue
                             final_event_count = 0
@@ -1953,9 +2022,30 @@ async def stream_chat_events(request: Request):
                                 # Stream ALL remaining events from FIFO queue
                                 while events_queue:
                                     event = events_queue.popleft()
-                                    print(f"[DEBUG /api/chat/stream] Streaming FINAL event #{event.get('seq')}: {event.get('type')} for {event.get('execution_id')}")
-                                    yield f"{json.dumps(event, ensure_ascii=False)}\n"
-                                    final_event_count += 1
+                                    event_type = event.get('type')
+
+                                    # Log data size for terminal_output events
+                                    if event_type == 'terminal_output' and 'data' in event:
+                                        data_len = len(event.get('data', ''))
+                                        print(f"[DEBUG /api/chat/stream] Streaming FINAL event #{event.get('seq')}: {event_type} for {event.get('execution_id')} (data: {data_len} bytes)")
+                                    else:
+                                        print(f"[DEBUG /api/chat/stream] Streaming FINAL event #{event.get('seq')}: {event_type} for {event.get('execution_id')}")
+
+                                    # Safe JSON serialization with error handling
+                                    try:
+                                        json_str = json.dumps(event, ensure_ascii=False)
+                                        yield f"{json_str}\n"
+                                        final_event_count += 1
+                                    except Exception as json_err:
+                                        print(f"[ERROR] Failed to serialize FINAL event {event.get('seq')}: {json_err}")
+                                        # Send error event instead
+                                        error_event = {
+                                            'type': 'error',
+                                            'message': f'Failed to serialize final event: {str(json_err)}',
+                                            'execution_id': event.get('execution_id', 'N/A')
+                                        }
+                                        yield f"{json.dumps(error_event, ensure_ascii=False)}\n"
+                                        final_event_count += 1
 
                             print(f"[DEBUG /api/chat/stream] Streamed {final_event_count} final events")
                             completed = True

@@ -129,11 +129,21 @@ export class FractalicChatClient {
             this.sendButton.addEventListener('click', () => this.sendMessage());
         }
         if (this.chatInput) {
-            this.chatInput.addEventListener('keypress', (e) => {
+            // Handle Enter key for sending, Shift+Enter for new line
+            this.chatInput.addEventListener('keydown', (e) => {
                 if (e.key === 'Enter' && !e.shiftKey) {
                     e.preventDefault();
                     this.sendMessage();
                 }
+            });
+
+            // Auto-resize textarea as user types
+            this.chatInput.addEventListener('input', (e) => {
+                const target = e.target;
+                // Reset height to auto to get the correct scrollHeight
+                target.style.height = 'auto';
+                // Set height based on scrollHeight, capped by CSS max-height
+                target.style.height = target.scrollHeight + 'px';
             });
         }
 
@@ -249,6 +259,8 @@ export class FractalicChatClient {
         // Don't store current message in history yet - it will be added after fractalic confirms
         this.uiRenderer.addMessage('user', text, formatTime(timestamp), { storeHistory: false });
         this.chatInput.value = '';
+        // Reset textarea height after sending
+        this.chatInput.style.height = 'auto';
         this.uiRenderer.showTyping(true);
 
         // Check if history mode is enabled
