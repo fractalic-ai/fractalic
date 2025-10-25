@@ -1263,3 +1263,56 @@ button {
         right: 0;
     }
 }
+
+/* ========================================
+   MERMAID DIAGRAMS
+   ======================================== */
+
+.mermaid-diagram {
+    margin: var(--space-lg) 0;
+    padding: var(--space-lg);
+    background: var(--color-bg-secondary);
+    border-radius: var(--radius-lg);
+    border: 1px solid var(--color-border);
+    overflow-x: auto;
+}
+
+.mermaid-loading {
+    font-family: var(--font-mono);
+    font-size: 12px;
+    color: var(--color-text-secondary);
+    background: var(--color-bg-tertiary);
+    padding: var(--space-md);
+    border-radius: var(--radius-sm);
+    overflow-x: auto;
+}
+
+.mermaid-diagram svg {
+    max-width: 100%;
+    height: auto;
+    display: block;
+    margin: 0 auto;
+}
+
+.mermaid-error {
+    padding: var(--space-md);
+    background: rgba(239, 68, 68, 0.1);
+    border: 1px solid var(--color-error);
+    border-radius: var(--radius-md);
+    color: var(--color-error);
+}
+
+.mermaid-error strong {
+    display: block;
+    margin-bottom: var(--space-sm);
+}
+
+.mermaid-error pre {
+    margin-top: var(--space-sm);
+    padding: var(--space-sm);
+    background: rgba(0, 0, 0, 0.2);
+    border-radius: var(--radius-sm);
+    font-family: var(--font-mono);
+    font-size: 12px;
+    overflow-x: auto;
+}

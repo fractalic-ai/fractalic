@@ -412,6 +412,8 @@ export class FractalicChatClient {
                         messageDiv.style.cssText = 'margin-bottom: 12px;';
                         messageDiv.innerHTML = rendered;
                         bubbleRefs.responseContent.appendChild(messageDiv);
+                        // Render Mermaid diagrams after DOM insertion
+                        this.uiRenderer.renderMermaidDiagrams(messageDiv);
                     }
 
                     if (shouldStoreInHistory) {
@@ -502,6 +504,8 @@ export class FractalicChatClient {
                         finalDiv.style.cssText = 'margin-bottom: 12px;';
                         finalDiv.innerHTML = this.uiRenderer.renderMarkdownish(data.return_content);
                         bubbleRefs.responseContent.appendChild(finalDiv);
+                        // Render Mermaid diagrams after DOM insertion
+                        this.uiRenderer.renderMermaidDiagrams(finalDiv);
                     }
                 }
 
@@ -840,6 +844,8 @@ export class FractalicChatClient {
                 resultDiv.style.cssText = 'margin-bottom: 12px;';
                 resultDiv.innerHTML = rendered;
                 bubbleRefs.responseContent.appendChild(resultDiv);
+                // Render Mermaid diagrams after DOM insertion
+                this.uiRenderer.renderMermaidDiagrams(resultDiv);
                 if (data.role === 'assistant') {
                     this.uiRenderer.appendConversationEntry('assistant', data.return_content);
                 }

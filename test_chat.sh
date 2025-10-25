@@ -108,13 +108,20 @@ fi
 
 # Запускаем UI Server
 echo "🚀 Запуск UI Server на порту $PORT..."
+UVICORN_ARGS=(--host "$HOST" --port "$PORT")
+if [ "$DEV_MODE" = "1" ]; then
+    UVICORN_ARGS+=(--reload --reload-exclude "**/.fractalic/**")
+fi
+# Note: Auto-reload is disabled by default when --reload is not specified
+# This prevents server restarts during LLM streaming
+
 if [ "$BACKGROUND" = "1" ]; then
-    nohup python3 -m uvicorn core.ui_server.server:app --host "$HOST" --port "$PORT" > server.out 2>&1 &
+    nohup python3 -m uvicorn core.ui_server.server:app "${UVICORN_ARGS[@]}" > server.out 2>&1 &
     SERVER_PID=$!
     echo $SERVER_PID > .server_pid
     echo "💤 Сервер запущен в фоне (PID=$SERVER_PID). Логи: tail -f server.out"
 else
-    python3 -m uvicorn core.ui_server.server:app --host "$HOST" --port "$PORT" &
+    python3 -m uvicorn core.ui_server.server:app "${UVICORN_ARGS[@]}" &
     SERVER_PID=$!
 fi
 

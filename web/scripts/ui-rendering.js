@@ -21,42 +21,129 @@ export class UIRenderer {
 
     // ========== MARKDOWN RENDERING ==========
 
-    configureMarked() {
-        if (this.markedConfigured || typeof marked === 'undefined') return;
+    configureMarkdown() {
+        if (this.markdownConfigured || typeof markdownit === 'undefined') return;
 
-        // Configure marked-highlight extension if available
-        if (typeof markedHighlight !== 'undefined' && typeof hljs !== 'undefined') {
-            marked.use(markedHighlight.markedHighlight({
-                langPrefix: 'hljs language-',
-                highlight(code, lang) {
-                    const language = hljs.getLanguage(lang) ? lang : 'plaintext';
-                    return hljs.highlight(code, { language }).value;
-                }
-            }));
-        }
-
-        marked.setOptions({
-            breaks: true,  // Convert \n to <br>
-            gfm: true,     // GitHub Flavored Markdown
-            headerIds: false,
-            mangle: false
+        // Initialize markdown-it with GFM-like options
+        this.md = markdownit({
+            html: true,         // Enable HTML tags in source
+            breaks: true,       // Convert \n to <br>
+            linkify: true,      // Auto-convert URLs to links
+            typographer: true   // Enable smartquotes and other replacements
         });
 
-        this.markedConfigured = true;
+        // Use markdown-it-highlightjs plugin for syntax highlighting
+        if (typeof markdownitHighlightjs !== 'undefined') {
+            this.md.use(markdownitHighlightjs);
+        }
+
+        // Configure Mermaid
+        if (typeof mermaid !== 'undefined') {
+            mermaid.initialize({
+                startOnLoad: false,  // We'll render manually
+                theme: 'dark',
+                securityLevel: 'loose',
+                fontFamily: 'system-ui, -apple-system, sans-serif'
+            });
+        }
+
+        // Custom fence renderer for Mermaid diagrams
+        const defaultFenceRenderer = this.md.renderer.rules.fence ||
+            ((tokens, idx, options, env, self) => self.renderToken(tokens, idx, options));
+
+        this.md.renderer.rules.fence = (tokens, idx, options, env, self) => {
+            const token = tokens[idx];
+            const code = token.content.trim();
+            const info = token.info ? token.info.trim() : '';
+            const langName = info.split(/\s+/g)[0];
+
+            // Handle Mermaid diagrams
+            if (langName === 'mermaid') {
+                const mermaidId = `mermaid-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+                // Return a container that will be processed by Mermaid
+                // We'll use a data attribute to store the diagram code
+                return `<div class="mermaid-diagram" data-mermaid-id="${mermaidId}" data-mermaid-code="${this.escapeHtmlAttr(code)}">
+                    <pre class="mermaid-loading">${code}</pre>
+                </div>`;
+            }
+
+            // Use default renderer for other code blocks
+            return defaultFenceRenderer(tokens, idx, options, env, self);
+        };
+
+        this.markdownConfigured = true;
+    }
+
+    escapeHtmlAttr(str) {
+        return str.replace(/&/g, '&amp;')
+                  .replace(/</g, '&lt;')
+                  .replace(/>/g, '&gt;')
+                  .replace(/"/g, '&quot;')
+                  .replace(/'/g, '&#39;');
+    }
+
+    async renderMermaidDiagrams(container) {
+        if (typeof mermaid === 'undefined') return;
+
+        const mermaidElements = container.querySelectorAll('.mermaid-diagram:not(.mermaid-rendered)');
+        for (const element of mermaidElements) {
+            const mermaidId = element.dataset.mermaidId;
+            const code = element.dataset.mermaidCode;
+
+            if (!code) continue;
+
+            try {
+                // Decode HTML entities
+                const decodedCode = code.replace(/&lt;/g, '<')
+                                        .replace(/&gt;/g, '>')
+                                        .replace(/&quot;/g, '"')
+                                        .replace(/&#39;/g, "'")
+                                        .replace(/&amp;/g, '&');
+
+                // Render Mermaid diagram
+                const { svg } = await mermaid.render(mermaidId, decodedCode);
+
+                // Clean up any orphaned divs that Mermaid may have created in the body
+                // (Mermaid sometimes creates error divs in document.body)
+                const orphanedDiv = document.getElementById(`d${mermaidId}`);
+                if (orphanedDiv && orphanedDiv.parentNode === document.body) {
+                    orphanedDiv.remove();
+                }
+
+                // Replace loading state with rendered SVG
+                element.innerHTML = svg;
+                element.classList.add('mermaid-rendered');
+            } catch (err) {
+                console.error('Mermaid rendering error:', err);
+
+                // Clean up any orphaned divs from failed render
+                const orphanedDiv = document.getElementById(`d${mermaidId}`);
+                if (orphanedDiv && orphanedDiv.parentNode === document.body) {
+                    orphanedDiv.remove();
+                }
+
+                // Show error state
+                element.innerHTML = `<div class="mermaid-error">
+                    <strong>Mermaid Diagram Error:</strong>
+                    <pre>${err.message || 'Failed to render diagram'}</pre>
+                </div>`;
+                element.classList.add('mermaid-error-state');
+            }
+        }
     }
 
     renderMarkdown(text) {
         if (!text) return '';
 
-        // Ensure marked.js is configured once
-        this.configureMarked();
+        // Ensure markdown-it is configured once
+        this.configureMarkdown();
 
-        if (typeof marked !== 'undefined') {
+        if (typeof markdownit !== 'undefined' && this.md) {
             try {
-                const html = marked.parse(text);
+                const html = this.md.render(text);
                 return html;
             } catch (err) {
-                console.error('Marked.js parsing error:', err);
+                console.error('Markdown-it parsing error:', err);
                 // Fallback to escaped text
                 return '<pre>' + text.replace(/&/g, '&amp;')
                                      .replace(/</g, '&lt;')
@@ -64,11 +151,22 @@ export class UIRenderer {
             }
         }
 
-        // Fallback if marked.js is not loaded
-        console.warn('marked.js not loaded, using fallback renderer');
+        // Fallback if markdown-it is not loaded
+        console.warn('markdown-it not loaded, using fallback renderer');
         return '<pre>' + text.replace(/&/g, '&amp;')
                              .replace(/</g, '&lt;')
                              .replace(/>/g, '&gt;') + '</pre>';
+    }
+
+    // Helper method to render markdown and process Mermaid diagrams
+    renderMarkdownWithMermaid(text, container) {
+        const html = this.renderMarkdown(text);
+        if (container) {
+            container.innerHTML = html;
+            // Render Mermaid diagrams after DOM insertion
+            this.renderMermaidDiagrams(container);
+        }
+        return html;
     }
 
     renderMarkdownish(text) {
@@ -131,6 +229,12 @@ export class UIRenderer {
         messageDiv.appendChild(timeDiv);
 
         this.client.messagesContainer.appendChild(messageDiv);
+
+        // Render Mermaid diagrams after DOM insertion (for markdown content)
+        if (options.markdownish || options.allowHtml) {
+            this.renderMermaidDiagrams(contentDiv);
+        }
+
         this.scrollToBottom();
 
         if (options.storeHistory !== false) {
@@ -1399,6 +1503,10 @@ export class UIRenderer {
         eventDiv.appendChild(timeSpan);
 
         eventsContainer.appendChild(eventDiv);
+
+        // Render Mermaid diagrams after DOM insertion
+        this.renderMermaidDiagrams(contentDiv);
+
         this.scrollToBottom();
 
         return true;
