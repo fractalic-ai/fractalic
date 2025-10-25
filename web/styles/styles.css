@@ -693,24 +693,63 @@ button {
     color: var(--color-text-primary);
 }
 
-.history-toggle-btn-inline {
-    width: 36px;
-    height: 36px;
-    border-radius: var(--radius-md);
+/* History Toggle Switch */
+.history-toggle-switch {
     display: flex;
     align-items: center;
-    justify-content: center;
-    color: var(--color-text-secondary);
-    transition: all 0.2s;
+    gap: var(--space-sm);
+    cursor: pointer;
+    user-select: none;
 }
 
-.history-toggle-btn-inline:hover {
+.history-toggle-switch input[type="checkbox"] {
+    display: none;
+}
+
+.toggle-slider {
+    position: relative;
+    width: 42px;
+    height: 24px;
+    background: var(--color-bg-tertiary);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-full);
+    transition: all 0.3s;
+}
+
+.toggle-slider::before {
+    content: '';
+    position: absolute;
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    background: var(--color-text-secondary);
+    top: 2px;
+    left: 2px;
+    transition: all 0.3s;
+}
+
+.history-toggle-switch:hover .toggle-slider {
     background: var(--color-bg-hover);
-    color: var(--color-text-primary);
 }
 
-.history-toggle-btn-inline.active {
-    background: var(--color-accent-light);
+.history-toggle-switch input[type="checkbox"]:checked + .toggle-slider {
+    background: var(--color-accent-primary);
+    border-color: var(--color-accent-primary);
+}
+
+.history-toggle-switch input[type="checkbox"]:checked + .toggle-slider::before {
+    background: white;
+    transform: translateX(18px);
+}
+
+.toggle-label {
+    font-size: 14px;
+    color: var(--color-text-secondary);
+    font-weight: 500;
+    transition: color 0.2s;
+}
+
+.history-toggle-switch input[type="checkbox"]:checked ~ .toggle-label {
     color: var(--color-accent-primary);
 }
 

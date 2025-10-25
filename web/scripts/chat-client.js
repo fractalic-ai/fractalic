@@ -137,27 +137,13 @@ export class FractalicChatClient {
             });
         }
 
-        // History toggle buttons (sidebar and inline)
-        const historyToggleBtn = document.getElementById('historyToggle');
+        // History toggle checkbox (inline)
         const historyToggleInline = document.getElementById('historyToggleInline');
 
-        const toggleHistoryMode = () => {
-            const isActive = historyToggleBtn ? historyToggleBtn.classList.contains('active') : false;
-            const newState = !isActive;
-
-            if (historyToggleBtn) {
-                historyToggleBtn.classList.toggle('active', newState);
-            }
-            if (historyToggleInline) {
-                historyToggleInline.classList.toggle('active', newState);
-            }
-        };
-
-        if (historyToggleBtn) {
-            historyToggleBtn.addEventListener('click', toggleHistoryMode);
-        }
         if (historyToggleInline) {
-            historyToggleInline.addEventListener('click', toggleHistoryMode);
+            historyToggleInline.addEventListener('change', (e) => {
+                console.log('[DEBUG] History toggle changed:', e.target.checked);
+            });
         }
 
         // Attach button (file selector) - main area
@@ -266,8 +252,8 @@ export class FractalicChatClient {
         this.uiRenderer.showTyping(true);
 
         // Check if history mode is enabled
-        const historyToggle = document.getElementById('historyToggle');
-        const useHistory = historyToggle ? historyToggle.classList.contains('active') : true;
+        const historyToggle = document.getElementById('historyToggleInline');
+        const useHistory = historyToggle ? historyToggle.checked : false;
 
         const history = useHistory ? this.conversation.slice(-50) : [];
         console.log('[DEBUG] Sending message with history:', {
