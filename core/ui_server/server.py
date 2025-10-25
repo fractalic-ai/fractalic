@@ -1670,6 +1670,10 @@ terminal_state_lock = threading.Lock()
 active_capture_tasks = set()
 active_capture_tasks_lock = threading.Lock()
 
+# Track background monitor tasks that wait for subprocess completion.
+process_monitor_tasks = {}
+process_monitor_tasks_lock = threading.Lock()
+
 
 def resolve_root_execution_id(execution_id: str) -> str:
     if not execution_id:
@@ -1813,6 +1817,11 @@ async def start_fractalic_process(file_path: str, execution_id: str, user_reques
             else:
                 print(f"[DEBUG] Skipped duplicate terminal capture task for {execution_id}")
 
+        monitor_task = asyncio.create_task(monitor_process_completion(process, execution_id))
+        with process_monitor_tasks_lock:
+            process_monitor_tasks[execution_id] = monitor_task
+        print(f"[DEBUG] Started process monitor task for {execution_id} (pid={getattr(process, 'pid', 'unknown')})")
+
         # Don't wait for completion - let events drive the response
         return process
     except Exception as e:
@@ -1854,6 +1863,7 @@ async def capture_terminal_output(process, execution_id: str):
     try:
         while True:
             if process.returncode is not None:
+                print(f"[DEBUG] Capture task detected process completion for {execution_id} (returncode={process.returncode})")
                 # Process finished, read remaining data
                 remaining_stdout = await process.stdout.read()
                 remaining_stderr = await process.stderr.read()
@@ -1896,6 +1906,21 @@ async def capture_terminal_output(process, execution_id: str):
             active_capture_tasks.discard(execution_id)
         print(f"[DEBUG] Terminal capture completed for {execution_id}")
 
+async def monitor_process_completion(process, execution_id: str):
+    """Background diagnostic task that waits for subprocess completion."""
+    pid = getattr(process, 'pid', 'unknown')
+    start_time = time.time()
+    print(f"[DEBUG] Process monitor started for {execution_id} (pid={pid})")
+    try:
+        returncode = await process.wait()
+        duration = time.time() - start_time
+        print(f"[DEBUG] Process monitor detected completion for {execution_id} (pid={pid}, returncode={returncode}, runtime={duration:.2f}s)")
+    except Exception as e:
+        print(f"[ERROR] Process monitor failed for {execution_id}: {e}")
+    finally:
+        with process_monitor_tasks_lock:
+            process_monitor_tasks.pop(execution_id, None)
+
 @app.post('/api/chat/stream')
 async def stream_chat_events(request: Request):
     """Streamable HTTP endpoint for structured chat events (from fractalic HTTP events)."""
@@ -1925,6 +1950,9 @@ async def stream_chat_events(request: Request):
             completed = False
             timeout_count = 0
             max_timeouts = 120  # 60 seconds total (0.5s * 120)
+            process_finished_handled = False  # Flag to handle process completion only once
+            last_process_state_log = 0
+            process_state_log_interval = 5.0
 
             while not completed and timeout_count < max_timeouts:
                 try:
@@ -1967,8 +1995,35 @@ async def stream_chat_events(request: Request):
                         await asyncio.sleep(0.5)
                         timeout_count += 1
 
-                        # Check if process is still running - if not, wait for final events and exit
-                        if process and hasattr(process, 'returncode') and process.returncode is not None:
+                    now = time.time()
+                    if now - last_process_state_log >= process_state_log_interval:
+                        rc = getattr(process, 'returncode', 'N/A') if process else 'N/A'
+                        stdout_eof = process.stdout.at_eof() if process and getattr(process, 'stdout', None) else 'N/A'
+                        stderr_eof = process.stderr.at_eof() if process and getattr(process, 'stderr', None) else 'N/A'
+                        with events_lock:
+                            queue_size_snapshot = len(events_queue)
+                        with active_capture_tasks_lock:
+                            capture_active = execution_id in active_capture_tasks
+                        with process_monitor_tasks_lock:
+                            monitor_task = process_monitor_tasks.get(execution_id)
+                        monitor_status = None
+                        if monitor_task:
+                            monitor_status = "done" if monitor_task.done() else "pending"
+                        else:
+                            monitor_status = "missing"
+                        print(
+                            f"[TRACE /api/chat/stream] Process state exec={execution_id}: "
+                            f"returncode={rc}, stdout_eof={stdout_eof}, stderr_eof={stderr_eof}, "
+                            f"queue_size={queue_size_snapshot}, capture_active={capture_active}, "
+                            f"monitor={monitor_status}, timeout_count={timeout_count}"
+                        )
+                        last_process_state_log = now
+
+                    # Check if process is still running - ALWAYS check, not just when no events!
+                    # This must be outside the else block to catch process completion even when events are flowing
+                    # Use flag to handle completion only once
+                    if not process_finished_handled and process and hasattr(process, 'returncode') and process.returncode is not None:
+                            process_finished_handled = True  # Set flag immediately to prevent re-entry
                             # Process finished, wait for terminal capture to complete AND events queue to drain
                             print(f"[DEBUG /api/chat/stream] Process finished (returncode={process.returncode}), waiting for terminal capture completion")
 
@@ -2057,6 +2112,8 @@ async def stream_chat_events(request: Request):
             
             # Final completion message
             if not completed:
+                rc = getattr(process, 'returncode', 'N/A') if process else 'N/A'
+                print(f"[WARNING /api/chat/stream] Stream exiting without completion for {execution_id} (timeout_count={timeout_count}, returncode={rc})")
                 yield f"{json.dumps({'type': 'error', 'message': 'Process timeout - no completion event received'}, ensure_ascii=False)}\n"
                 
         except Exception as e:

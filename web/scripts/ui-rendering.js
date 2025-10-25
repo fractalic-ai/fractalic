@@ -44,8 +44,8 @@ export class UIRenderer {
             }.bind(this)
         });
 
-        if (typeof markdownItEmoji !== 'undefined') {
-            this.md.use(markdownItEmoji);
+        if (typeof markdownitEmoji !== 'undefined') {
+            this.md.use(markdownitEmoji);
         }
 
         if (typeof markdownitTaskLists !== 'undefined') {
@@ -55,16 +55,16 @@ export class UIRenderer {
             });
         }
 
-        if (typeof markdownItMark !== 'undefined') {
-            this.md.use(markdownItMark);
+        if (typeof markdownitMark !== 'undefined') {
+            this.md.use(markdownitMark);
         }
 
-        if (typeof markdownItSub !== 'undefined') {
-            this.md.use(markdownItSub);
+        if (typeof markdownitSub !== 'undefined') {
+            this.md.use(markdownitSub);
         }
 
-        if (typeof markdownItSup !== 'undefined') {
-            this.md.use(markdownItSup);
+        if (typeof markdownitSup !== 'undefined') {
+            this.md.use(markdownitSup);
         }
 
         // Configure Mermaid
