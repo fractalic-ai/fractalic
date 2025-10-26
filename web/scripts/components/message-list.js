@@ -139,9 +139,9 @@ export class MessageListComponent extends BaseComponent {
         // Clear container
         this.container.innerHTML = '';
 
-        // Create header
+        // Create header (with drag handle class for GridStack)
         const header = this.createElement('div', {
-            classes: ['message-list-header'],
+            classes: ['message-list-header', 'grid-widget-header'],
             innerHTML: `<h4>${title}</h4><span class="message-count">${messages.length} message(s)</span>`
         });
         this.container.appendChild(header);

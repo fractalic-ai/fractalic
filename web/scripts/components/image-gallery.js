@@ -111,9 +111,9 @@ export class ImageGalleryComponent extends BaseComponent {
         // Clear container
         this.container.innerHTML = '';
 
-        // Create header
+        // Create header (with drag handle class for GridStack)
         const header = this.createElement('div', {
-            classes: ['gallery-header'],
+            classes: ['gallery-header', 'grid-widget-header'],
             innerHTML: `<h3>${title}</h3><span class="image-count">${images.length} image(s)</span>`
         });
         this.container.appendChild(header);

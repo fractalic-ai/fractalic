@@ -4,8 +4,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Fractalic Chat Agent</title>
-    <link rel="stylesheet" href="styles/styles.css">
-    <link rel="stylesheet" href="styles/components.css">
+    <link rel="stylesheet" href="styles/styles.css?v=6">
+    <link rel="stylesheet" href="styles/components.css?v=6">
     <!-- Highlight.js CSS for code syntax highlighting -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
 
@@ -35,7 +35,7 @@
 
         <!-- Sidebar (будет преобразован в grid widget) -->
         <aside class="sidebar" id="historyWidget">
-            <div class="sidebar-header">
+            <div class="sidebar-header grid-widget-header">
                 <h1 class="logo">Fractalic</h1>
                 <div class="connection-status-compact" style="margin-bottom: 12px;">
                     <span id="connectionStatusSidebar" class="status-disconnected">
@@ -84,7 +84,7 @@
         <main class="main-content" id="chatWidget">
 
             <!-- Chat Header -->
-            <header class="chat-header">
+            <header class="chat-header grid-widget-header">
                 <div class="header-info">
                     <h2 class="chat-title">Fractalic Chat Agent</h2>
                     <span id="connectionStatus" class="status-badge status-disconnected">Подключение...</span>

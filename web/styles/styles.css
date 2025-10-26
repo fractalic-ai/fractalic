@@ -1466,11 +1466,13 @@ button {
     flex-direction: column;
     box-shadow: var(--shadow-md);
     transition: box-shadow 0.2s, border-color 0.2s;
-    height: 100%;
-    inset: var(--space-sm) !important; /* Margin внутри grid item */
+    /* Убрали height: 100% чтобы inset работал по вертикали */
+    inset: 4px !important; /* Отступ со всех сторон чтобы плитка была точно внутри placeholder */
 }
 
-.grid-stack-item-content:hover {
+/* Показываем зеленую границу при hover на resize handle или заголовок */
+.grid-stack-item:has(.ui-resizable-se:hover) .grid-stack-item-content,
+.grid-stack-item:has(.grid-widget-header:hover) .grid-stack-item-content {
     border-color: var(--color-accent-primary);
     box-shadow: var(--shadow-lg);
 }
@@ -1481,18 +1483,39 @@ button {
 }
 
 .grid-stack-item > .ui-resizable-se {
-    width: 20px;
-    height: 20px;
-    right: 2px;
-    bottom: 2px;
+    width: 24px;
+    height: 24px;
+    right: 0px;
+    bottom: 0px;
     background: linear-gradient(135deg, transparent 50%, var(--color-accent-primary) 50%);
-    opacity: 0.3;
-    transition: opacity 0.2s;
+    opacity: 0;
+    transition: opacity 0.2s, background 0.2s;
+    cursor: nwse-resize;
 }
 
 .grid-stack-item:hover > .ui-resizable-se {
-    opacity: 0.7;
+    opacity: 0.6;
 }
+
+.grid-stack-item > .ui-resizable-se:hover {
+    opacity: 1 !important;
+    background: linear-gradient(135deg, transparent 50%, var(--color-success) 50%);
+}
+
+/* ========================================
+   WIDGET DRAG HANDLE (заголовки для перетаскивания)
+   ======================================== */
+
+.grid-widget-header {
+    cursor: move;
+    cursor: grab;
+    user-select: none;
+}
+
+.grid-widget-header:active {
+    cursor: grabbing;
+}
+
 
 /* ========================================
    WIDGET TYPES - History Widget
@@ -1589,20 +1612,25 @@ button {
    GRID STACK DRAG PLACEHOLDER
    ======================================== */
 
-.grid-stack-placeholder > .placeholder-content {
+.grid-stack-placeholder > .placeholder-content,
+.grid-stack > .grid-stack-placeholder > .placeholder-content,
+[class*="gs-id"] > .grid-stack-placeholder > .placeholder-content {
     background: var(--color-accent-light);
     border: 2px dashed var(--color-accent-primary);
     border-radius: var(--radius-lg);
+    /* inset меньше на 2px чтобы компенсировать border 2px */
+    position: absolute !important;
+    inset: 2px !important;
 }
 
 /* ========================================
    GRIDSTACK RESPONSIVE BEHAVIOR
    ======================================== */
 
-/* На маленьких экранах уменьшить margins */
+/* На маленьких экранах немного меньше отступы */
 @media (max-width: 768px) {
     .grid-stack-item-content {
-        inset: var(--space-xs) !important;
+        inset: 2px !important;
     }
 }
 

@@ -28,7 +28,9 @@ export class GridStackManager {
             acceptWidgets: true,  // Разрешить drag из внешних источников
             disableOneColumnMode: true,  // Отключить авто-переключение в 1 колонку
             animate: true,        // Анимация перемещения
-            removeTimeout: 100    // Задержка перед удалением
+            removeTimeout: 100,   // Задержка перед удалением
+            handle: '.grid-widget-header', // Перетаскивание только за заголовок
+            handleClass: 'grid-widget-header' // Класс для drag handle
         }, containerSelector);
 
         // Подписаться на события изменения grid
