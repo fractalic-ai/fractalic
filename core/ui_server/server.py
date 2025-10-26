@@ -1675,6 +1675,21 @@ process_monitor_tasks = {}
 process_monitor_tasks_lock = threading.Lock()
 
 
+def log_stream_debug(message: str) -> None:
+    """Persist streaming diagnostics to a file for long-running session analysis."""
+    try:
+        root = get_fractalic_root()
+        logs_dir = Path(root) / "logs"
+        logs_dir.mkdir(parents=True, exist_ok=True)
+        log_path = logs_dir / "chat_stream.log"
+        timestamp = datetime.utcnow().isoformat()
+        with log_path.open("a", encoding="utf-8") as log_file:
+            log_file.write(f"{timestamp} {message}\n")
+    except Exception:
+        # Never let logging failures break streaming logic
+        pass
+
+
 def resolve_root_execution_id(execution_id: str) -> str:
     if not execution_id:
         return execution_id
@@ -1863,7 +1878,9 @@ async def capture_terminal_output(process, execution_id: str):
     try:
         while True:
             if process.returncode is not None:
-                print(f"[DEBUG] Capture task detected process completion for {execution_id} (returncode={process.returncode})")
+                msg = f"[DEBUG] Capture task detected process completion for {execution_id} (returncode={process.returncode})"
+                print(msg)
+                log_stream_debug(msg)
                 # Process finished, read remaining data
                 remaining_stdout = await process.stdout.read()
                 remaining_stderr = await process.stderr.read()
@@ -1904,19 +1921,27 @@ async def capture_terminal_output(process, execution_id: str):
             running_processes.pop(execution_id, None)
         with active_capture_tasks_lock:
             active_capture_tasks.discard(execution_id)
-        print(f"[DEBUG] Terminal capture completed for {execution_id}")
+        msg = f"[DEBUG] Terminal capture completed for {execution_id}"
+        print(msg)
+        log_stream_debug(msg)
 
 async def monitor_process_completion(process, execution_id: str):
     """Background diagnostic task that waits for subprocess completion."""
     pid = getattr(process, 'pid', 'unknown')
     start_time = time.time()
-    print(f"[DEBUG] Process monitor started for {execution_id} (pid={pid})")
+    msg = f"[DEBUG] Process monitor started for {execution_id} (pid={pid})"
+    print(msg)
+    log_stream_debug(msg)
     try:
         returncode = await process.wait()
         duration = time.time() - start_time
-        print(f"[DEBUG] Process monitor detected completion for {execution_id} (pid={pid}, returncode={returncode}, runtime={duration:.2f}s)")
+        msg = f"[DEBUG] Process monitor detected completion for {execution_id} (pid={pid}, returncode={returncode}, runtime={duration:.2f}s)"
+        print(msg)
+        log_stream_debug(msg)
     except Exception as e:
-        print(f"[ERROR] Process monitor failed for {execution_id}: {e}")
+        msg = f"[ERROR] Process monitor failed for {execution_id}: {e}"
+        print(msg)
+        log_stream_debug(msg)
     finally:
         with process_monitor_tasks_lock:
             process_monitor_tasks.pop(execution_id, None)
@@ -1938,6 +1963,9 @@ async def stream_chat_events(request: Request):
     import asyncio, json
 
     async def event_stream():
+        process = None
+        completed = False
+        timeout_count = 0
         try:
             # Start fractalic process in background (history already in user_message)
             process = await start_fractalic_process(file_path, execution_id, user_message)
@@ -1947,8 +1975,6 @@ async def stream_chat_events(request: Request):
             
             # Stream events from single FIFO queue as they arrive (maintains chronological order)
             # Server is AGNOSTIC to event types and execution_id structure - just proxy everything
-            completed = False
-            timeout_count = 0
             max_timeouts = 120  # 60 seconds total (0.5s * 120)
             process_finished_handled = False  # Flag to handle process completion only once
             last_process_state_log = 0
@@ -1958,35 +1984,40 @@ async def stream_chat_events(request: Request):
                 try:
                     # Stream events from single global queue in chronological order
                     events_found = False
+                    # NOTE: Never hold a threading.Lock across awaits/yields.
+                    # Copy out a batch under the lock, then release it before yielding to the client.
+                    batch = []
                     with events_lock:
-                        # Stream all events from FIFO queue
                         while events_queue:
-                            event = events_queue.popleft()
-                            event_type = event.get('type')
-                            exec_id = event.get('execution_id', 'N/A')
+                            batch.append(events_queue.popleft())
 
-                            # Log data size for terminal_output events
-                            if event_type == 'terminal_output' and 'data' in event:
-                                data_len = len(event.get('data', ''))
-                                print(f"[DEBUG /api/chat/stream] Streaming event #{event.get('seq')}: {event_type} for {exec_id} (data: {data_len} bytes)")
-                            else:
-                                print(f"[DEBUG /api/chat/stream] Streaming event #{event.get('seq')}: {event_type} for {exec_id}")
+                    # Stream copied batch outside the lock
+                    for event in batch:
+                        event_type = event.get('type')
+                        exec_id = event.get('execution_id', 'N/A')
 
-                            # Safe JSON serialization with error handling
-                            try:
-                                json_str = json.dumps(event, ensure_ascii=False)
-                                yield f"{json_str}\n"
-                                events_found = True
-                            except Exception as json_err:
-                                print(f"[ERROR] Failed to serialize event {event.get('seq')}: {json_err}")
-                                # Send error event instead
-                                error_event = {
-                                    'type': 'error',
-                                    'message': f'Failed to serialize event: {str(json_err)}',
-                                    'execution_id': exec_id
-                                }
-                                yield f"{json.dumps(error_event, ensure_ascii=False)}\n"
-                                events_found = True
+                        # Log data size for terminal_output events
+                        if event_type == 'terminal_output' and 'data' in event:
+                            data_len = len(event.get('data', ''))
+                            print(f"[DEBUG /api/chat/stream] Streaming event #{event.get('seq')}: {event_type} for {exec_id} (data: {data_len} bytes)")
+                        else:
+                            print(f"[DEBUG /api/chat/stream] Streaming event #{event.get('seq')}: {event_type} for {exec_id}")
+
+                        # Safe JSON serialization with error handling
+                        try:
+                            json_str = json.dumps(event, ensure_ascii=False)
+                            yield f"{json_str}\n"
+                            events_found = True
+                        except Exception as json_err:
+                            print(f"[ERROR] Failed to serialize event {event.get('seq')}: {json_err}")
+                            # Send error event instead
+                            error_event = {
+                                'type': 'error',
+                                'message': f'Failed to serialize event: {str(json_err)}',
+                                'execution_id': exec_id
+                            }
+                            yield f"{json.dumps(error_event, ensure_ascii=False)}\n"
+                            events_found = True
 
                     if events_found:
                         timeout_count = 0  # Reset timeout when we get events
@@ -2011,12 +2042,14 @@ async def stream_chat_events(request: Request):
                             monitor_status = "done" if monitor_task.done() else "pending"
                         else:
                             monitor_status = "missing"
-                        print(
+                        trace_msg = (
                             f"[TRACE /api/chat/stream] Process state exec={execution_id}: "
                             f"returncode={rc}, stdout_eof={stdout_eof}, stderr_eof={stderr_eof}, "
                             f"queue_size={queue_size_snapshot}, capture_active={capture_active}, "
                             f"monitor={monitor_status}, timeout_count={timeout_count}"
                         )
+                        print(trace_msg)
+                        log_stream_debug(trace_msg)
                         last_process_state_log = now
 
                     # Check if process is still running - ALWAYS check, not just when no events!
@@ -2025,7 +2058,9 @@ async def stream_chat_events(request: Request):
                     if not process_finished_handled and process and hasattr(process, 'returncode') and process.returncode is not None:
                             process_finished_handled = True  # Set flag immediately to prevent re-entry
                             # Process finished, wait for terminal capture to complete AND events queue to drain
-                            print(f"[DEBUG /api/chat/stream] Process finished (returncode={process.returncode}), waiting for terminal capture completion")
+                            finish_msg = f"[DEBUG /api/chat/stream] Process finished (returncode={process.returncode}), waiting for terminal capture completion"
+                            print(finish_msg)
+                            log_stream_debug(finish_msg)
 
                             # Wait for capture task to finish (up to 10 seconds)
                             wait_time = 0
@@ -2034,33 +2069,47 @@ async def stream_chat_events(request: Request):
                                 with active_capture_tasks_lock:
                                     if execution_id not in active_capture_tasks:
                                         capture_finished = True
-                                        print(f"[DEBUG /api/chat/stream] Terminal capture task completed")
+                                        cap_msg = f"[DEBUG /api/chat/stream] Terminal capture task completed"
+                                        print(cap_msg)
+                                        log_stream_debug(cap_msg)
                                         break
                                 await asyncio.sleep(0.5)
                                 wait_time += 0.5
 
                             if not capture_finished:
-                                print(f"[WARNING /api/chat/stream] Terminal capture task timeout after {wait_time}s")
+                                cap_timeout = f"[WARNING /api/chat/stream] Terminal capture task timeout after {wait_time}s"
+                                print(cap_timeout)
+                                log_stream_debug(cap_timeout)
 
                             # Now wait for events queue to drain (up to 5 seconds)
-                            print(f"[DEBUG /api/chat/stream] Waiting for events queue to drain...")
+                            drain_msg = f"[DEBUG /api/chat/stream] Waiting for events queue to drain..."
+                            print(drain_msg)
+                            log_stream_debug(drain_msg)
                             drain_wait = 0
                             last_queue_size = -1
                             stuck_iterations = 0
                             while drain_wait < 5:
                                 with events_lock:
                                     queue_size = len(events_queue)
-                                    print(f"[DEBUG /api/chat/stream] Events queue size: {queue_size}")
+                                    queue_msg = f"[DEBUG /api/chat/stream] Events queue size: {queue_size}"
+                                    print(queue_msg)
+                                    log_stream_debug(queue_msg)
                                     if queue_size == 0:
-                                        print(f"[DEBUG /api/chat/stream] Events queue drained")
+                                        drained_msg = f"[DEBUG /api/chat/stream] Events queue drained"
+                                        print(drained_msg)
+                                        log_stream_debug(drained_msg)
                                         break
                                     # If queue is not shrinking, detect no reader scenario
                                     if queue_size == last_queue_size:
                                         stuck_iterations += 1
-                                        print(f"[DEBUG /api/chat/stream] Events queue stuck at {queue_size} events (iteration {stuck_iterations})")
+                                        stuck_msg = f"[DEBUG /api/chat/stream] Events queue stuck at {queue_size} events (iteration {stuck_iterations})"
+                                        print(stuck_msg)
+                                        log_stream_debug(stuck_msg)
                                         # If stuck for 3 iterations (1.5s), assume no reader and exit early
                                         if stuck_iterations >= 3:
-                                            print(f"[INFO /api/chat/stream] No active consumer detected, exiting drain wait")
+                                            no_consumer_msg = f"[INFO /api/chat/stream] No active consumer detected, exiting drain wait"
+                                            print(no_consumer_msg)
+                                            log_stream_debug(no_consumer_msg)
                                             break
                                     else:
                                         stuck_iterations = 0  # Reset if queue is changing
@@ -2073,18 +2122,24 @@ async def stream_chat_events(request: Request):
 
                             # Drain all remaining events from single queue
                             final_event_count = 0
-                            with events_lock:
-                                # Stream ALL remaining events from FIFO queue
-                                while events_queue:
-                                    event = events_queue.popleft()
+                            while True:
+                                batch = []
+                                with events_lock:
+                                    while events_queue:
+                                        batch.append(events_queue.popleft())
+                                if not batch:
+                                    break
+                                for event in batch:
                                     event_type = event.get('type')
 
                                     # Log data size for terminal_output events
                                     if event_type == 'terminal_output' and 'data' in event:
                                         data_len = len(event.get('data', ''))
-                                        print(f"[DEBUG /api/chat/stream] Streaming FINAL event #{event.get('seq')}: {event_type} for {event.get('execution_id')} (data: {data_len} bytes)")
+                                        final_msg = f"[DEBUG /api/chat/stream] Streaming FINAL event #{event.get('seq')}: {event_type} for {event.get('execution_id')} (data: {data_len} bytes)"
                                     else:
-                                        print(f"[DEBUG /api/chat/stream] Streaming FINAL event #{event.get('seq')}: {event_type} for {event.get('execution_id')}")
+                                        final_msg = f"[DEBUG /api/chat/stream] Streaming FINAL event #{event.get('seq')}: {event_type} for {event.get('execution_id')}"
+                                    print(final_msg)
+                                    log_stream_debug(final_msg)
 
                                     # Safe JSON serialization with error handling
                                     try:
@@ -2102,7 +2157,9 @@ async def stream_chat_events(request: Request):
                                         yield f"{json.dumps(error_event, ensure_ascii=False)}\n"
                                         final_event_count += 1
 
-                            print(f"[DEBUG /api/chat/stream] Streamed {final_event_count} final events")
+                            summary_msg = f"[DEBUG /api/chat/stream] Streamed {final_event_count} final events"
+                            print(summary_msg)
+                            log_stream_debug(summary_msg)
                             completed = True
                             break
                         
@@ -2113,11 +2170,24 @@ async def stream_chat_events(request: Request):
             # Final completion message
             if not completed:
                 rc = getattr(process, 'returncode', 'N/A') if process else 'N/A'
-                print(f"[WARNING /api/chat/stream] Stream exiting without completion for {execution_id} (timeout_count={timeout_count}, returncode={rc})")
+                warn_msg = f"[WARNING /api/chat/stream] Stream exiting without completion for {execution_id} (timeout_count={timeout_count}, returncode={rc})"
+                print(warn_msg)
+                log_stream_debug(warn_msg)
                 yield f"{json.dumps({'type': 'error', 'message': 'Process timeout - no completion event received'}, ensure_ascii=False)}\n"
                 
+        except asyncio.CancelledError:
+            rc = getattr(process, 'returncode', 'N/A') if process else 'N/A'
+            cancel_msg = f"[WARNING /api/chat/stream] Stream cancelled for {execution_id} (completed={completed}, timeout_count={timeout_count}, returncode={rc})"
+            print(cancel_msg)
+            log_stream_debug(cancel_msg)
+            raise
         except Exception as e:
             yield f"{json.dumps({'type': 'error', 'message': f'Fatal error: {str(e)}'}, ensure_ascii=False)}\n"
+        finally:
+            rc = getattr(process, 'returncode', 'N/A') if process else 'N/A'
+            exit_msg = f"[DEBUG /api/chat/stream] event_stream exiting for {execution_id} (completed={completed}, timeout_count={timeout_count}, returncode={rc})"
+            print(exit_msg)
+            log_stream_debug(exit_msg)
 
     return StreamingResponse(
         event_stream(), 

@@ -193,9 +193,33 @@ class FractalicLinter:
         blocks = []
         parsing_state = 'normal'
         current_block = None
+        in_code_block = False
+        code_fence_char = None
         
         for idx, line in enumerate(lines):
             line_num = idx + 1
+            stripped_line = line.lstrip()
+
+            # Toggle code block state on fenced markers (``` or ~~~)
+            fence_match = re.match(r'^([`~]{3,})', stripped_line)
+            if fence_match:
+                fence_char = fence_match.group(1)[0]
+                if not in_code_block:
+                    in_code_block = True
+                    code_fence_char = fence_char
+                elif code_fence_char == fence_char:
+                    in_code_block = False
+                    code_fence_char = None
+
+                if parsing_state == 'operation_block' and current_block is not None:
+                    current_block['content'].append(line)
+                continue
+
+            # While inside a code fence, copy verbatim and skip operation detection
+            if in_code_block:
+                if parsing_state == 'operation_block' and current_block is not None:
+                    current_block['content'].append(line)
+                continue
             
             # Detect operation start
             if re.match(r'^@[a-zA-Z]+', line):

@@ -109,11 +109,8 @@ fi
 # Запускаем UI Server
 echo "🚀 Запуск UI Server на порту $PORT..."
 UVICORN_ARGS=(--host "$HOST" --port "$PORT")
-if [ "$DEV_MODE" = "1" ]; then
-    UVICORN_ARGS+=(--reload --reload-exclude "**/.fractalic/**")
-fi
-# Note: Auto-reload is disabled by default when --reload is not specified
-# This prevents server restarts during LLM streaming
+# Авто-reload выключен намеренно: любой рестарт убьёт длинный LLM-стрим.
+# Если очень нужно перезапускать на лету — запускайте uvicorn вручную с --reload после завершения ранга.
 
 if [ "$BACKGROUND" = "1" ]; then
     nohup python3 -m uvicorn core.ui_server.server:app "${UVICORN_ARGS[@]}" > server.out 2>&1 &

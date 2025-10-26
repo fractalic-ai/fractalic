@@ -11,6 +11,7 @@ Fractalic syntax = Standard Markdown (structure, prose) + Lightweight YAML opera
 ## Markdown + YAML Hybrid Structure
 - Headings (`#`, `##`, `###`, …) define knowledge blocks.
 - Paragraphs, lists, code fences belong to the nearest preceding heading.
+- Inside fenced code blocks (``` / ~~~) the parser treats everything as literal text: heading markers and `@operation` lines are ignored and stay inside the code block content.
 - An operation block: a line starting with `@operationName` followed by YAML.
 - Content up to next heading OR next `@operation` lines belongs to the current block.
 ```markdown

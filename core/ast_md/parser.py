@@ -597,15 +597,40 @@ def parse_document(text: str, schema_text: str) -> List[Any]:
     parsing_state = 'normal'
     current_block = None
     previous_line = None
+    in_code_block = False
+    code_fence_char = None
     
     # Track system block hierarchy - if parent is system, children are too
     system_block_levels = []  # Stack to track system block levels
 
     for idx, l in enumerate(lines):
         line = l.rstrip('\n')
+        stripped_line = line.lstrip()
+
+        # Track fenced code blocks (``` or ~~~). Inside them we should treat everything as literal content.
+        fence_match = re.match(r'^([`~]{3,})', stripped_line)
+        if fence_match:
+            fence_char = fence_match.group(1)[0]
+            if not in_code_block:
+                in_code_block = True
+                code_fence_char = fence_char
+            elif code_fence_char == fence_char:
+                in_code_block = False
+                code_fence_char = None
+
+            if parsing_state in ('heading_block', 'operation_block') and current_block is not None:
+                current_block.content += l + '\n'
+            previous_line = l
+            continue
+
+        if in_code_block:
+            if parsing_state in ('heading_block', 'operation_block') and current_block is not None:
+                current_block.content += l + '\n'
+            previous_line = l
+            continue
 
         # Heading Block Detection
-        if re.match(r'^#+ ', line) and parsing_state != 'operation_block' and (previous_line is None or previous_line.strip() == ''):
+        if re.match(r'^#+ ', line) and parsing_state != 'operation_block' and not in_code_block and (previous_line is None or previous_line.strip() == ''):
             parsing_state = 'heading_block'
             level = len(line) - len(line.lstrip('#'))
             heading_line = line
@@ -646,7 +671,7 @@ def parse_document(text: str, schema_text: str) -> List[Any]:
             continue
 
         # Operation Block Detection
-        if re.match(r'^@[a-zA-Z]+', line) and (previous_line is None or previous_line.strip() == ''):
+        if re.match(r'^@[a-zA-Z]+', line) and not in_code_block and (previous_line is None or previous_line.strip() == ''):
             parsing_state = 'operation_block'
             operation = line.strip('@').strip()
             
