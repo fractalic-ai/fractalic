@@ -19,21 +19,25 @@ export class ComponentRouter {
 
         // Reference to DOM mount points
         this.mountPoints = {
-            chat: null,
-            artifacts: null
+            chat: null
         };
+
+        // Reference to GridStackManager for creating dynamic widget tiles
+        this.gridManager = null;
     }
 
     /**
-     * Initialize router with DOM mount points
+     * Initialize router with DOM mount points and GridStackManager
      *
-     * @param {Object} mountPoints - DOM elements for mounting
-     * @param {HTMLElement} mountPoints.chat - Chat container element
-     * @param {HTMLElement} mountPoints.artifacts - Artifacts panel element
+     * @param {Object} options - Configuration options
+     * @param {Object} options.mountPoints - DOM elements for mounting
+     * @param {HTMLElement} options.mountPoints.chat - Chat container element
+     * @param {GridStackManager} options.gridManager - GridStackManager instance for creating dynamic widgets
      */
-    initialize(mountPoints) {
+    initialize({ mountPoints, gridManager = null }) {
         this.mountPoints = mountPoints;
-        console.log('[ComponentRouter] Initialized with mount points', mountPoints);
+        this.gridManager = gridManager;
+        console.log('[ComponentRouter] Initialized', { mountPoints, hasGridManager: !!gridManager });
     }
 
     /**
@@ -217,10 +221,30 @@ export class ComponentRouter {
 
     /**
      * Mount component container to appropriate DOM location
+     * For 'artifacts' mountPoint, creates a GridStack widget tile
+     * For 'chat' mountPoint, adds directly to chat container
      *
      * @private
      */
     _mountToDom(containerElement, mountPoint) {
+        // Handle legacy 'artifacts' mountPoint by creating grid widget
+        if (mountPoint === 'artifacts' || mountPoint === 'dynamic') {
+            if (this.gridManager) {
+                // Extract component type from container classes
+                const componentType = containerElement.className.split(' ').find(c => c.endsWith('-component'))?.replace('-component', '') || 'component';
+
+                this.gridManager.addDynamicWidget(componentType, containerElement, {
+                    w: 4,  // 33% width (4 out of 12 columns)
+                    h: 6   // Height in grid units
+                });
+                console.log(`[ComponentRouter] Mounted ${componentType} as grid widget`);
+            } else {
+                console.warn(`[ComponentRouter] GridManager not available, cannot create widget for ${mountPoint}`);
+            }
+            return;
+        }
+
+        // For 'chat' mountPoint, append directly
         const targetElement = this.mountPoints[mountPoint];
 
         if (!targetElement) {

@@ -1432,3 +1432,185 @@ button {
     font-size: 0.75em;
     vertical-align: super;
 }
+
+/* ========================================
+   GRIDSTACK LAYOUT
+   ======================================== */
+
+/* Grid Container */
+.grid-stack {
+    background: var(--color-bg-primary);
+    min-height: 100vh;
+    height: 100vh;
+    overflow: hidden;
+}
+
+/* Grid Items (плитки) */
+.grid-stack-item {
+    transition: all 0.3s ease;
+}
+
+.grid-stack-item.ui-draggable-dragging {
+    transition: none !important;
+    opacity: 0.8;
+    z-index: 1000;
+}
+
+/* Grid Item Content (внутренний контейнер плитки) */
+.grid-stack-item-content {
+    background: var(--color-bg-secondary);
+    border-radius: var(--radius-lg);
+    border: 1px solid var(--color-border);
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    box-shadow: var(--shadow-md);
+    transition: box-shadow 0.2s, border-color 0.2s;
+    height: 100%;
+    inset: var(--space-sm) !important; /* Margin внутри grid item */
+}
+
+.grid-stack-item-content:hover {
+    border-color: var(--color-accent-primary);
+    box-shadow: var(--shadow-lg);
+}
+
+/* Resize Handle Styling */
+.grid-stack-item > .ui-resizable-handle {
+    z-index: 100;
+}
+
+.grid-stack-item > .ui-resizable-se {
+    width: 20px;
+    height: 20px;
+    right: 2px;
+    bottom: 2px;
+    background: linear-gradient(135deg, transparent 50%, var(--color-accent-primary) 50%);
+    opacity: 0.3;
+    transition: opacity 0.2s;
+}
+
+.grid-stack-item:hover > .ui-resizable-se {
+    opacity: 0.7;
+}
+
+/* ========================================
+   WIDGET TYPES - History Widget
+   ======================================== */
+
+.grid-stack-item[gs-id="history-widget"] .grid-stack-item-content {
+    padding: 0;
+    background: var(--color-bg-secondary);
+}
+
+.grid-stack-item[gs-id="history-widget"] .sidebar {
+    width: 100%;
+    height: 100%;
+    background: transparent;
+    border: none;
+}
+
+/* ========================================
+   WIDGET TYPES - Chat Widget
+   ======================================== */
+
+.grid-stack-item[gs-id="chat-widget"] .grid-stack-item-content {
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+}
+
+.grid-stack-item[gs-id="chat-widget"] .main-content {
+    width: 100%;
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    background: transparent;
+}
+
+/* ========================================
+   WIDGET TYPES - Execution Widget
+   ======================================== */
+
+.execution-widget .grid-stack-item-content {
+    padding: 0;
+    background: var(--color-bg-elevated);
+}
+
+.execution-widget-content {
+    width: 100%;
+    height: 100%;
+    overflow: auto;
+    padding: var(--space-md);
+}
+
+/* Execution Bubble внутри widget */
+.execution-widget .execution-bubble {
+    margin: 0;
+    height: 100%;
+    border: none;
+    background: transparent;
+}
+
+/* ========================================
+   WIDGET TYPES - Dynamic Widgets
+   ======================================== */
+
+.dynamic-widget .grid-stack-item-content {
+    padding: var(--space-md);
+}
+
+.dynamic-widget-content {
+    width: 100%;
+    height: 100%;
+    overflow: auto;
+}
+
+/* ========================================
+   NEW WIDGET ANIMATION
+   ======================================== */
+
+.grid-stack-item.new-widget {
+    animation: slideInRight 0.3s ease-out;
+}
+
+@keyframes slideInRight {
+    from {
+        opacity: 0;
+        transform: translateX(20px);
+    }
+    to {
+        opacity: 1;
+        transform: translateX(0);
+    }
+}
+
+/* ========================================
+   GRID STACK DRAG PLACEHOLDER
+   ======================================== */
+
+.grid-stack-placeholder > .placeholder-content {
+    background: var(--color-accent-light);
+    border: 2px dashed var(--color-accent-primary);
+    border-radius: var(--radius-lg);
+}
+
+/* ========================================
+   GRIDSTACK RESPONSIVE BEHAVIOR
+   ======================================== */
+
+/* На маленьких экранах уменьшить margins */
+@media (max-width: 768px) {
+    .grid-stack-item-content {
+        inset: var(--space-xs) !important;
+    }
+}
+
+/* ========================================
+   GRIDSTACK OVERRIDES (если нужны)
+   ======================================== */
+
+/* Убираем стандартную тень GridStack */
+.grid-stack-item.ui-draggable-dragging .grid-stack-item-content {
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.6);
+}

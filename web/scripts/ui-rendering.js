@@ -17,6 +17,17 @@ export class UIRenderer {
         // Track nested bubbles that need to be preserved across AST re-renders (per execution)
         // Map: executionId -> Map(blockId -> Array of bubble elements)
         this.savedNestedBubbles = new Map();
+        // GridStack manager reference (set later via setGridManager)
+        this.gridManager = null;
+    }
+
+    /**
+     * Set GridStack manager instance (called from chat-client after initialization)
+     * @param {GridStackManager} gridManager
+     */
+    setGridManager(gridManager) {
+        this.gridManager = gridManager;
+        console.log('[UIRenderer] GridStackManager linked');
     }
 
     // ========== MARKDOWN RENDERING ==========
@@ -634,8 +645,10 @@ export class UIRenderer {
             parentBubble.responseContent.appendChild(bubble);
             console.log(`[Nested Bubble] Added to parent response content (parent: ${parentExecutionId.substring(0, 8)}, blockId: ${blockId ? blockId.substring(0, 8) : 'none'})`);
         } else {
-            // Top-level bubble: add to messages container
+            // Top-level bubble: always add to messages container (chat widget)
+            // GridStack manages the chat widget itself, execution bubbles stay inside it
             this.messagesContainer.appendChild(bubble);
+            console.log(`[UIRenderer] Execution bubble added to messages container: ${executionId.substring(0, 8)}`);
         }
 
         this.scrollToBottom();

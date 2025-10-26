@@ -26,7 +26,7 @@ export class MessageListComponent extends BaseComponent {
         return {
             events: ['message_added', 'messages_batch', 'message_list_update', 'msg_info', 'msg_success', 'msg_warning', 'msg_error', 'msg_debug'],
             singleton: false, // Can have multiple instances per execution
-            mountPoint: 'chat', // Show inline with chat messages
+            mountPoint: 'artifacts', // Create as separate grid widget tile
             updateStrategy: 'append', // Add new messages to existing ones
             description: 'Displays a dynamically updating list of messages'
         };

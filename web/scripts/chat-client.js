@@ -7,6 +7,7 @@ import { UIRenderer } from './ui-rendering.js?v=9';
 import { StreamClient } from './stream-client.js?v=9';
 import { TerminalViewer } from './terminal-viewer.js?v=9';
 import { DiffViewer } from './diff-viewer.js?v=9';
+import { GridStackManager } from './gridstack-manager.js?v=1';
 import { createSVGIcon, formatTime } from './utils.js?v=9';
 
 // Component System imports - using central module to avoid cache issues
@@ -19,12 +20,12 @@ import {
 
 export class FractalicChatClient {
     constructor() {
-        // DOM Elements
-        this.messagesContainer = document.getElementById('messages');
-        this.chatInput = document.getElementById('chatInput');
-        this.sendButton = document.getElementById('sendButton');
-        this.connectionStatus = document.getElementById('connectionStatus');
-        this.typingIndicator = document.getElementById('typingIndicator');
+        // DOM Elements (will be updated after GridStack init)
+        this._messagesContainer = document.getElementById('messages');
+        this._chatInput = document.getElementById('chatInput');
+        this._sendButton = document.getElementById('sendButton');
+        this._connectionStatus = document.getElementById('connectionStatus');
+        this._typingIndicator = document.getElementById('typingIndicator');
         this.fileBrowserModal = document.getElementById('fileBrowserModal');
         this.fileList = document.getElementById('fileList');
         this.currentPathDisplay = document.getElementById('currentPath');
@@ -45,11 +46,6 @@ export class FractalicChatClient {
         this.closeDiffButton = document.getElementById('closeDiffBtn');
         this.terminalModalCloseButton = document.getElementById('terminalModalCloseBtn');
         this.closeTerminalButton = document.getElementById('closeTerminalBtn');
-
-        // Artifacts panel elements
-        this.artifactsPanel = document.getElementById('artifactsPanel');
-        this.artifactsContent = document.getElementById('artifactsContent');
-        this.artifactsToggle = document.getElementById('artifactsToggle');
 
         // State
         this.selectedFile = null;
@@ -75,27 +71,14 @@ export class FractalicChatClient {
             content: this.diffContent
         });
 
-        // Initialize component system
+        // Initialize GridStack layout FIRST (creates gridManager)
+        this.initializeGridStack();
+
+        // Initialize component system (needs gridManager for dynamic widgets)
         this.initializeComponentSystem();
 
         // Setup event listeners
         this.initializeEventListeners();
-
-        // Set connection status (HTTP streaming mode, no persistent WebSocket)
-        this.connectionStatus.textContent = '🟢 Готово (HTTP Stream)';
-        this.connectionStatus.className = 'status-connected';
-
-        // Update sidebar connection status
-        const sidebarStatus = document.getElementById('connectionStatusSidebar');
-        if (sidebarStatus) {
-            sidebarStatus.innerHTML = `
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
-                    <circle cx="12" cy="12" r="10"/>
-                </svg>
-                Готово
-            `;
-            sidebarStatus.className = 'status-connected';
-        }
     }
 
     initializeComponentSystem() {
@@ -112,16 +95,145 @@ export class FractalicChatClient {
             MessageListComponent.getManifest()
         );
 
-        // Initialize router with mount points
+        // Initialize router with mount points and GridStackManager
+        // GridStackManager creates dynamic widgets for components with 'artifacts' mountPoint
         componentRouter.initialize({
-            chat: this.messagesContainer,
-            artifacts: this.artifactsContent
+            mountPoints: {
+                chat: this.messagesContainer
+            },
+            gridManager: this.gridManager
         });
 
         console.log('[ComponentSystem] Initialized:', {
             components: componentRegistry.getAllComponents().length,
-            mountPoints: ['chat', 'artifacts']
+            mountPoints: ['chat'],
+            hasGridManager: !!this.gridManager
         });
+    }
+
+    initializeGridStack() {
+        // Create GridStack manager
+        this.gridManager = new GridStackManager();
+
+        // Initialize grid with the main container
+        const initialized = this.gridManager.init('.grid-stack');
+        if (!initialized) {
+            console.error('[FractalicChatClient] Failed to initialize GridStack');
+            return;
+        }
+
+        // Link GridStack to UIRenderer so execution bubbles can be added as widgets
+        this.uiRenderer.setGridManager(this.gridManager);
+
+        // Create base widgets (history sidebar, chat panel)
+        this.gridManager.createBaseWidgets();
+
+        // After creating base widgets, get references to containers inside grid widgets
+        // The chat widget now contains the messages-container
+        // Use requestAnimationFrame to ensure DOM is ready
+        requestAnimationFrame(() => {
+            setTimeout(() => {
+                // Update messagesContainer reference to point inside the grid widget
+                const chatWidget = document.querySelector('.grid-stack-item[gs-id="chat-widget"] .messages-container');
+                if (chatWidget) {
+                    this.messagesContainer = chatWidget;
+                    this.uiRenderer.messagesContainer = chatWidget;
+                    console.log('[FractalicChatClient] messagesContainer updated to grid widget content');
+                }
+
+                // Update other DOM element references inside grid widgets
+                this.connectionStatus = document.getElementById('connectionStatus');
+                this.chatInput = document.getElementById('chatInput');
+                this.sendButton = document.getElementById('sendButton');
+                this.typingIndicator = document.getElementById('typingIndicator');
+
+                console.log('[FractalicChatClient] Found elements:', {
+                    connectionStatus: !!this.connectionStatus,
+                    chatInput: !!this.chatInput,
+                    sendButton: !!this.sendButton
+                });
+
+                // Re-apply connection status
+                if (this.connectionStatus) {
+                    this.connectionStatus.textContent = '🟢 Готово (HTTP Stream)';
+                    this.connectionStatus.className = 'status-badge status-connected';
+                    console.log('[FractalicChatClient] Connection status updated');
+                }
+
+                // Update sidebar connection status
+                const sidebarStatus = document.getElementById('connectionStatusSidebar');
+                if (sidebarStatus) {
+                    sidebarStatus.innerHTML = `
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
+                            <circle cx="12" cy="12" r="10"/>
+                        </svg>
+                        Готово
+                    `;
+                    sidebarStatus.className = 'status-connected';
+                }
+
+                console.log('[FractalicChatClient] DOM references updated after GridStack init');
+            }, 200);
+        });
+
+        console.log('[FractalicChatClient] GridStack initialized');
+    }
+
+    // Геттеры для динамического получения DOM элементов
+    // Это гарантирует что мы всегда работаем с актуальными элементами после GridStack init
+    get messagesContainer() {
+        if (!this._messagesContainer || !document.contains(this._messagesContainer)) {
+            this._messagesContainer = document.getElementById('messages');
+        }
+        return this._messagesContainer;
+    }
+
+    set messagesContainer(value) {
+        this._messagesContainer = value;
+    }
+
+    get chatInput() {
+        if (!this._chatInput || !document.contains(this._chatInput)) {
+            this._chatInput = document.getElementById('chatInput');
+        }
+        return this._chatInput;
+    }
+
+    set chatInput(value) {
+        this._chatInput = value;
+    }
+
+    get sendButton() {
+        if (!this._sendButton || !document.contains(this._sendButton)) {
+            this._sendButton = document.getElementById('sendButton');
+        }
+        return this._sendButton;
+    }
+
+    set sendButton(value) {
+        this._sendButton = value;
+    }
+
+    get connectionStatus() {
+        if (!this._connectionStatus || !document.contains(this._connectionStatus)) {
+            this._connectionStatus = document.getElementById('connectionStatus');
+        }
+        return this._connectionStatus;
+    }
+
+    set connectionStatus(value) {
+        this._connectionStatus = value;
+    }
+
+    get typingIndicator() {
+        if (!this._typingIndicator || !document.contains(this._typingIndicator)) {
+            this._typingIndicator = document.getElementById('typingIndicator');
+        }
+        return this._typingIndicator;
+    }
+
+    set typingIndicator(value) {
+        this._typingIndicator = value;
     }
 
     initializeEventListeners() {
@@ -223,22 +335,7 @@ export class FractalicChatClient {
             });
         }
 
-        // Artifacts panel toggle - button in header
-        const artifactsToggleBtn = document.getElementById('artifactsToggleBtn');
-        if (artifactsToggleBtn && this.artifactsPanel) {
-            artifactsToggleBtn.addEventListener('click', () => {
-                this.artifactsPanel.classList.toggle('hidden');
-                const isHidden = this.artifactsPanel.classList.contains('hidden');
-                artifactsToggleBtn.title = isHidden ? 'Показать артефакты' : 'Скрыть артефакты';
-            });
-        }
-
-        // Artifacts panel close button (inside panel)
-        if (this.artifactsToggle && this.artifactsPanel) {
-            this.artifactsToggle.addEventListener('click', () => {
-                this.artifactsPanel.classList.add('hidden');
-            });
-        }
+        // Note: Artifacts panel removed - now using GridStack dynamic widgets
     }
 
     async sendMessage() {

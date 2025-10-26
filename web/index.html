@@ -24,12 +24,17 @@
 
     <!-- Mermaid for diagram rendering -->
     <script src="https://cdn.jsdelivr.net/npm/mermaid@10.6.1/dist/mermaid.min.js"></script>
+
+    <!-- GridStack.js for dynamic grid layout -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/gridstack@10.1.2/dist/gridstack.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/gridstack@10.1.2/dist/gridstack-all.js"></script>
 </head>
 <body>
-    <div class="app-container">
+    <!-- GridStack container - плитки будут созданы динамически -->
+    <div class="grid-stack">
 
-        <!-- Sidebar -->
-        <aside class="sidebar">
+        <!-- Sidebar (будет преобразован в grid widget) -->
+        <aside class="sidebar" id="historyWidget">
             <div class="sidebar-header">
                 <h1 class="logo">Fractalic</h1>
                 <div class="connection-status-compact" style="margin-bottom: 12px;">
@@ -75,8 +80,8 @@
             <!-- Sidebar footer removed - history button now inline -->
         </aside>
 
-        <!-- Main Content -->
-        <main class="main-content">
+        <!-- Main Content (будет преобразован в grid widget) -->
+        <main class="main-content" id="chatWidget">
 
             <!-- Chat Header -->
             <header class="chat-header">
@@ -84,14 +89,6 @@
                     <h2 class="chat-title">Fractalic Chat Agent</h2>
                     <span id="connectionStatus" class="status-badge status-disconnected">Подключение...</span>
                 </div>
-                <button class="artifacts-toggle-btn" id="artifactsToggleBtn" title="Показать артефакты">
-                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <rect x="3" y="3" width="7" height="7" rx="1"></rect>
-                        <rect x="14" y="3" width="7" height="7" rx="1"></rect>
-                        <rect x="3" y="14" width="7" height="7" rx="1"></rect>
-                        <rect x="14" y="14" width="7" height="7" rx="1"></rect>
-                    </svg>
-                </button>
             </header>
 
             <!-- Messages Container -->
@@ -138,30 +135,7 @@
 
         </main>
 
-        <!-- Artifacts Panel -->
-        <aside class="artifacts-panel hidden" id="artifactsPanel">
-            <div class="artifacts-header">
-                <h3>Артефакты</h3>
-                <button class="close-panel-btn" id="artifactsToggle" title="Скрыть панель">
-                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <line x1="18" y1="6" x2="6" y2="18"></line>
-                        <line x1="6" y1="6" x2="18" y2="18"></line>
-                    </svg>
-                </button>
-            </div>
-            <div class="artifacts-content" id="artifactsContent">
-                <!-- Dynamic components mounted here via ComponentRouter -->
-                <div class="artifacts-empty">
-                    <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1">
-                        <rect x="3" y="3" width="7" height="7" rx="1"></rect>
-                        <rect x="14" y="3" width="7" height="7" rx="1"></rect>
-                        <rect x="3" y="14" width="7" height="7" rx="1"></rect>
-                        <rect x="14" y="14" width="7" height="7" rx="1"></rect>
-                    </svg>
-                    <p>Артефакты появятся здесь автоматически</p>
-                </div>
-            </div>
-        </aside>
+        <!-- Динамические плитки (execution bubbles, галереи) будут добавлены через GridStack -->
 
     </div>
 
