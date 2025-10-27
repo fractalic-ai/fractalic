@@ -1467,7 +1467,8 @@ button {
     box-shadow: var(--shadow-md);
     transition: box-shadow 0.2s, border-color 0.2s;
     /* Убрали height: 100% чтобы inset работал по вертикали */
-    inset: 4px !important; /* Отступ со всех сторон чтобы плитка была точно внутри placeholder */
+    /* Плитка: inset 6px чтобы вписаться внутрь placeholder (4px + 2px border) */
+    inset: 6px !important;
 }
 
 /* Показываем зеленую границу при hover на resize handle или заголовок */
@@ -1618,9 +1619,9 @@ button {
     background: var(--color-accent-light);
     border: 2px dashed var(--color-accent-primary);
     border-radius: var(--radius-lg);
-    /* inset меньше на 2px чтобы компенсировать border 2px */
+    /* Placeholder имеет нормальный отступ, плитка должна вписаться внутрь с учетом border */
     position: absolute !important;
-    inset: 2px !important;
+    inset: 4px !important;
 }
 
 /* ========================================
@@ -1630,7 +1631,7 @@ button {
 /* На маленьких экранах немного меньше отступы */
 @media (max-width: 768px) {
     .grid-stack-item-content {
-        inset: 2px !important;
+        inset: 4px !important;
     }
 }
 
