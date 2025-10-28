@@ -1581,7 +1581,7 @@ button {
    ======================================== */
 
 .dynamic-widget .grid-stack-item-content {
-    padding: var(--space-md);
+    padding: 0;
 }
 
 .dynamic-widget-content {
