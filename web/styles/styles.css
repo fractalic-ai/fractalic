@@ -542,16 +542,16 @@ button {
     padding: var(--space-md);
     margin-bottom: var(--space-sm);
     transition: all 0.2s;
-    cursor: pointer;
+    /* cursor: pointer; */ /* Removed: blocks should not be clickable */
 }
 
 .ast-block:hover {
-    border-color: var(--color-accent-primary);
+    /* border-color: var(--color-accent-primary); */ /* Removed: no highlight on hover */
 }
 
 .ast-block.expanded {
-    border-color: var(--color-accent-primary);
-    background: var(--color-bg-hover);
+    /* border-color: var(--color-accent-primary); */ /* Removed: no green/blue border for expanded */
+    /* background: var(--color-bg-hover); */
 }
 
 .ast-block.active {

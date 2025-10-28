@@ -1035,28 +1035,8 @@ export class UIRenderer {
         blockEl.dataset.blockType = block.type || '';
         blockEl.dataset.blockIcon = typeIcon || '';
 
-        // Add click handler to toggle expanded state
-        blockEl.onclick = (e) => {
-    e.stopPropagation();
-    const isExpanding = !blockEl.classList.contains('expanded');
-    blockEl.classList.toggle('expanded');
-
-    // Switch between preview and full content
-    const previewEl = blockEl.querySelector('.ast-block-preview');
-    if (previewEl && blockEl.dataset.fullContent) {
-        if (isExpanding) {
-            // Show full content
-            previewEl.textContent = blockEl.dataset.fullContent;
-        } else {
-            // Show truncated preview
-            let preview = blockEl.dataset.fullContent;
-            if (preview.length > 100) {
-                preview = preview.substring(0, 100) + '...';
-            }
-            previewEl.textContent = preview;
-        }
-    }
-        };
+        // Removed click handler: blocks should always be expanded (no collapsing)
+        // blockEl.onclick = (e) => { ... };
 
         // Remove 'new' class first to avoid duplicate animations
         blockEl.classList.remove('new');

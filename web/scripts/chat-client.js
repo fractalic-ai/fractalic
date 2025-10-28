@@ -586,7 +586,7 @@ export class FractalicChatClient {
                         <span>✓ Completed: ${fileName}</span>
                         <span style="font-size: 11px; color: #83d69d; margin-left: 8px;">Done</span>
                     `;
-                    bubbleRefs.bubble.style.borderColor = '#83d69d';
+                    // bubbleRefs.bubble.style.borderColor = '#83d69d'; // Removed: no green border on completion
                     bubbleRefs.isCompleted = true;
 
                     if (data.return_content) {
@@ -686,7 +686,7 @@ export class FractalicChatClient {
                         <span>Completed: ${filePath}</span>
                         <span style="font-size: 11px; color: #83d69d; margin-left: 8px;">✓ Done</span>
                     `;
-                    bubbleRefs.bubble.style.borderColor = '#83d69d';
+                    // bubbleRefs.bubble.style.borderColor = '#83d69d'; // Removed: no green border on completion
                     bubbleRefs.isCompleted = true;
                 }
 
