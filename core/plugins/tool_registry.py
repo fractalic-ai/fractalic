@@ -803,12 +803,14 @@ class ToolRegistry(dict):
                     "data": {
                         "type": "object",
                         "description": (
-                            "Event payload for single event. Common fields: 'message' (string), 'url' (string for images), "
-                            "'caption' (string for images), 'to' (string for component targeting like 'message-list:custom-id')"
+                            "Event payload for single event. Common fields: 'message' (string), 'url' (string for web images), "
+                            "'local_path' (string for local file images), 'caption' (string for images), "
+                            "'to' (string for component targeting like 'message-list:custom-id')"
                         ),
                         "properties": {
                             "message": {"type": "string", "description": "Message text to display"},
-                            "url": {"type": "string", "description": "Image URL for image_generated events"},
+                            "url": {"type": "string", "description": "Image URL for image_generated events (web images)"},
+                            "local_path": {"type": "string", "description": "Local file path for image_generated events (relative to repo root). Use instead of 'url' for local images."},
                             "caption": {"type": "string", "description": "Image caption for image_generated events"},
                             "to": {"type": "string", "description": "Component target like 'message-list:instance-id'"}
                         }
@@ -834,10 +836,11 @@ class ToolRegistry(dict):
                                 },
                                 "data": {
                                     "type": "object",
-                                    "description": "Event payload with fields like 'message', 'url', 'caption', or 'to'",
+                                    "description": "Event payload with fields like 'message', 'url', 'local_path', 'caption', or 'to'",
                                     "properties": {
                                         "message": {"type": "string"},
                                         "url": {"type": "string"},
+                                        "local_path": {"type": "string"},
                                         "caption": {"type": "string"},
                                         "to": {"type": "string"}
                                     }

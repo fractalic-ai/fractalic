@@ -676,6 +676,55 @@ async def serve_image(path: str = Query(...)):
     return response
 
 
+@app.get("/serve_local_image/")
+async def serve_local_image(path: str = Query(...), execution_id: str = Query(...)):
+    """
+    Serves an image file from either:
+    1. Absolute path - used directly
+    2. Relative path - resolved relative to the directory of the MD script that's running
+
+    This endpoint is specifically for @emit events with local_path field.
+    """
+    try:
+        # Get the MD file path for this execution_id
+        with execution_file_paths_lock:
+            md_file_path = execution_file_paths.get(execution_id)
+
+        if not md_file_path:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Unknown execution_id: {execution_id}"
+            )
+
+        # Resolve the image path
+        path_obj = Path(path)
+
+        if path_obj.is_absolute():
+            # Absolute path - use directly
+            image_path = path_obj
+        else:
+            # Relative path - resolve relative to MD file's directory
+            md_dir = Path(md_file_path).parent.resolve()
+            image_path = (md_dir / path).resolve()
+
+        # Security check: ensure the resolved path exists and is a file
+        if not image_path.exists():
+            raise HTTPException(status_code=404, detail=f"Image not found: {path}")
+
+        if not image_path.is_file():
+            raise HTTPException(status_code=400, detail=f"Path is not a file: {path}")
+
+        # Return the image
+        response = FileResponse(str(image_path))
+        response.headers["Cache-Control"] = "no-store"
+        return response
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error serving image: {str(e)}")
+
+
 @app.get("/list_directory/")
 async def list_directory(path: str = Query("")):
     resolved_path = Path(path).resolve()
@@ -1659,6 +1708,10 @@ processes_lock = threading.Lock()
 # Track parent relationships between execution IDs
 execution_parent_map = {}
 
+# Store file paths for each execution_id to resolve relative image paths
+execution_file_paths = {}
+execution_file_paths_lock = threading.Lock()
+
 # Track per-execution event sequence numbers
 event_sequence_counters = defaultdict(int)
 
@@ -1814,6 +1867,10 @@ async def start_fractalic_process(file_path: str, execution_id: str, user_reques
         # Store process for terminal streaming
         with processes_lock:
             running_processes[execution_id] = process
+
+        # Store file path for resolving relative image paths
+        with execution_file_paths_lock:
+            execution_file_paths[execution_id] = file_path
 
         with terminal_state_lock:
             stack = terminal_owner_stacks[execution_id]

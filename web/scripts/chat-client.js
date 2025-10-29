@@ -16,7 +16,7 @@ import {
     componentRegistry,
     ImageGalleryComponent,
     MessageListComponent
-} from './components.js?v=10';
+} from './components.js?v=11';
 
 export class FractalicChatClient {
     constructor() {

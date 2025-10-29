@@ -497,8 +497,8 @@ static getManifest() {
 
 | Event | Data Fields | Behavior |
 |-------|-------------|----------|
-| `image_generated` | `url`, `caption` | Add single image to gallery |
-| `images_batch` | `images` array | Add multiple images at once |
+| `image_generated` | `url` or `local_path`, `caption` | Add single image to gallery (use `url` for web images, `local_path` for local files) |
+| `images_batch` | `images` array | Add multiple images at once (each image can have `url` or `local_path`) |
 | `image_gallery_update` | `title`, `images`, `clear` | Update gallery title and/or images |
 
 **Example Usage:**
@@ -529,6 +529,39 @@ data:
       caption: Final destination
 prompt: "✅ Updated gallery with custom title"
 ```
+
+**Local File Examples** (for locally-run Fractalic):
+```markdown
+@emit
+event: image_generated
+data:
+  local_path: outputs/chart.png
+  caption: Generated Sales Chart
+prompt: "✅ Local image added to gallery"
+
+@emit
+event: images_batch
+data:
+  images:
+    - local_path: outputs/diagram1.png
+      caption: System Architecture
+    - local_path: outputs/diagram2.png
+      caption: Data Flow
+prompt: "✅ Added batch of local images"
+
+# Mix of local and web images
+@emit
+event: images_batch
+data:
+  images:
+    - url: https://example.com/logo.png
+      caption: Company Logo
+    - local_path: outputs/generated_report.png
+      caption: Monthly Report
+prompt: "✅ Mixed local and web images"
+```
+
+> **Note:** Use `local_path` (relative to repository root) when Fractalic runs locally. The path is automatically converted to `/serve_image/?path=...` endpoint. Use `url` for web-hosted images.
 
 **Visual Output:**
 ```

@@ -39,20 +39,24 @@ export class ImageGalleryComponent extends BaseComponent {
 
         switch (eventType) {
             case 'image_generated':
-                // Single image event
+                // Single image event - supports both url and local_path
                 this._addImage({
                     url: eventData.url || eventData.image_url,
+                    local_path: eventData.local_path,
+                    execution_id: eventData.execution_id,
                     caption: eventData.caption || eventData.message || '',
                     timestamp: Date.now()
                 });
                 break;
 
             case 'images_batch':
-                // Batch of images
+                // Batch of images - supports both url and local_path for each image
                 if (Array.isArray(eventData.images)) {
                     eventData.images.forEach(img => {
                         this._addImage({
                             url: img.url,
+                            local_path: img.local_path,
+                            execution_id: eventData.execution_id,
                             caption: img.caption || '',
                             timestamp: Date.now()
                         });
@@ -81,13 +85,30 @@ export class ImageGalleryComponent extends BaseComponent {
     }
 
     /**
+     * Resolve image URL from either url or local_path
+     * @private
+     */
+    _resolveImageUrl(imageData) {
+        // Priority: local_path > url
+        if (imageData.local_path && imageData.execution_id) {
+            // Convert local path to server endpoint URL with execution_id
+            const params = new URLSearchParams({
+                path: imageData.local_path,
+                execution_id: imageData.execution_id
+            });
+            return `/serve_local_image/?${params.toString()}`;
+        }
+        return imageData.url || imageData.image_url;
+    }
+
+    /**
      * Add image to gallery
      * @private
      */
     _addImage(imageData) {
         const currentImages = this.getState().images;
         currentImages.push({
-            url: imageData.url,
+            url: this._resolveImageUrl(imageData),
             caption: imageData.caption || '',
             timestamp: imageData.timestamp || Date.now()
         });
