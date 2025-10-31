@@ -1142,18 +1142,85 @@ class FastMCPManager:
     async def add_server(self, server_config: Dict[str, Any]) -> Dict[str, Any]:
         """Add new MCP server configuration with cache update"""
         try:
-            name = server_config.get('name')
-            if not name:
-                return {"error": "Server name is required"}
-            
+            # Handle JSON configuration format
+            if server_config.get('type') == 'json':
+                json_config_str = server_config.get('jsonConfig', '').strip()
+                if not json_config_str:
+                    return {"error": "JSON configuration is empty"}
+
+                try:
+                    parsed_json = json.loads(json_config_str)
+                except json.JSONDecodeError as e:
+                    return {"error": f"Invalid JSON: {str(e)}"}
+
+                # Support different JSON formats:
+                # 1. {"mcpServers": {"server-name": {...}}}
+                # 2. {"server-name": {...}}
+                # 3. Direct config: {"command": "...", "args": [...]}
+
+                if "mcpServers" in parsed_json:
+                    # Format 1: Extract from mcpServers wrapper
+                    mcp_servers = parsed_json["mcpServers"]
+                    if not isinstance(mcp_servers, dict) or len(mcp_servers) == 0:
+                        return {"error": "mcpServers must contain at least one server"}
+
+                    # Take the first server
+                    name = list(mcp_servers.keys())[0]
+                    actual_config = mcp_servers[name]
+
+                elif "command" in parsed_json or "url" in parsed_json:
+                    # Format 3: Direct server config without name
+                    # Generate a name from the command or url
+                    if "command" in parsed_json:
+                        # Try to extract name from command (e.g., "chrome-devtools-mcp" from the args)
+                        args = parsed_json.get("args", [])
+                        # Look for package name in args
+                        for arg in args:
+                            if "@" in arg and "/" in arg:
+                                # Package name like "@smithery/cli@latest" or "chrome-devtools-mcp@latest"
+                                name = arg.split("@")[0].split("/")[-1]
+                                break
+                            elif "-mcp" in arg or "mcp-" in arg:
+                                name = arg.split("@")[0]
+                                break
+                        else:
+                            # Default name from command
+                            name = parsed_json["command"].replace("/", "-").replace("\\", "-")
+                    else:
+                        # Extract from URL
+                        url = parsed_json["url"]
+                        name = url.split("/")[-1].split(":")[0]
+
+                    actual_config = parsed_json
+
+                else:
+                    # Format 2: Named server config {"server-name": {...}}
+                    if len(parsed_json) != 1:
+                        return {"error": "Configuration must contain exactly one server"}
+
+                    name = list(parsed_json.keys())[0]
+                    actual_config = parsed_json[name]
+
+                # Validate we have a proper config
+                if not isinstance(actual_config, dict):
+                    return {"error": "Server configuration must be an object"}
+
+                # Update server_config to standard format
+                server_config = actual_config
+            else:
+                # Manual/URL-based configuration
+                name = server_config.get('name')
+                if not name:
+                    return {"error": "Server name is required"}
+
             if name in self.service_configs:
                 return {"error": f"Service {name} already exists"}
-            
+
             # Create service config
             config = ServiceConfig.from_dict(name, server_config)
             self.service_configs[name] = config
             self.service_states[name] = "enabled" if config.enabled else "disabled"
-            
+
             # Save to mcp_servers.json
             self._save_server_config(name, server_config)
             
