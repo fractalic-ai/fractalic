@@ -13,7 +13,7 @@ from pathlib import Path
 from aiohttp import web
 import aiohttp_cors
 
-from mcp_manager.api_handlers import setup_routes, init_manager
+from mcp_manager.api_handlers import setup_routes, init_manager, manager as global_manager
 from mcp_manager.fastmcp_manager import FastMCPManager
 
 # Configure logging
@@ -81,6 +81,7 @@ class FastMCPServer:
             logger.info("  GET /tools/{name} - Tools for service")
             logger.info("  POST /call/{service}/{tool} - Call tool")
             logger.info("  POST /toggle/{name} - Toggle service")
+            logger.info("  POST /refresh/{name} - Refresh service data")
             logger.info("  GET /oauth/status - OAuth status for all services")
             logger.info("  POST /oauth/start/{service} - Start OAuth flow")
             logger.info("  POST /oauth/reset/{service} - Reset OAuth tokens")
@@ -95,14 +96,15 @@ class FastMCPServer:
     async def stop_server(self):
         """Stop the HTTP server"""
         try:
+            # No cleanup needed - clients are created fresh per request
             if self.site:
                 await self.site.stop()
                 logger.info("Server site stopped")
-            
+
             if self.runner:
                 await self.runner.cleanup()
                 logger.info("Server runner cleaned up")
-                
+
         except Exception as e:
             logger.error(f"Error stopping server: {e}")
     

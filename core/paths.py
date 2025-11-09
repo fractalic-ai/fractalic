@@ -74,6 +74,7 @@ _FRACTALIC_ROOT = Path(__file__).resolve().parent.parent
 # Global variables to track session context (set by the runner)
 _SESSION_ROOT: Optional[Path] = None
 _SESSION_CWD: Optional[Path] = None
+_SESSION_CONTEXT: Optional['SessionContext'] = None  # Stores full session context with workspace_dir
 
 def get_fractalic_root() -> Path:
     """Get the absolute path to the fractalic installation root.
@@ -176,13 +177,14 @@ def get_tools_directory() -> Path:
 
 def get_oauth_cache_directory() -> Path:
     """Get the absolute path to the oauth-cache directory.
-    
-    This is always in fractalic_root as OAuth cache is shared across all sessions.
-    
+
+    Returns FastMCP's standard OAuth cache location: ~/.fastmcp/oauth-mcp-client-cache/
+    This is where FastMCP stores OAuth tokens via DiskStore.
+
     Returns:
-        Path: The absolute path to the oauth-cache directory
+        Path: The absolute path to the FastMCP OAuth cache directory
     """
-    return _FRACTALIC_ROOT / "oauth-cache"
+    return Path.home() / ".fastmcp" / "oauth-mcp-client-cache"
 
 def get_logs_directory() -> Path:
     """Get the absolute path to the logs directory.
@@ -343,11 +345,42 @@ def ensure_git_in_session_root():
     git_dir = _SESSION_ROOT / ".git"
     return git_dir
 
+def set_session_context(session_ctx: 'SessionContext') -> None:
+    """Set the global session context (includes workspace_dir).
+
+    Args:
+        session_ctx: SessionContext object from storage layer
+    """
+    global _SESSION_CONTEXT
+    _SESSION_CONTEXT = session_ctx
+
+def get_session_context() -> Optional['SessionContext']:
+    """Get the current session context.
+
+    Returns:
+        SessionContext: The current session context, or None if not set
+    """
+    return _SESSION_CONTEXT
+
+def get_workspace_dir() -> Optional[Path]:
+    """Get the workspace directory for the current session.
+
+    Returns the isolated workspace directory where files are executed.
+    This is more efficient than querying storage via execution_id.
+
+    Returns:
+        Path: Workspace directory path, or None if no session context
+    """
+    if _SESSION_CONTEXT:
+        return _SESSION_CONTEXT.workspace_dir
+    return None
+
 def reset_session_context():
     """Reset session context (useful for testing or new sessions)."""
-    global _SESSION_ROOT, _SESSION_CWD
+    global _SESSION_ROOT, _SESSION_CWD, _SESSION_CONTEXT
     _SESSION_ROOT = None
     _SESSION_CWD = None
+    _SESSION_CONTEXT = None
 
 def is_session_active() -> bool:
     """Check if we're currently in an active session.

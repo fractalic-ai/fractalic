@@ -74,6 +74,41 @@ def get_sessions_dir(session_root=None):
     return Path(session_root) / '.fractalic' / 'sessions'
 
 
+def get_workspace_dir(execution_id: str = None):
+    """
+    Get the workspace directory for the current or specified execution.
+
+    Returns the isolated workspace directory where files are executed:
+    {session_root}/.fractalic/sessions/{execution_id}/workspace/
+
+    Args:
+        execution_id: Optional execution ID. If not provided, uses FRACTALIC_EXECUTION_ID from environment
+
+    Returns:
+        Path: Workspace directory path, or None if no execution context
+
+    Example:
+        >>> workspace = get_workspace_dir()
+        >>> # /path/to/project/.fractalic/sessions/abc-123/workspace/
+    """
+    import os
+    from pathlib import Path
+
+    if execution_id is None:
+        execution_id = os.getenv('FRACTALIC_EXECUTION_ID')
+
+    if not execution_id:
+        return None
+
+    try:
+        storage = get_session_storage()
+        session_ctx = storage.get_session_context(execution_id)
+        return session_ctx.workspace_dir
+    except (ValueError, FileNotFoundError):
+        # Session doesn't exist yet or storage not initialized
+        return None
+
+
 __all__ = [
     'SessionStorage',
     'SessionContext',
@@ -84,4 +119,5 @@ __all__ = [
     'get_session_storage',
     'set_session_storage',
     'get_sessions_dir',
+    'get_workspace_dir',
 ]

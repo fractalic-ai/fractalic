@@ -28,6 +28,7 @@ class ServiceConfig:
     spec: Dict[str, Any]
     has_oauth: bool = False
     enabled: bool = True
+    oauth_callback_port: Optional[int] = None
     
     @classmethod
     def from_dict(cls, name: str, config: Dict[str, Any]) -> 'ServiceConfig':
@@ -45,13 +46,17 @@ class ServiceConfig:
         
         # OAuth only when explicitly configured by user
         has_oauth = config.get('oauth', False)
-        
+
+        # OAuth callback port (optional, for services that need specific port)
+        oauth_callback_port = config.get('oauth_callback_port')
+
         return cls(
             name=name,
             transport=transport,
             spec=config,
             has_oauth=has_oauth,
-            enabled=config.get('enabled', True)
+            enabled=config.get('enabled', True),
+            oauth_callback_port=oauth_callback_port
         )
     
     

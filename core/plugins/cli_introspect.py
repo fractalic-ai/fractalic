@@ -227,12 +227,24 @@ def sniff(path: Path, kind: str):
                             for item in Config.TOML_SETTINGS['environment']:
                                 if 'key' in item and 'value' in item:
                                     env[item['key']] = item['value']
-                        
-                        # Set working directory to the tool's directory
+
+                        # Determine working directory:
+                        # Policy: "workspace" (default) | "tool_dir"
+                        # os.getcwd() returns workspace because fractalic.py does os.chdir(workspace_dir) at line 205
                         tool_dir = path.parent
+
+                        # Get policy from settings, default to 'workspace'
+                        cwd_policy = (Config.TOML_SETTINGS.get('tools', {}).get('defaultCwdPolicy')
+                                      if Config.TOML_SETTINGS else None) or 'workspace'
+
+                        if cwd_policy == 'tool_dir':
+                            run_cwd = str(tool_dir)
+                        else:  # workspace (default)
+                            run_cwd = os.getcwd()
+
                         result = subprocess.run(
                             [sys.executable, str(path), json_input],
-                            capture_output=True, text=True, env=env, timeout=TOOL_EXECUTION_TIMEOUT, cwd=str(tool_dir)
+                            capture_output=True, text=True, env=env, timeout=TOOL_EXECUTION_TIMEOUT, cwd=run_cwd
                         )
                         if result.returncode != 0:
                             try:

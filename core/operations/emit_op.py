@@ -34,6 +34,13 @@ def process_emit(ast: AST, current_node: Node, nested_execution_id: str = None) 
     if prompt_text:
         event_data['message'] = prompt_text
 
+    # Inject workspace_path for proper image resolution
+    # os.getcwd() returns workspace because fractalic.py does os.chdir(workspace_dir) at line 205
+    import os
+    workspace_dir = os.getcwd()
+    if workspace_dir:
+        event_data['_workspace_path'] = str(workspace_dir)
+
     # Emit the custom event using the event emitters infrastructure
     # The event will be routed through the HTTP event system to the frontend
     emit_event(

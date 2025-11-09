@@ -253,3 +253,22 @@ DBG_TOOLS.json
 tutorials/mcp-integration-tests/
 CLAUDE.md
 .github/copilot-instructions.md
+
+# Runtime server files
+.server_pid
+server.out
+
+# Benchmark data
+benchmarks/
+
+# OAuth temporary caches
+oauth-cache-backup-*/
+oauth-cache-test/
+
+# Temporary workaround scripts
+oauth_workaround_*.py
+*_working.py
+*_old.py
+
+# Test result JSON files
+test_*_results.json

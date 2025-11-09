@@ -677,25 +677,23 @@ async def serve_image(path: str = Query(...)):
 
 
 @app.get("/serve_local_image/")
-async def serve_local_image(path: str = Query(...), execution_id: str = Query(...)):
+async def serve_local_image(
+    path: str = Query(...),
+    workspace_path: str = Query(None),
+    execution_id: str = Query(None)
+):
     """
     Serves an image file from either:
     1. Absolute path - used directly
-    2. Relative path - resolved relative to the directory of the MD script that's running
+    2. Relative path - resolved relative to workspace_path (if provided) or MD file directory
+
+    Priority for resolving relative paths:
+    - workspace_path (from @emit/_workspace_path) - preferred
+    - execution_id (legacy, resolves to MD file directory)
 
     This endpoint is specifically for @emit events with local_path field.
     """
     try:
-        # Get the MD file path for this execution_id
-        with execution_file_paths_lock:
-            md_file_path = execution_file_paths.get(execution_id)
-
-        if not md_file_path:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Unknown execution_id: {execution_id}"
-            )
-
         # Resolve the image path
         path_obj = Path(path)
 
@@ -703,9 +701,29 @@ async def serve_local_image(path: str = Query(...), execution_id: str = Query(..
             # Absolute path - use directly
             image_path = path_obj
         else:
-            # Relative path - resolve relative to MD file's directory
-            md_dir = Path(md_file_path).parent.resolve()
-            image_path = (md_dir / path).resolve()
+            # Relative path - resolve based on provided context
+            if workspace_path:
+                # Priority 1: Use workspace_path from @emit event
+                base_dir = Path(workspace_path).resolve()
+                image_path = (base_dir / path).resolve()
+            elif execution_id:
+                # Priority 2: Fallback to MD file directory (legacy)
+                with execution_file_paths_lock:
+                    md_file_path = execution_file_paths.get(execution_id)
+
+                if not md_file_path:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"Unknown execution_id: {execution_id}"
+                    )
+
+                md_dir = Path(md_file_path).parent.resolve()
+                image_path = (md_dir / path).resolve()
+            else:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Must provide either workspace_path or execution_id for relative paths"
+                )
 
         # Security check: ensure the resolved path exists and is a file
         if not image_path.exists():

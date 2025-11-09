@@ -84,27 +84,33 @@ async def complete_status_handler(request):
         return web.json_response({"error": str(e)}, status=500)
 
 async def list_tools_handler(request):
-    """GET /list_tools - Fractalic compatibility endpoint (flat array format)"""
+    """GET /list_tools - Fractalic compatibility endpoint (flat array format)
+
+    Uses complete_status cache for fast response. This is essential for fractalic
+    which caches /list_tools response for 30 seconds.
+    """
     init_manager()
     try:
-        all_tools = await manager.get_all_tools()
-        
+        # Use complete_status data (cached for 24h) instead of get_all_tools() which rebuilds
+        complete_status = await manager.get_complete_status()
+        services = complete_status.get('services', {})
+
         # Convert nested services format to flat array format for Fractalic compatibility
         flat_tools = []
         total_token_count = 0
         enabled_services = 0
         disabled_services = 0
-        
-        for service_name, service_data in all_tools.items():
-            if 'error' in service_data and service_data.get('enabled', True):
-                # Only count errors from enabled services
-                continue
-            
-            # Count enabled/disabled services
+
+        for service_name, service_data in services.items():
             if service_data.get('enabled', True):
                 enabled_services += 1
+
+                # Skip if service has error
+                if 'error' in service_data and service_data.get('error'):
+                    continue
+
                 tools = service_data.get('tools', [])
-                
+
                 for tool in tools:
                     # Create tool with service prefix as expected by Fractalic
                     tool_with_service = {
@@ -114,12 +120,12 @@ async def list_tools_handler(request):
                         "original_name": tool['name']
                     }
                     flat_tools.append(tool_with_service)
-                
+
                 # Add service token count if available
                 total_token_count += service_data.get('token_count', 0)
             else:
                 disabled_services += 1
-        
+
         # Return format matching original fractalic_mcp_manager.py
         response = {
             'tools': flat_tools,
@@ -138,12 +144,66 @@ async def toggle_service_handler(request):
     """POST /toggle/{name} - Toggle service enabled/disabled"""
     init_manager()
     service_name = request.match_info['name']
-    
+
     try:
         result = await manager.toggle_service(service_name)
         return web.json_response(result)
     except Exception as e:
         logger.error(f"Toggle service error: {e}")
+        return web.json_response({"error": str(e)}, status=500)
+
+async def refresh_service_handler(request):
+    """POST /refresh/{name} - Refresh service data (invalidate cache and refetch)
+
+    Returns fresh data for this service only, without invalidating complete_status cache.
+    Frontend should update local state for this service instead of refetching all services.
+    """
+    init_manager()
+    service_name = request.match_info['name']
+
+    try:
+        # Invalidate cache for this specific service
+        await manager.cache.invalidate_service(service_name)
+
+        # Fetch fresh data for this service
+        service_data = await manager.get_all_service_data(service_name)
+
+        # Get OAuth status for ONLY this service (optimized)
+        oauth_info = await manager.get_service_oauth_status(service_name)
+        has_oauth = oauth_info.get("has_token", False) or oauth_info.get("authenticated", False)
+
+        # Extract status info from service data
+        status_info = service_data.get("status_info", {})
+        tools = service_data.get("tools", [])
+        prompts = service_data.get("prompts", [])
+        resources = service_data.get("resources", [])
+
+        # Calculate status field (matches get_complete_status logic)
+        service_state = "connected" if status_info.get("connected") else (
+            "disabled" if not status_info.get("enabled") else "error"
+        )
+
+        # Return complete service data in same format as complete_status
+        return web.json_response({
+            "success": True,
+            "service": service_name,
+            "status": service_state,
+            "connected": status_info.get("connected", False),
+            "enabled": status_info.get("enabled", False),
+            "transport": status_info.get("transport", "unknown"),
+            "has_oauth": has_oauth,
+            "oauth": oauth_info,
+            "tool_count": len(tools),
+            "tools": tools,
+            "prompt_count": len(prompts),
+            "prompts": prompts,
+            "resource_count": len(resources),
+            "resources": resources,
+            "token_count": 0,
+            "error": status_info.get("error")
+        })
+    except Exception as e:
+        logger.error(f"Refresh service error: {e}")
         return web.json_response({"error": str(e)}, status=500)
 
 async def get_all_tools_handler(request):
@@ -263,11 +323,11 @@ async def get_prompt_handler(request):
     try:
         data = await request.json()
         arguments = data.get('arguments', {})
-        
-        client = manager.create_fastmcp_client(service_name)
+
+        client = await manager.get_or_create_client(service_name)
         if not client:
             return web.json_response({"error": f"Service {service_name} not available"}, status=404)
-        
+
         async with client as c:
             result = await c.get_prompt(prompt_name, arguments)
             
@@ -327,11 +387,11 @@ async def read_resource_handler(request):
         
         if not resource_uri:
             return web.json_response({"error": "Resource URI is required"}, status=400)
-        
-        client = manager.create_fastmcp_client(service_name)
+
+        client = await manager.get_or_create_client(service_name)
         if not client:
             return web.json_response({"error": f"Service {service_name} not available"}, status=404)
-        
+
         async with client as c:
             result = await c.read_resource(resource_uri)
             
@@ -363,12 +423,34 @@ async def oauth_reset_handler(request):
     """POST /oauth/reset/{service} - Reset OAuth tokens"""
     init_manager()
     service_name = request.match_info['service']
-    
+
     try:
         result = await manager.reset_oauth_tokens(service_name)
         return web.json_response(result)
     except Exception as e:
         logger.error(f"OAuth reset error: {e}")
+        return web.json_response({"error": str(e)}, status=500)
+
+async def cleanup_session_handler(request):
+    """POST /cleanup/{service}/{session_id} - Cleanup stdio client session"""
+    init_manager()
+    service_name = request.match_info['service']
+    session_id = request.match_info['session_id']
+
+    try:
+        success = await manager.cleanup_stdio_session(service_name, session_id)
+        if success:
+            return web.json_response({
+                "success": True,
+                "message": f"Cleaned up session {session_id} for {service_name}"
+            })
+        else:
+            return web.json_response({
+                "success": False,
+                "message": f"No active session {session_id} for {service_name}"
+            }, status=404)
+    except Exception as e:
+        logger.error(f"Cleanup session error: {e}")
         return web.json_response({"error": str(e)}, status=500)
 
 async def oauth_authorize_handler(request):
@@ -478,6 +560,7 @@ def setup_routes(app):
     cors.add(app.router.add_get('/status/complete', complete_status_handler))
     cors.add(app.router.add_get('/list_tools', list_tools_handler))
     cors.add(app.router.add_post('/toggle/{name}', toggle_service_handler))
+    cors.add(app.router.add_post('/refresh/{name}', refresh_service_handler))
     cors.add(app.router.add_get('/tools', get_all_tools_handler))
     cors.add(app.router.add_get('/tools/{name}', get_tools_handler))
     cors.add(app.router.add_get('/capabilities/{name}', get_capabilities_handler))
@@ -495,7 +578,10 @@ def setup_routes(app):
     cors.add(app.router.add_post('/oauth/authorize/{service}', oauth_authorize_handler))
     cors.add(app.router.add_get('/oauth/status', oauth_status_all_handler))
     cors.add(app.router.add_get('/oauth/status/{service}', oauth_status_service_handler))
-    
+
+    # Session Management
+    cors.add(app.router.add_post('/cleanup/{service}/{session_id}', cleanup_session_handler))
+
     # Server Management
     cors.add(app.router.add_post('/add_server', add_server_handler))
     cors.add(app.router.add_post('/delete_server', delete_server_handler))

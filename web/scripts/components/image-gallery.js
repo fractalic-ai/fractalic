@@ -44,6 +44,7 @@ export class ImageGalleryComponent extends BaseComponent {
                     url: eventData.url || eventData.image_url,
                     local_path: eventData.local_path,
                     execution_id: eventData.execution_id,
+                    workspace_path: eventData._workspace_path,
                     caption: eventData.caption || eventData.message || '',
                     timestamp: Date.now()
                 });
@@ -57,6 +58,7 @@ export class ImageGalleryComponent extends BaseComponent {
                             url: img.url,
                             local_path: img.local_path,
                             execution_id: eventData.execution_id,
+                            workspace_path: eventData._workspace_path,
                             caption: img.caption || '',
                             timestamp: Date.now()
                         });
@@ -90,12 +92,20 @@ export class ImageGalleryComponent extends BaseComponent {
      */
     _resolveImageUrl(imageData) {
         // Priority: local_path > url
-        if (imageData.local_path && imageData.execution_id) {
-            // Convert local path to server endpoint URL with execution_id
+        if (imageData.local_path) {
+            // Convert local path to server endpoint URL
             const params = new URLSearchParams({
-                path: imageData.local_path,
-                execution_id: imageData.execution_id
+                path: imageData.local_path
             });
+
+            // If workspace_path is provided, use it for resolution
+            if (imageData.workspace_path) {
+                params.append('workspace_path', imageData.workspace_path);
+            } else if (imageData.execution_id) {
+                // Fallback to execution_id for backward compatibility
+                params.append('execution_id', imageData.execution_id);
+            }
+
             return `/serve_local_image/?${params.toString()}`;
         }
         return imageData.url || imageData.image_url;

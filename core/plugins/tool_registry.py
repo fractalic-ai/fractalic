@@ -560,7 +560,12 @@ class ToolRegistry(dict):
                     context['current_file'] = self._current_file
                     context['current_directory'] = str(current_cwd)
                     print(f"[DEBUG] MCP Context: current_file={self._current_file}, current_directory={current_cwd}")
-                
+
+                # Add session_id for stdio client pooling
+                import os
+                if 'FRACTALIC_EXECUTION_ID' in os.environ:
+                    context['session_id'] = os.environ['FRACTALIC_EXECUTION_ID']
+
                 return mcp_call(srv, name, kwargs, context)
             
             # Add to registry dictionary and manifests list
@@ -585,23 +590,28 @@ class ToolRegistry(dict):
                             env[item['key']] = item['value']
                 
                 # Determine working directory:
-                # 1) settings.tools.defaultCwdPolicy: "session_cwd" | "tool_dir" (default: session_cwd)
-                # 2) default to session_cwd
-                from ..paths import get_session_cwd
-                cwd_policy = (Config.TOML_SETTINGS.get('tools', {}).get('defaultCwdPolicy')
-                              if Config.TOML_SETTINGS else None) or 'session_cwd'
+                # Note: os.getcwd() returns workspace because fractalic.py does os.chdir(workspace_dir) at line 205
+                # Policy: "workspace" (default) | "tool_dir"
                 tool_dir = path.parent
+
+                # Get policy from settings, default to 'workspace'
+                cwd_policy = (Config.TOML_SETTINGS.get('tools', {}).get('defaultCwdPolicy')
+                              if Config.TOML_SETTINGS else None) or 'workspace'
+
                 if cwd_policy == 'tool_dir':
                     run_cwd = str(tool_dir)
-                else:
-                    run_cwd = str(get_session_cwd() or tool_dir)
-                
+                else:  # workspace (default) - use os.getcwd() which is already set to workspace
+                    run_cwd = os.getcwd()
+
+                # Debug: print CWD policy decision
+                print(f"[ToolRegistry] Custom tool CWD policy: '{cwd_policy}', tool_dir: {tool_dir}, run_cwd: {run_cwd}")
+
                 # Ensure tool's directory is on PYTHONPATH so its local imports work when cwd != tool_dir
                 run_env = env or os.environ.copy()
                 existing_pp = run_env.get('PYTHONPATH', '')
                 if str(tool_dir) not in existing_pp.split(os.pathsep):
                     run_env['PYTHONPATH'] = (existing_pp + os.pathsep if existing_pp else '') + str(tool_dir)
-                
+
                 result = subprocess.run(
                     [sys.executable, str(path), json_input],
                     capture_output=True, text=True, env=run_env, timeout=TOOL_EXECUTION_TIMEOUT, cwd=run_cwd
@@ -640,7 +650,12 @@ class ToolRegistry(dict):
                     from ..paths import get_session_cwd
                     context['current_file'] = self._current_file
                     context['current_directory'] = str(get_session_cwd())
-                
+
+                # Add session_id for stdio client pooling
+                import os
+                if 'FRACTALIC_EXECUTION_ID' in os.environ:
+                    context['session_id'] = os.environ['FRACTALIC_EXECUTION_ID']
+
                 return mcp_call(srv, name, kw, context)
             runner = mcp_runner
 
@@ -1058,6 +1073,12 @@ class ToolRegistry(dict):
                     if message and "message" not in event_data:
                         event_data["message"] = message
 
+                    # Inject workspace_path for proper image resolution
+                    # os.getcwd() returns workspace because fractalic.py does os.chdir(workspace_dir) at line 205
+                    workspace_dir = os.getcwd()
+                    if workspace_dir:
+                        event_data['_workspace_path'] = str(workspace_dir)
+
                     # Emit the event
                     emit_event(
                         single_event,
@@ -1097,6 +1118,14 @@ class ToolRegistry(dict):
 
                     try:
                         event_data = event_item.get("data", {})
+
+                        # Inject workspace_path for proper image resolution
+                        # session_cwd already points to workspace after os.chdir() in fractalic.py
+                        from core.paths import get_session_cwd
+                        workspace_dir = get_session_cwd()
+                        if workspace_dir:
+                            event_data['_workspace_path'] = str(workspace_dir)
+
                         emit_event(
                             event_type,
                             nested_execution_id=None,
@@ -1262,7 +1291,12 @@ class ToolRegistry(dict):
                     from ..paths import get_session_cwd
                     context['current_file'] = self._current_file
                     context['current_directory'] = str(get_session_cwd())
-                
+
+                # Add session_id for stdio client pooling
+                import os
+                if 'FRACTALIC_EXECUTION_ID' in os.environ:
+                    context['session_id'] = os.environ['FRACTALIC_EXECUTION_ID']
+
                 return mcp_call(server, tool_name, kwargs, context)
             elif manifest.get("_type") == "mcp_prompt":
                 # Synthetic prompt invocation returns the prompt message content
