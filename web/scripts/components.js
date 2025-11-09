@@ -13,5 +13,5 @@ export { ComponentRouter, componentRouter } from './components/component-router.
 export { BaseComponent } from './components/base-component.js?v=10';
 
 // Re-export concrete components
-export { ImageGalleryComponent } from './components/image-gallery.js?v=11';
+export { ImageGalleryComponent } from './components/image-gallery.js?v=13';
 export { MessageListComponent } from './components/message-list.js?v=10';

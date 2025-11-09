@@ -142,33 +142,102 @@ export class ImageGalleryComponent extends BaseComponent {
         // Clear container
         this.container.innerHTML = '';
 
-        // Create header (with drag handle class for GridStack)
+        // Create header (simple design matching artifacts-header)
         const header = this.createElement('div', {
-            classes: ['gallery-header', 'grid-widget-header'],
-            innerHTML: `<h3>${title}</h3><span class="image-count">${images.length} image(s)</span>`
+            classes: ['gallery-header', 'grid-widget-header']
         });
+
+        // Title
+        const headerTitle = this.createElement('h3', {
+            textContent: title
+        });
+
+        // Actions section
+        const actions = this.createElement('div', {
+            classes: ['gallery-header-actions']
+        });
+
+        const imageCount = this.createElement('span', {
+            classes: ['image-count'],
+            textContent: `${images.length} image${images.length !== 1 ? 's' : ''}`
+        });
+
+        const closeBtn = this.createElement('button', {
+            classes: ['gallery-close-btn'],
+            innerHTML: '×',
+            attributes: {
+                title: 'Close gallery'
+            }
+        });
+
+        // Close button handler
+        this.addEventListener(closeBtn, 'click', (e) => {
+            e.stopPropagation(); // Prevent drag initiation
+            this._closeGallery();
+        });
+
+        actions.appendChild(imageCount);
+        actions.appendChild(closeBtn);
+
+        header.appendChild(headerTitle);
+        header.appendChild(actions);
         this.container.appendChild(header);
 
-        // Create gallery grid
-        const grid = this.createElement('div', {
-            classes: ['gallery-grid']
+        // Create scrollable content wrapper
+        const contentWrapper = this.createElement('div', {
+            classes: ['gallery-content-wrapper']
         });
-
-        // Add images
-        images.forEach((image, index) => {
-            const imageCard = this._createImageCard(image, index);
-            grid.appendChild(imageCard);
-        });
-
-        this.container.appendChild(grid);
 
         // Show empty state if no images
         if (images.length === 0) {
             const emptyState = this.createElement('div', {
                 classes: ['gallery-empty'],
-                textContent: 'No images yet. Images will appear here as they are generated.'
+                innerHTML: `
+                    <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                        <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
+                        <circle cx="8.5" cy="8.5" r="1.5"/>
+                        <polyline points="21 15 16 10 5 21"/>
+                    </svg>
+                    <p>No images yet</p>
+                    <span>Images will appear here as they are generated</span>
+                `
             });
-            this.container.appendChild(emptyState);
+            contentWrapper.appendChild(emptyState);
+        } else {
+            // Create gallery grid
+            const grid = this.createElement('div', {
+                classes: ['gallery-grid']
+            });
+
+            // Add images
+            images.forEach((image, index) => {
+                const imageCard = this._createImageCard(image, index);
+                grid.appendChild(imageCard);
+            });
+
+            contentWrapper.appendChild(grid);
+        }
+
+        this.container.appendChild(contentWrapper);
+    }
+
+    /**
+     * Close gallery (remove from GridStack)
+     * @private
+     */
+    _closeGallery() {
+        // Emit unmount event to cleanup
+        if (typeof this.onUnmount === 'function') {
+            this.onUnmount();
+        }
+
+        // Remove widget from GridStack if available
+        const widgetEl = this.container.closest('.grid-stack-item');
+        if (widgetEl && window.gridManager) {
+            const grid = window.gridManager.getGrid();
+            if (grid) {
+                grid.removeWidget(widgetEl);
+            }
         }
     }
 
@@ -216,7 +285,7 @@ export class ImageGalleryComponent extends BaseComponent {
     }
 
     /**
-     * Show enlarged image in modal
+     * Show enlarged image in modal with download option
      * @private
      */
     _enlargeImage(url, caption) {
@@ -229,18 +298,93 @@ export class ImageGalleryComponent extends BaseComponent {
             classes: ['image-modal-content']
         });
 
-        const img = this.createElement('img', {
-            attributes: { src: url, alt: caption || 'Enlarged image' }
+        // Modal header with actions
+        const modalHeader = this.createElement('div', {
+            classes: ['image-modal-header']
         });
 
+        // Download button
+        const downloadBtn = this.createElement('a', {
+            classes: ['image-modal-download'],
+            innerHTML: `
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                    <polyline points="7 10 12 15 17 10"/>
+                    <line x1="12" y1="15" x2="12" y2="3"/>
+                </svg>
+                <span>Download</span>
+            `,
+            attributes: {
+                href: url,
+                download: caption || 'image',
+                title: 'Download image'
+            }
+        });
+
+        // Close button
         const closeBtn = this.createElement('button', {
             classes: ['image-modal-close'],
-            textContent: '×'
+            innerHTML: '×',
+            attributes: {
+                title: 'Close (Esc)'
+            }
         });
 
-        modalContent.appendChild(closeBtn);
-        modalContent.appendChild(img);
+        modalHeader.appendChild(downloadBtn);
+        modalHeader.appendChild(closeBtn);
 
+        // Image container with loading state
+        const imgContainer = this.createElement('div', {
+            classes: ['image-modal-img-container']
+        });
+
+        const img = this.createElement('img', {
+            classes: ['image-modal-img'],
+            attributes: {
+                src: url,
+                alt: caption || 'Enlarged image',
+                loading: 'eager'
+            }
+        });
+
+        // Loading spinner
+        const spinner = this.createElement('div', {
+            classes: ['image-modal-spinner'],
+            innerHTML: `
+                <svg width="40" height="40" viewBox="0 0 50 50" stroke="currentColor">
+                    <circle cx="25" cy="25" r="20" fill="none" stroke-width="4" opacity="0.2"/>
+                    <circle cx="25" cy="25" r="20" fill="none" stroke-width="4" stroke-dasharray="80" stroke-dashoffset="60">
+                        <animateTransform attributeName="transform" type="rotate" from="0 25 25" to="360 25 25" dur="1s" repeatCount="indefinite"/>
+                    </circle>
+                </svg>
+            `
+        });
+
+        imgContainer.appendChild(spinner);
+        imgContainer.appendChild(img);
+
+        // Remove spinner when image loads
+        img.addEventListener('load', () => {
+            spinner.remove();
+            img.classList.add('loaded');
+        });
+
+        img.addEventListener('error', () => {
+            spinner.innerHTML = `
+                <svg width="40" height="40" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                    <circle cx="12" cy="12" r="10"/>
+                    <line x1="12" y1="8" x2="12" y2="12"/>
+                    <line x1="12" y1="16" x2="12.01" y2="16"/>
+                </svg>
+                <p>Failed to load image</p>
+            `;
+            spinner.classList.add('error');
+        });
+
+        modalContent.appendChild(modalHeader);
+        modalContent.appendChild(imgContainer);
+
+        // Caption if present
         if (caption) {
             const captionDiv = this.createElement('div', {
                 classes: ['image-modal-caption'],
@@ -252,14 +396,33 @@ export class ImageGalleryComponent extends BaseComponent {
         modal.appendChild(modalContent);
         document.body.appendChild(modal);
 
+        // Add animation class after mount
+        requestAnimationFrame(() => {
+            modal.classList.add('visible');
+        });
+
         // Close handlers
         const closeModal = () => {
-            document.body.removeChild(modal);
+            modal.classList.remove('visible');
+            setTimeout(() => {
+                if (modal.parentNode) {
+                    document.body.removeChild(modal);
+                }
+            }, 200); // Match CSS transition duration
         };
 
         closeBtn.addEventListener('click', closeModal);
         modal.addEventListener('click', (e) => {
             if (e.target === modal) closeModal();
         });
+
+        // Keyboard shortcut (Esc to close)
+        const handleKeydown = (e) => {
+            if (e.key === 'Escape') {
+                closeModal();
+                document.removeEventListener('keydown', handleKeydown);
+            }
+        };
+        document.addEventListener('keydown', handleKeydown);
     }
 }
