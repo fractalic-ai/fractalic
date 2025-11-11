@@ -11,10 +11,11 @@ export class ImageGalleryComponent extends BaseComponent {
     constructor(componentId, options) {
         super(componentId, options);
 
-        // Initialize state with empty images array
+        // Initialize state with empty images array and view mode
         this.setState({
             images: [],
-            title: 'Image Gallery'
+            title: 'Image Gallery',
+            viewMode: 'comfortable' // 'compact', 'comfortable', 'large', 'slideshow'
         }, false); // Don't render yet
     }
 
@@ -142,45 +143,77 @@ export class ImageGalleryComponent extends BaseComponent {
         // Clear container
         this.container.innerHTML = '';
 
-        // Create header (simple design matching artifacts-header)
+        // Create header (matching chat-header design)
         const header = this.createElement('div', {
             classes: ['gallery-header', 'grid-widget-header']
         });
 
-        // Title
-        const headerTitle = this.createElement('h3', {
+        // Header info section (title + image count)
+        const headerInfo = this.createElement('div', {
+            classes: ['header-info']
+        });
+
+        const headerTitle = this.createElement('h2', {
+            classes: ['gallery-title'],
             textContent: title
         });
 
-        // Actions section
-        const actions = this.createElement('div', {
-            classes: ['gallery-header-actions']
-        });
-
         const imageCount = this.createElement('span', {
-            classes: ['image-count'],
+            classes: ['status-badge'],
             textContent: `${images.length} image${images.length !== 1 ? 's' : ''}`
         });
 
+        headerInfo.appendChild(headerTitle);
+        headerInfo.appendChild(imageCount);
+
+        // View mode controls
+        const controls = this.createElement('div', {
+            classes: ['gallery-controls']
+        });
+
+        // View mode toggle buttons
+        const viewModes = [
+            { mode: 'compact', icon: this._getGridIcon('compact'), title: 'Compact grid' },
+            { mode: 'comfortable', icon: this._getGridIcon('comfortable'), title: 'Comfortable grid' },
+            { mode: 'large', icon: this._getGridIcon('large'), title: 'Large grid' },
+            { mode: 'slideshow', icon: this._getSlideshowIcon(), title: 'Slideshow' }
+        ];
+
+        viewModes.forEach(({ mode, icon, title }) => {
+            const classes = ['view-mode-btn'];
+            if (this.getState().viewMode === mode) {
+                classes.push('active');
+            }
+
+            const btn = this.createElement('button', {
+                classes: classes,
+                innerHTML: icon,
+                attributes: { title }
+            });
+
+            this.addEventListener(btn, 'click', (e) => {
+                e.stopPropagation();
+                this._setViewMode(mode);
+            });
+
+            controls.appendChild(btn);
+        });
+
+        // Close button
         const closeBtn = this.createElement('button', {
             classes: ['gallery-close-btn'],
             innerHTML: '×',
-            attributes: {
-                title: 'Close gallery'
-            }
+            attributes: { title: 'Close gallery' }
         });
 
-        // Close button handler
         this.addEventListener(closeBtn, 'click', (e) => {
-            e.stopPropagation(); // Prevent drag initiation
+            e.stopPropagation();
             this._closeGallery();
         });
 
-        actions.appendChild(imageCount);
-        actions.appendChild(closeBtn);
-
-        header.appendChild(headerTitle);
-        header.appendChild(actions);
+        controls.appendChild(closeBtn);
+        header.appendChild(headerInfo);
+        header.appendChild(controls);
         this.container.appendChild(header);
 
         // Create scrollable content wrapper
@@ -204,21 +237,160 @@ export class ImageGalleryComponent extends BaseComponent {
             });
             contentWrapper.appendChild(emptyState);
         } else {
-            // Create gallery grid
-            const grid = this.createElement('div', {
-                classes: ['gallery-grid']
-            });
+            // Render based on view mode
+            const { viewMode } = this.getState();
 
-            // Add images
-            images.forEach((image, index) => {
-                const imageCard = this._createImageCard(image, index);
-                grid.appendChild(imageCard);
-            });
-
-            contentWrapper.appendChild(grid);
+            if (viewMode === 'slideshow') {
+                this._renderSlideshow(contentWrapper, images);
+            } else {
+                this._renderGrid(contentWrapper, images, viewMode);
+            }
         }
 
         this.container.appendChild(contentWrapper);
+    }
+
+    /**
+     * Render grid view
+     * @private
+     */
+    _renderGrid(container, images, viewMode) {
+        const grid = this.createElement('div', {
+            classes: ['gallery-grid', `gallery-grid-${viewMode}`]
+        });
+
+        images.forEach((image, index) => {
+            const imageCard = this._createImageCard(image, index);
+            grid.appendChild(imageCard);
+        });
+
+        container.appendChild(grid);
+    }
+
+    /**
+     * Render slideshow view
+     * @private
+     */
+    _renderSlideshow(container, images) {
+        const slideshow = this.createElement('div', {
+            classes: ['gallery-slideshow']
+        });
+
+        // Current slide index
+        if (!this._currentSlideIndex) this._currentSlideIndex = 0;
+
+        // Slide image
+        const currentImage = images[this._currentSlideIndex];
+        const slide = this._createImageCard(currentImage, this._currentSlideIndex);
+        slideshow.appendChild(slide);
+
+        // Navigation
+        const nav = this.createElement('div', {
+            classes: ['slideshow-nav']
+        });
+
+        // Previous button
+        const prevBtn = this.createElement('button', {
+            classes: ['slideshow-btn', 'slideshow-prev'],
+            innerHTML: `
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <polyline points="15 18 9 12 15 6"/>
+                </svg>
+            `,
+            attributes: { title: 'Previous' }
+        });
+
+        this.addEventListener(prevBtn, 'click', () => {
+            this._currentSlideIndex = (this._currentSlideIndex - 1 + images.length) % images.length;
+            this.render();
+        });
+
+        // Next button
+        const nextBtn = this.createElement('button', {
+            classes: ['slideshow-btn', 'slideshow-next'],
+            innerHTML: `
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <polyline points="9 18 15 12 9 6"/>
+                </svg>
+            `,
+            attributes: { title: 'Next' }
+        });
+
+        this.addEventListener(nextBtn, 'click', () => {
+            this._currentSlideIndex = (this._currentSlideIndex + 1) % images.length;
+            this.render();
+        });
+
+        // Slide counter
+        const counter = this.createElement('div', {
+            classes: ['slideshow-counter'],
+            textContent: `${this._currentSlideIndex + 1} / ${images.length}`
+        });
+
+        nav.appendChild(prevBtn);
+        nav.appendChild(counter);
+        nav.appendChild(nextBtn);
+        slideshow.appendChild(nav);
+
+        container.appendChild(slideshow);
+    }
+
+    /**
+     * Set view mode
+     * @private
+     */
+    _setViewMode(mode) {
+        this.setState({ viewMode: mode }, true);
+    }
+
+    /**
+     * Get grid icon for different sizes
+     * @private
+     */
+    _getGridIcon(size) {
+        const icons = {
+            compact: `
+                <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
+                    <rect x="1" y="1" width="4" height="4" rx="1"/>
+                    <rect x="6" y="1" width="4" height="4" rx="1"/>
+                    <rect x="11" y="1" width="4" height="4" rx="1"/>
+                    <rect x="1" y="6" width="4" height="4" rx="1"/>
+                    <rect x="6" y="6" width="4" height="4" rx="1"/>
+                    <rect x="11" y="6" width="4" height="4" rx="1"/>
+                    <rect x="1" y="11" width="4" height="4" rx="1"/>
+                    <rect x="6" y="11" width="4" height="4" rx="1"/>
+                    <rect x="11" y="11" width="4" height="4" rx="1"/>
+                </svg>
+            `,
+            comfortable: `
+                <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
+                    <rect x="1" y="1" width="6" height="6" rx="1"/>
+                    <rect x="9" y="1" width="6" height="6" rx="1"/>
+                    <rect x="1" y="9" width="6" height="6" rx="1"/>
+                    <rect x="9" y="9" width="6" height="6" rx="1"/>
+                </svg>
+            `,
+            large: `
+                <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
+                    <rect x="1" y="1" width="14" height="6" rx="1"/>
+                    <rect x="1" y="9" width="14" height="6" rx="1"/>
+                </svg>
+            `
+        };
+        return icons[size];
+    }
+
+    /**
+     * Get slideshow icon
+     * @private
+     */
+    _getSlideshowIcon() {
+        return `
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
+                <rect x="2" y="3" width="12" height="10" rx="1" fill="none" stroke="currentColor" stroke-width="1.5"/>
+                <polygon points="6,6 6,11 11,8.5"/>
+            </svg>
+        `;
     }
 
     /**
